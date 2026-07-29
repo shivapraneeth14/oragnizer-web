@@ -1,0 +1,33 @@
+# env files
+.env
+.env.local
+.env.production
+.env.development
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+.cache/
+
+# Flutter
+apps/mobile/build/
+apps/mobile/.dart_tool/
+apps/mobile/.packages
+apps/mobile/.pub/
+apps/mobile/pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Supabase
+supabase/.branches
+supabase/.temp

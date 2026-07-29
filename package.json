@@ -1,0 +1,15 @@
+{
+  "name": "cluvo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/organizer-web",
+    "apps/admin-web"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "ci": "npm run typecheck && npm run lint"
+  }
+}
