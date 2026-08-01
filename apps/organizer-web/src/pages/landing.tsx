@@ -238,7 +238,7 @@ function ExploreCommunityContent() {
   const deeplink = import.meta.env.VITE_APP_DEEPLINK_BASE || "cluvo://"
 
   const handleOpenApp = () => {
-    window.location.href = deeplink
+    window.location.href = "https://cluvo-sand.vercel.app"
   }
 
   return (
