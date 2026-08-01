@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { copyText } from "../../lib/clipboard"
 import type { Event } from "shared"
 
 interface Props {
@@ -42,6 +43,7 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
   const [search, setSearch] = useState("")
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const filtered = events.filter((e) => {
     if (search.trim() && !e.title.toLowerCase().includes(search.trim().toLowerCase()))
@@ -196,18 +198,28 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
               </button>
 
               <div className="flex shrink-0 gap-1">
-                <button onClick={(e) => {
+                <button onClick={async (e) => {
                   e.stopPropagation()
                   const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://'
                   const url = `${base}events/${event.id}`
-                  navigator.clipboard.writeText(url)
+                  await copyText(url)
+                  setCopiedId(event.id)
+                  setTimeout(() => setCopiedId(null), 2000)
                 }}
-                  className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-[#C2185B]"
-                  title="Copy share link"
+                  className={`rounded-lg p-1.5 hover:bg-neutral-100 ${
+                    copiedId === event.id ? "text-green-600" : "text-neutral-400 hover:text-[#C2185B]"
+                  }`}
+                  title={copiedId === event.id ? "Copied!" : "Copy share link"}
                 >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                  </svg>
+                  {copiedId === event.id ? (
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                  )}
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); onEdit(event) }}
                   className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-[#C2185B]"
