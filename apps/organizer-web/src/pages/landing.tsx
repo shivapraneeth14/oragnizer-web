@@ -54,7 +54,7 @@ function deriveNames(meta: Record<string, unknown>): { first_name: string; last_
 }
 
 export default function LandingPage() {
-  const { signInWithGoogle, signOut, user } = useAuth()
+  const { signInWithGoogle, signOut, user, error } = useAuth()
   const [flow, setFlow] = useState<Flow>("create")
   const [checkingSession, setCheckingSession] = useState(true)
   const [activeTab, setActiveTab] = useState<"explore" | "organizer">("explore")
@@ -85,6 +85,7 @@ export default function LandingPage() {
         setPrefill({ email: user.email ?? "", ...names })
       }
       setInitialStep(username ? "community" : "register")
+      setActiveTab("organizer")
       setFlow("new")
       setCheckingSession(false)
     }).catch(() => {
@@ -120,7 +121,8 @@ export default function LandingPage() {
         <div className="flex w-full md:w-[42%]">
           <div className="w-full bg-white shadow-2xl md:rounded-l-[140px] md:min-h-screen flex flex-col">
             {user && (
-              <div className="flex justify-end px-6 pt-4">
+              <div className="flex items-center justify-end gap-3 px-6 pt-4">
+                <span className="text-xs text-neutral-400">Signed in as {user.email}</span>
                 <button
                   type="button"
                   onClick={() => { signOut(); setFlow("create") }}
@@ -148,7 +150,7 @@ export default function LandingPage() {
                   <span className="text-neutral-300">|</span>
                   <button
                     type="button"
-                    onClick={() => { setActiveTab("organizer"); setFlow("create") }}
+                    onClick={() => { setActiveTab("organizer"); if (!user) setFlow("create") }}
                     className={`transition-colors ${activeTab === "organizer" ? "font-medium text-[#C2185B]" : "text-neutral-500 hover:text-neutral-700"}`}
                   >
                     Become an Organizer
@@ -161,6 +163,9 @@ export default function LandingPage() {
                   <>
                     {flow === "create" && (
                       <div className="flex flex-col items-center py-8">
+                        {error && (
+                          <div className="mb-4 w-full rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">{error}</div>
+                        )}
                         <h2 className="text-xl font-semibold text-neutral-900">Welcome to Cluvo</h2>
                         <p className="mt-2 text-center text-sm text-neutral-500">
                           Create a community or sign in to your dashboard.
