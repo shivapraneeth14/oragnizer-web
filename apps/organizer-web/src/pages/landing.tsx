@@ -57,7 +57,7 @@ export default function LandingPage() {
   const { signInWithGoogle, signOut, user } = useAuth()
   const [flow, setFlow] = useState<Flow>("create")
   const [checkingSession, setCheckingSession] = useState(true)
-  const [activeTab, setActiveTab] = useState<"explore" | "organizer">("organizer")
+  const [activeTab, setActiveTab] = useState<"explore" | "organizer">("explore")
   const [prefill, setPrefill] = useState<{ email: string; first_name: string; last_name: string } | null>(null)
   const [initialStep, setInitialStep] = useState<"register" | "community">("register")
 
