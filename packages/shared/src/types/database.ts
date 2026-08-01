@@ -28,6 +28,10 @@ export interface Community {
   city: string | null
   contact_email: string | null
   contact_phone: string | null
+  instagram_url: string | null
+  facebook_url: string | null
+  twitter_url: string | null
+  linkedin_url: string | null
   tags: string[] | null
   rules: string | null
   created_at: string
@@ -68,6 +72,8 @@ export interface Event {
   created_at: string
   updated_at: string
   deleted_at: string | null
+  discussion_enabled: boolean
+  discussion_restricted: boolean
 }
 
 export interface WaitlistEntry {
@@ -154,6 +160,23 @@ export interface Notification {
   body: string | null
   payload: Record<string, unknown> | null
   read: boolean
+  created_at: string
+}
+
+export interface EventMessage {
+  id: string
+  event_id: string
+  user_id: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export interface EventRestrictedUser {
+  id: string
+  event_id: string
+  user_id: string
+  created_by: string
   created_at: string
 }
 

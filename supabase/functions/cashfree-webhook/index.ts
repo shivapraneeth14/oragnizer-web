@@ -40,6 +40,18 @@ Deno.serve(async (req) => {
     const cashfreePayoutId = payload.data?.referenceId || payload.data?.transferId
     if (!cashfreePayoutId) return new Response("Missing payout reference", { status: 400 })
 
+    // Webhook deduplication: use cashfree_payout_id + status as unique key
+    const webhookId = `cashfree_${cashfreePayoutId}_${payload.data?.status || "unknown"}`
+    const { data: alreadyProcessed } = await supabase
+      .rpc("try_process_webhook", {
+        p_webhook_id: webhookId,
+        p_provider: "cashfree",
+        p_event_type: payload.type,
+      })
+    if (alreadyProcessed === false) {
+      return new Response("Already processed", { status: 200 })
+    }
+
     const { data: payout } = await supabase
       .from("payout_items")
       .select("id, status, community_id, amount")
@@ -61,9 +73,7 @@ Deno.serve(async (req) => {
         action: "payout_success",
         details: { payout_id: payout.id, community_id: payout.community_id, amount: payout.amount },
       })
-    } else if (newStatus === "FAILED" || newStatus === "REVERSED") {
-      if (payout.status === "failed") return new Response("Already processed", { status: 200 })
-
+    } else if (["FAILED", "REJECTED", "REVERSED"].includes(newStatus)) {
       await supabase.rpc("refund_wallet", { p_payout_id: payout.id })
 
       await supabase.from("payment_audit_log").insert({
@@ -75,7 +85,6 @@ Deno.serve(async (req) => {
     return new Response("OK", { status: 200 })
   } catch (err) {
     console.error(err)
-    const errMsg = err instanceof Error ? err.message : typeof err === "object" ? JSON.stringify(err, Object.getOwnPropertyNames(err)) : String(err)
-    return new Response("Internal error: " + errMsg, { status: 500 })
+    return new Response("Internal error", { status: 500 })
   }
 })

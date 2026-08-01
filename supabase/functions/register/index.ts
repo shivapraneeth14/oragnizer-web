@@ -109,14 +109,6 @@ Deno.serve(async (req) => {
       throw authError
     }
 
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      email: email.trim().toLowerCase(),
-    })
-
-    if (otpError) {
-      console.error("OTP send failed (non-fatal):", otpError)
-    }
-
     await supabase.from("audit_log").insert({
       actor_id: authData.user!.id,
       action: "user_registered",

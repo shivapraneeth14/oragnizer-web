@@ -10,8 +10,6 @@ interface AuthState {
   error: string | null
   success: string | null
   isRecovery: boolean
-  otpSent: boolean
-  otpVerified: boolean
 }
 
 type Action =
@@ -20,8 +18,6 @@ type Action =
   | { type: "SET_ERROR"; error: string | null }
   | { type: "SET_SUCCESS"; success: string | null }
   | { type: "SET_RECOVERY"; isRecovery: boolean }
-  | { type: "SET_OTP_SENT"; otpSent: boolean }
-  | { type: "SET_OTP_VERIFIED"; otpVerified: boolean }
   | { type: "CLEAR_MESSAGES" }
 
 function reducer(state: AuthState, action: Action): AuthState {
@@ -36,10 +32,6 @@ function reducer(state: AuthState, action: Action): AuthState {
       return { ...state, success: action.success }
     case "SET_RECOVERY":
       return { ...state, isRecovery: action.isRecovery }
-    case "SET_OTP_SENT":
-      return { ...state, otpSent: action.otpSent }
-    case "SET_OTP_VERIFIED":
-      return { ...state, otpVerified: action.otpVerified }
     case "CLEAR_MESSAGES":
       return { ...state, error: null, success: null }
     default:
@@ -68,14 +60,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     error: null,
     success: null,
     isRecovery: false,
-    otpSent: false,
-    otpVerified: false,
   })
   const navigate = useNavigate()
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      dispatch({ type: "SET_USER", user: session?.user ?? null, session })
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) {
+        dispatch({ type: "SET_USER", user: null, session: null })
+        return
+      }
+      const { data: { session } } = await supabase.auth.getSession()
+      dispatch({ type: "SET_USER", user, session })
     }).catch(() => {
       dispatch({ type: "SET_USER", user: null, session: null })
     })
@@ -128,9 +123,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${window.location.origin}/dashboard` },
+        options: { redirectTo: `${window.location.origin}/?oauth=1` },
       })
-      // OAuth redirects away — loading persists until page reloads
+      // OAuth redirects away — reset loading in case the user cancels the Google window
+      setTimeout(() => dispatch({ type: "SET_LOADING", loading: false }), 60000)
     } catch {
       dispatch({ type: "SET_ERROR", error: "Google sign-in failed. Try again." })
       dispatch({ type: "SET_LOADING", loading: false })

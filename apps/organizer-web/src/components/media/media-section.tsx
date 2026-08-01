@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { supabase } from "../../supabase"
-import { uploadToCloudinary } from "../../lib/cloudinary"
+import { uploadToCloudinary, uploadVideoToCloudinary, videoPosterUrl } from "../../lib/cloudinary"
 import { useEvents } from "../../hooks/use-events"
+import DropdownSelect from "../dropdown-select"
+import VideoPreviewModal from "./video-preview-modal"
 
 interface MediaItem {
   id: string
@@ -28,6 +30,12 @@ export default function MediaSection({ communityId }: Props) {
   const [eventMediaLoading, setEventMediaLoading] = useState(false)
   const [communityMediaError, setCommunityMediaError] = useState<string | null>(null)
   const [eventMediaError, setEventMediaError] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [communityLoaded, setCommunityLoaded] = useState(0)
+  const [eventLoaded, setEventLoaded] = useState(0)
+  const [communityGen, setCommunityGen] = useState(0)
+  const [eventGen, setEventGen] = useState(0)
+  const [preview, setPreview] = useState<MediaItem | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { events } = useEvents(communityId)
 
@@ -45,6 +53,8 @@ export default function MediaSection({ communityId }: Props) {
       setCommunityMediaError(error.message)
     } else if (data) {
       setCommunityMedia(data as MediaItem[])
+      setCommunityLoaded(0)
+      setCommunityGen((g) => g + 1)
     }
     setCommunityMediaLoading(false)
   }, [communityId])
@@ -63,6 +73,8 @@ export default function MediaSection({ communityId }: Props) {
       setEventMediaError(error.message)
     } else if (data) {
       setEventMedia(data as MediaItem[])
+      setEventLoaded(0)
+      setEventGen((g) => g + 1)
     }
     setEventMediaLoading(false)
   }, [])
@@ -74,8 +86,11 @@ export default function MediaSection({ communityId }: Props) {
     const file = e.target.files?.[0]
     if (!file || !communityId) return
     setUploading(true)
+    setUploadProgress(0)
     try {
-      const url = await uploadToCloudinary(file)
+      const url = uploadType === "video"
+        ? await uploadVideoToCloudinary(file, setUploadProgress)
+        : await uploadToCloudinary(file, setUploadProgress)
       const mediableId = uploadTarget === "community" ? communityId : selectedEventId
       if (!mediableId) return
 
@@ -93,6 +108,7 @@ export default function MediaSection({ communityId }: Props) {
         mediable_type: uploadTarget,
         mediable_id: mediableId,
         url,
+        thumbnail_url: uploadType === "video" ? videoPosterUrl(url) : null,
         type: uploadType,
         sort_order: nextOrder,
       })
@@ -105,6 +121,7 @@ export default function MediaSection({ communityId }: Props) {
     } catch (err) {
       console.error("Upload failed:", err)
     }
+    setUploadProgress(null)
     setUploading(false)
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
@@ -124,6 +141,9 @@ export default function MediaSection({ communityId }: Props) {
     if (target === "event" && !selectedEventId) return
     setUploadTarget(target)
     setUploadType(type)
+    if (fileInputRef.current) {
+      fileInputRef.current.accept = type === "video" ? "video/*" : "image/*"
+    }
     fileInputRef.current?.click()
   }
 
@@ -172,12 +192,11 @@ export default function MediaSection({ communityId }: Props) {
           <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">{communityMediaError}</div>
         ) : (
           <>
-        {uploading && uploadTarget === "community" && (
-          <p className="mt-2 text-sm text-neutral-500">Uploading...</p>
-        )}
+        {uploadTarget === "community" && <UploadProgress percent={uploadProgress} type={uploadType} />}
+        <MediaLoadProgress loaded={communityLoaded} total={communityMedia.length} />
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {communityMedia.map((item) => (
-            <MediaCard key={item.id} item={item} onDelete={handleDelete} />
+            <MediaCard key={`${item.id}:${communityGen}`} item={item} onDelete={handleDelete} onPreview={() => setPreview(item)} onLoaded={() => setCommunityLoaded((n) => n + 1)} />
           ))}
           {communityMedia.length === 0 && !uploading && (
             <p className="col-span-full py-8 text-center text-sm text-neutral-400">No media yet. Add photos and videos for your community.</p>
@@ -191,18 +210,15 @@ export default function MediaSection({ communityId }: Props) {
       <div className="mt-12">
         <h4 className="text-lg font-semibold text-neutral-800">Event Media</h4>
         <p className="mt-1 text-sm text-neutral-500">Select an event to manage its photos and videos.</p>
-        <select
-          value={selectedEventId}
-          onChange={(e) => setSelectedEventId(e.target.value)}
-          className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-[#C2185B] focus:outline-none focus:ring-1 focus:ring-[#C2185B] max-w-xs"
-        >
-          <option value="">Select an event...</option>
-          {events.map((ev) => (
-            <option key={ev.id} value={ev.id}>
-              {ev.title}
-            </option>
-          ))}
-        </select>
+        <div className="mt-3 max-w-xs">
+          <DropdownSelect
+            value={selectedEventId}
+            onChange={setSelectedEventId}
+            options={events.map((ev) => ({ value: ev.id, label: ev.title }))}
+            placeholder="Select an event..."
+            emptyText="No events"
+          />
+        </div>
         {selectedEventId && (
           <div className="mt-4">
             <div className="flex gap-2 mb-4">
@@ -221,9 +237,8 @@ export default function MediaSection({ communityId }: Props) {
                 + Video
               </button>
             </div>
-            {uploading && uploadTarget === "event" && (
-              <p className="mb-2 text-sm text-neutral-500">Uploading...</p>
-            )}
+            {uploadTarget === "event" && <UploadProgress percent={uploadProgress} type={uploadType} />}
+            <MediaLoadProgress loaded={eventLoaded} total={eventMedia.length} />
             {eventMediaLoading ? (
               <div className="flex justify-center py-12">
                 <svg className="h-6 w-6 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
@@ -236,7 +251,7 @@ export default function MediaSection({ communityId }: Props) {
             ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
               {eventMedia.map((item) => (
-                <MediaCard key={item.id} item={item} onDelete={handleDelete} />
+                <MediaCard key={`${item.id}:${eventGen}`} item={item} onDelete={handleDelete} onPreview={() => setPreview(item)} onLoaded={() => setEventLoaded((n) => n + 1)} />
               ))}
               {eventMedia.length === 0 && !uploading && (
                 <p className="col-span-full py-8 text-center text-sm text-neutral-400">No media for this event yet.</p>
@@ -246,16 +261,34 @@ export default function MediaSection({ communityId }: Props) {
           </div>
         )}
       </div>
+      <VideoPreviewModal item={preview} onClose={() => setPreview(null)} />
     </div>
   )
 }
 
-function MediaCard({ item, onDelete }: { item: MediaItem; onDelete: (item: MediaItem) => void }) {
+function MediaCard({ item, onDelete, onPreview, onLoaded }: { item: MediaItem; onDelete: (item: MediaItem) => void; onPreview?: (item: MediaItem) => void; onLoaded?: () => void }) {
   const isVideo = item.type === "video"
   const [imgError, setImgError] = useState(false)
+  const reported = useRef(false)
 
+  const report = useCallback(() => {
+    if (reported.current) return
+    reported.current = true
+    onLoaded?.()
+  }, [onLoaded])
+
+  useEffect(() => {
+    if (isVideo && !item.thumbnail_url) report()
+  }, [isVideo, item.thumbnail_url, report])
+
+  const clickable = isVideo && onPreview
   return (
     <div className="group relative rounded-xl border border-neutral-200 bg-white overflow-hidden shadow-soft">
+      <button
+        type="button"
+        onClick={() => onPreview?.(item)}
+        className={`block w-full text-left ${clickable ? "cursor-pointer" : "cursor-default"}`}
+      >
       <div className="aspect-[4/3] overflow-hidden">
         {isVideo ? (
           <div className="relative flex h-full items-center justify-center bg-neutral-900">
@@ -264,7 +297,8 @@ function MediaCard({ item, onDelete }: { item: MediaItem; onDelete: (item: Media
                 src={item.thumbnail_url}
                 alt=""
                 className="h-full w-full object-cover"
-                onError={() => setImgError(true)}
+                onLoad={() => report()}
+                onError={() => { setImgError(true); report() }}
               />
             ) : (
               <svg className="h-10 w-10 text-white/60" fill="currentColor" viewBox="0 0 24 24">
@@ -282,13 +316,15 @@ function MediaCard({ item, onDelete }: { item: MediaItem; onDelete: (item: Media
             src={item.url}
             alt={item.caption || ""}
             className="h-full w-full object-cover"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
+            onLoad={() => report()}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; report() }}
           />
         )}
       </div>
+      </button>
       <div className="absolute right-1.5 top-1.5 opacity-0 transition-opacity group-hover:opacity-100">
         <button
-          onClick={() => onDelete(item)}
+          onClick={(e) => { e.stopPropagation(); onDelete(item) }}
           className="flex h-7 w-7 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 shadow"
           title="Delete"
         >
@@ -302,6 +338,38 @@ function MediaCard({ item, onDelete }: { item: MediaItem; onDelete: (item: Media
           {isVideo ? "Video" : "Photo"}
         </span>
       </div>
+    </div>
+  )
+}
+
+function UploadProgress({ percent, type }: { percent: number | null; type: "image" | "video" }) {
+  if (percent === null) return null
+  const done = percent >= 100
+  return (
+    <div className="mt-3">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
+        {done ? (
+          <div className="h-full w-full animate-pulse rounded-full bg-[#C2185B]" />
+        ) : (
+          <div className="h-full rounded-full bg-[#C2185B] transition-all" style={{ width: `${percent}%` }} />
+        )}
+      </div>
+      <p className="mt-1 text-sm text-neutral-500">
+        {done ? "Processing…" : `Uploading ${type === "video" ? "video" : "photo"}… ${percent}%`}
+      </p>
+    </div>
+  )
+}
+
+function MediaLoadProgress({ loaded, total }: { loaded: number; total: number }) {
+  if (total === 0 || loaded >= total) return null
+  const percent = Math.round((loaded / total) * 100)
+  return (
+    <div className="mt-3">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
+        <div className="h-full rounded-full bg-[#C2185B] transition-all" style={{ width: `${percent}%` }} />
+      </div>
+      <p className="mt-1 text-xs text-neutral-500">Loading media… {loaded}/{total}</p>
     </div>
   )
 }

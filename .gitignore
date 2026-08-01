@@ -1,33 +1,47 @@
-# env files
+# Secrets & env (never commit — keep .env.example)
 .env
-.env.local
-.env.production
-.env.development
+.env.*
+!.env.example
+*.env
+*.env.*
+!.env.example
 
 # Node
 node_modules/
 dist/
 build/
-.next/
+coverage/
+*.tsbuildinfo
 .cache/
+.next/
+.npm/
 
-# Flutter
-apps/mobile/build/
-apps/mobile/.dart_tool/
-apps/mobile/.packages
-apps/mobile/.pub/
-apps/mobile/pubspec.lock
+# Logs & debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
 
-# IDE
+# Vercel CLI local state
+.vercel/
+
+# Supabase local state
+supabase/.branches
+supabase/.temp
+supabase/.env
+
+# Flutter app (extracted to its own repo: github.com/shivapraneeth14/cluvo)
+apps/mobile/
+
+# IDE / editor
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Supabase
-supabase/.branches
-supabase/.temp

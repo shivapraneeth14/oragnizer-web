@@ -382,6 +382,11 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 2
 
+# reconcile-payments is scheduled via pg_cron + pg_net (see migration 202607300005)
+# The config.toml `schedule` key is not supported by CLI 2.x for edge functions.
+# Scheduling is managed in-database using:
+#   SELECT cron.schedule('invoke-reconcile-payments', '*/5 * * * *', $$ ... net.http_post ... $$);
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

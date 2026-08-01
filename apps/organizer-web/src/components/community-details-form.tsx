@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import PhoneInput from "react-phone-number-input"
 import "react-phone-number-input/style.css"
 import { Country, State, City } from "country-state-city"
+import DropdownSelect from "./dropdown-select"
 
 const categories = [
   "Technology", "Sports & Fitness", "Music & Arts",
@@ -34,19 +35,38 @@ export const initialCommunityData: CommunityData = {
   agree18: false, agreeContent: false,
 }
 
+export function missingCommunityFields(data: CommunityData): { step1: string[]; step2: string[] } {
+  const step1: string[] = []
+  if (!data.community_name.trim()) step1.push("Community name")
+  if (!data.category.trim()) step1.push("Category")
+  if (!data.country) step1.push("Country")
+  if (!data.state) step1.push("State")
+  if (!data.city) step1.push("City")
+  if (!data.contact_email.trim()) step1.push("Contact email")
+  if (!data.contact_phone.trim()) step1.push("Contact phone")
+  const step2: string[] = []
+  if (!data.rules.trim()) step2.push("Community rules")
+  if (!data.agree18) step2.push("18+ confirmation")
+  if (!data.agreeContent) step2.push("Content guidelines agreement")
+  return { step1, step2 }
+}
+
 interface Props {
   data: CommunityData
   onChange: (data: CommunityData) => void
   checkName: (name: string) => Promise<boolean>
+  checkEmail: (email: string) => Promise<boolean>
   step: 1 | 2
 }
 
-export default function CommunityDetailsForm({ data, onChange, checkName, step }: Props) {
+export default function CommunityDetailsForm({ data, onChange, checkName, checkEmail, step }: Props) {
   const [nameAvailable, setNameAvailable] = useState<boolean | null>(null)
   const [checkingName, setCheckingName] = useState(false)
+  const [emailAvailable, setEmailAvailable] = useState<boolean | null>(null)
+  const [checkingEmail, setCheckingEmail] = useState(false)
   const [tagInput, setTagInput] = useState("")
-  const [categoryOpen, setCategoryOpen] = useState(false)
   const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const emailTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const update = useCallback(<K extends keyof CommunityData>(key: K, value: CommunityData[K]) => {
     onChange({ ...data, [key]: value })
@@ -74,6 +94,24 @@ export default function CommunityDetailsForm({ data, onChange, checkName, step }
     }, 500)
     return () => { if (nameTimer.current) clearTimeout(nameTimer.current) }
   }, [data.community_name, checkName])
+
+  useEffect(() => {
+    if (emailTimer.current) clearTimeout(emailTimer.current)
+    const e = data.contact_email.trim()
+    if (e.length < 5 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { setEmailAvailable(null); setCheckingEmail(false); return }
+    setCheckingEmail(true)
+    emailTimer.current = setTimeout(async () => {
+      try {
+        const avail = await checkEmail(e)
+        setEmailAvailable(avail)
+      } catch {
+        setEmailAvailable(false)
+      } finally {
+        setCheckingEmail(false)
+      }
+    }, 500)
+    return () => { if (emailTimer.current) clearTimeout(emailTimer.current) }
+  }, [data.contact_email, checkEmail])
 
   const addTag = () => {
     const t = tagInput.trim().toLowerCase()
@@ -120,44 +158,16 @@ export default function CommunityDetailsForm({ data, onChange, checkName, step }
         )}
       </div>
 
-      <div className="relative">
+      <div>
         <label className="mb-1 block text-xs font-medium text-neutral-600">Category</label>
-        <button
-          type="button"
-          onClick={() => setCategoryOpen(!categoryOpen)}
-          className="flex w-full items-center justify-between rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
-        >
-          <span className={data.category ? "text-neutral-900" : "text-neutral-400"}>
-            {data.category || "Select a category (optional)"}
-          </span>
-          <svg className={`h-4 w-4 text-neutral-400 transition-transform ${categoryOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-        {categoryOpen && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setCategoryOpen(false)} />
-            <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-medium">
-              <button
-                type="button"
-                onClick={() => { update("category", ""); setCategoryOpen(false) }}
-                className={`w-full px-3.5 py-2 text-left text-sm hover:bg-neutral-50 ${!data.category ? "bg-[#C2185B]/5 font-medium text-[#C2185B]" : "text-neutral-500"}`}
-              >
-                None
-              </button>
-              {categories.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => { update("category", c); setCategoryOpen(false) }}
-                  className={`w-full px-3.5 py-2 text-left text-sm hover:bg-neutral-50 ${data.category === c ? "bg-[#C2185B]/5 font-medium text-[#C2185B]" : "text-neutral-900"}`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+        <DropdownSelect
+          value={data.category}
+          onChange={(v) => update("category", v)}
+          options={categories.map((c) => ({ value: c, label: c }))}
+          placeholder="Select or type a category"
+          freeInput
+          emptyText="No matching category"
+        />
       </div>
 
       <div>
@@ -174,57 +184,66 @@ export default function CommunityDetailsForm({ data, onChange, checkName, step }
       <div className="grid grid-cols-3 gap-2">
         <div>
           <label className="mb-1 block text-xs font-medium text-neutral-600">Country</label>
-          <select
+          <DropdownSelect
             value={data.country}
-            onChange={(e) => onChange({ ...data, country: e.target.value, state: "", city: "" })}
-            className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
-          >
-            <option value="">Country</option>
-            {countries.map((c) => (
-              <option key={c.isoCode} value={c.isoCode}>{c.name}</option>
-            ))}
-          </select>
+            onChange={(v) => onChange({ ...data, country: v, state: "", city: "" })}
+            options={countries.map((c) => ({ value: c.isoCode, label: c.name }))}
+            placeholder="Country"
+          />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-neutral-600">State</label>
-          <select
+          <DropdownSelect
             value={data.state}
-            onChange={(e) => onChange({ ...data, state: e.target.value, city: "" })}
-            className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+            onChange={(v) => onChange({ ...data, state: v, city: "" })}
+            options={states.map((s) => ({ value: s.isoCode, label: s.name }))}
+            placeholder="State"
             disabled={!data.country}
-          >
-            <option value="">State</option>
-            {states.map((s) => (
-              <option key={s.isoCode} value={s.isoCode}>{s.name}</option>
-            ))}
-          </select>
+          />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-neutral-600">City</label>
-          <select
+          <DropdownSelect
             value={data.city}
-            onChange={(e) => update("city", e.target.value)}
-            className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+            onChange={(v) => update("city", v)}
+            options={cities.map((c) => ({ value: c.name, label: c.name }))}
+            placeholder="City"
             disabled={!data.state}
-          >
-            <option value="">City</option>
-            {cities.map((c) => (
-              <option key={`${c.name}-${c.latitude}-${c.longitude}`} value={c.name}>{c.name}</option>
-            ))}
-          </select>
+          />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-neutral-600">Contact email</label>
-          <input
-            type="email"
-            value={data.contact_email}
-            onChange={(e) => update("contact_email", e.target.value)}
-            placeholder="community@example.com"
-            className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
-          />
+          <div className="relative">
+            <input
+              type="email"
+              value={data.contact_email}
+              onChange={(e) => update("contact_email", e.target.value)}
+              placeholder="community@example.com"
+              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2">
+              {checkingEmail ? (
+                <svg className="h-4 w-4 animate-spin text-neutral-400" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : emailAvailable === true ? (
+                <svg className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              ) : emailAvailable === false ? (
+                <svg className="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : null}
+            </span>
+          </div>
+          {emailAvailable === false && (
+            <p className="mt-0.5 text-xs text-red-500">This email is already associated with another community</p>
+          )}
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-neutral-600">Contact phone</label>
@@ -262,25 +281,7 @@ export default function CommunityDetailsForm({ data, onChange, checkName, step }
         </div>
       </div>
 
-      <div className="flex items-center justify-between rounded-lg border border-neutral-200 px-4 py-3">
-        <label className="text-sm text-neutral-700">Community visibility</label>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => update("visibility", "public")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${data.visibility === "public" ? "bg-[#C2185B] text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"}`}
-          >
-            Public
-          </button>
-          <button
-            type="button"
-            onClick={() => update("visibility", "private")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${data.visibility === "private" ? "bg-[#C2185B] text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"}`}
-          >
-            Private
-          </button>
-        </div>
-      </div>
+
     </div>
   ) : (
     <div className="space-y-4">

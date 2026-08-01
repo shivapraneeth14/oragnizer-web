@@ -11,5 +11,8 @@
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "ci": "npm run typecheck && npm run lint"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -1,4 +1,5 @@
 import { createClient } from "jsr:@supabase/supabase-js@2"
+import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -22,6 +23,10 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })
   }
+
+  const ip = getClientIp(req)
+  const rl = await checkRateLimit(ip, "create-community")
+  if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
     const authHeader = req.headers.get("Authorization")
@@ -61,9 +66,22 @@ Deno.serve(async (req) => {
     } = await req.json()
 
     const errors: string[] = []
-    if (!community_name || typeof community_name !== "string") errors.push("Please enter a community name.")
-    if (!agree18) errors.push("You must confirm you are 18 years or older.")
-    if (!agreeContent) errors.push("You must agree to the content guidelines.")
+    const required: Array<[unknown, string]> = [
+      [community_name, "Please enter a community name."],
+      [category, "Please select a category."],
+      [country, "Please select a country."],
+      [state, "Please select a state."],
+      [city, "Please select a city."],
+      [contact_email, "Please enter a contact email."],
+      [contact_phone, "Please enter a contact phone number."],
+      [rules, "Please enter community rules."],
+      [agree18, "You must confirm you are 18 years or older."],
+      [agreeContent, "You must agree to the content guidelines."],
+    ]
+    for (const [value, message] of required) {
+      const missing = typeof value === "string" ? !value.trim() : !value
+      if (missing) errors.push(message)
+    }
 
     if (errors.length > 0) {
       return new Response(JSON.stringify({ error: errors[0] }), {
@@ -76,6 +94,19 @@ Deno.serve(async (req) => {
       if (!emailRegex.test(contact_email)) {
         return new Response(JSON.stringify({ error: "Please enter a valid contact email." }), {
           status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
+
+      const { data: existingEmail } = await supabase
+        .from("communities")
+        .select("id")
+        .eq("contact_email", contact_email.trim())
+        .is("deleted_at", null)
+        .maybeSingle()
+
+      if (existingEmail) {
+        return new Response(JSON.stringify({ error: "This contact email is already associated with another community." }), {
+          status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
         })
       }
     }

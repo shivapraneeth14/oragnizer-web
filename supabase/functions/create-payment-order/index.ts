@@ -14,12 +14,9 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 }
 
-async function createRazorpayOrder(amount: number, registrationId: string, transfers: any[]) {
+async function createRazorpayOrder(amount: number, registrationId: string) {
   const idempotencyKey = `order_${registrationId}`
   const body: any = { amount, currency: "INR", receipt: registrationId }
-  if (transfers.length > 0) {
-    body.transfers = transfers
-  }
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15000)
@@ -63,7 +60,7 @@ Deno.serve(async (req) => {
     const rl = await checkRateLimit(user.id, "create-payment-order")
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
-    const { registration_id } = await req.json()
+    const { registration_id, coupon_code } = await req.json()
     if (!registration_id) return new Response(JSON.stringify({ error: "registration_id is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
     const { data: registration } = await supabase
@@ -73,36 +70,53 @@ Deno.serve(async (req) => {
       .single()
 
     if (!registration) return new Response(JSON.stringify({ error: "Registration not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (registration.user_id !== user.id) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (registration.status === "confirmed") return new Response(JSON.stringify({ error: "Already confirmed" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (registration.status === "cancelled") return new Response(JSON.stringify({ error: "Registration expired" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
     const { data: event } = await supabase
       .from("events")
-      .select("id, price, title, community_id")
+      .select("id, price, title, community_id, status")
       .eq("id", registration.event_id)
       .single()
 
     if (!event || event.price <= 0) return new Response(JSON.stringify({ error: "Event is free or not found" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (event.status !== "published") return new Response(JSON.stringify({ error: "Event is not available" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
-    const { data: community } = await supabase
-      .from("communities")
-      .select("id, razorpay_account_id, razorpay_account_status, commission_percent")
-      .eq("id", event.community_id)
-      .single()
-
-    // Build transfers array if organizer has a linked account
-    const platformFee = Math.round(event.price * (community?.commission_percent ?? 10) / 100)
-    const organizerShare = event.price - platformFee
     const amount = event.price
+    let finalAmount = amount
+    let couponId: string | null = null
 
-    const transfers: any[] = []
-    if (community?.razorpay_account_id && organizerShare > 0) {
-      transfers.push({
-        account: community.razorpay_account_id,
-        amount: organizerShare,
-        currency: "INR",
-        on_hold: community.razorpay_account_status !== "activated",
-      })
+    if (coupon_code) {
+      const { data: coupon } = await supabase
+        .from("coupons")
+        .select("id, discount_type, discount_value, valid_until")
+        .eq("code", coupon_code)
+        .eq("community_id", event.community_id)
+        .maybeSingle()
+
+      if (!coupon) {
+        return new Response(JSON.stringify({ error: "Invalid coupon code" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+
+      if (coupon.valid_until && new Date(coupon.valid_until) < new Date()) {
+        return new Response(JSON.stringify({ error: "Coupon has expired" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+
+      const { data: claimResult } = await supabase
+        .rpc("claim_coupon", { p_coupon_id: coupon.id })
+
+      if (claimResult?.claimed) {
+        let discount = 0
+        if (coupon.discount_type === "percentage") {
+          discount = Math.floor(amount * coupon.discount_value / 100)
+        } else {
+          discount = coupon.discount_value
+        }
+
+        finalAmount = Math.max(amount - discount, 0)
+        couponId = coupon.id
+      }
     }
 
     // Check for existing payment — reuse valid order, avoid duplicate
@@ -118,14 +132,13 @@ Deno.serve(async (req) => {
       if (existingPayment.status === "pending" && existingPayment.razorpay_order_id) {
         const orderAge = Date.now() - new Date(existingPayment.created_at).getTime()
         if (orderAge < 24 * 60 * 60 * 1000) {
-          return new Response(JSON.stringify({ razorpay_order_id: existingPayment.razorpay_order_id, amount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          return new Response(JSON.stringify({ razorpay_order_id: existingPayment.razorpay_order_id, amount: finalAmount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
     }
 
-    // Create Razorpay order with idempotency key (includes transfers for Route splits)
     const attemptCount = (existingPayment?.attempt_count ?? 0) + 1
-    const order = await createRazorpayOrder(amount, `${registration_id}_${attemptCount}`, transfers)
+    const order = await createRazorpayOrder(finalAmount, `${registration_id}_${attemptCount}`)
 
     // Insert or update payments row with 23505 recovery for concurrent double-tap
     let paymentId: string
@@ -136,6 +149,8 @@ Deno.serve(async (req) => {
           .update({
             razorpay_order_id: order.id,
             status: "pending",
+            amount: finalAmount,
+            coupon_id: couponId,
             attempt_count: attemptCount,
             created_at: new Date().toISOString(),
           })
@@ -146,9 +161,10 @@ Deno.serve(async (req) => {
           .from("payments")
           .insert({
             registration_id,
-            amount,
+            amount: finalAmount,
             razorpay_order_id: order.id,
             status: "pending",
+            coupon_id: couponId,
             attempt_count: attemptCount,
           })
           .select("id")
@@ -165,24 +181,13 @@ Deno.serve(async (req) => {
           .eq("registration_id", registration_id)
           .single()
         if (recovered) {
-          return new Response(JSON.stringify({ razorpay_order_id: recovered.razorpay_order_id, amount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          return new Response(JSON.stringify({ razorpay_order_id: recovered.razorpay_order_id, amount: finalAmount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
       throw insertErr
     }
 
-    // If transfers were included in the order, log to payment_transfers
-    if (transfers.length > 0) {
-      await supabase.from("payment_transfers").insert({
-        payment_id: paymentId,
-        community_id: event.community_id,
-        amount: organizerShare,
-        commission_amount: platformFee,
-        status: "pending",
-      })
-    }
-
-    return new Response(JSON.stringify({ razorpay_order_id: order.id, amount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    return new Response(JSON.stringify({ razorpay_order_id: order.id, amount: finalAmount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
     console.error(err)
     return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })

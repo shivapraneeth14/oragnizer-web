@@ -66,32 +66,50 @@ Deno.serve(async (req) => {
 
     if (payment && payment.status === "success" && payment.razorpay_payment_id) {
       try {
-        // Step 1: Refund the payment
         const refund = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, { amount: payment.amount })
 
-        // Step 2: Check for processed transfer and reverse it
-        const { data: transfer } = await supabase
-          .from("payment_transfers")
-          .select("id, status, razorpay_transfer_id")
-          .eq("payment_id", payment.id)
-          .maybeSingle()
+        const { data: regEvent } = await supabase
+          .from("registrations")
+          .select("event_id")
+          .eq("id", registration.id)
+          .single()
 
-        if (transfer?.status === "processed" && transfer?.razorpay_transfer_id) {
-          try {
-            await razorpayPost(`transfers/${transfer.razorpay_transfer_id}/reverse`, {})
-            await supabase.from("payment_transfers").update({ status: "reversed", updated_at: new Date().toISOString() }).eq("id", transfer.id)
-          } catch (reverseErr) {
-            console.error("Reverse transfer failed:", reverseErr)
+        if (regEvent) {
+          const { data: ev } = await supabase
+            .from("events")
+            .select("community_id")
+            .eq("id", regEvent.event_id)
+            .single()
+
+          if (ev) {
+            const { data: comm } = await supabase
+              .from("communities")
+              .select("id, commission_percent")
+              .eq("id", ev.community_id)
+              .single()
+
+            if (comm) {
+              const platformFee = Math.floor(Number(payment.amount) * Number(comm.commission_percent) / 100)
+              const organizerShare = Number(payment.amount) - platformFee
+              const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
+                p_community_id: comm.id,
+                p_amount: organizerShare,
+                p_reason: "registration_cancellation_refund",
+              })
+              if (debitError || debitResult?.error) {
+                throw new Error(debitResult?.error || debitError?.message || "Wallet debit failed")
+              }
+            }
           }
         }
 
-        // Step 3: Update payment status
         await supabase.from("payments").update({
           status: "refunded",
           refund_status: "processed",
+          razorpay_refund_id: refund.id,
+          refunded_amount: payment.amount,
         }).eq("id", payment.id)
 
-        // Step 4: Audit log
         await supabase.from("payment_audit_log").insert({
           action: "refund_issued",
           payment_id: payment.id,
@@ -105,7 +123,6 @@ Deno.serve(async (req) => {
           payment_id: payment.id,
           details: { error: String(refundErr) },
         })
-        // Continue with cancellation even if refund fails (registration cancelled, refund will be handled manually)
       }
     }
 

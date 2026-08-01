@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
 
     const { data: event, error: eventError } = await supabase
       .from("events")
-      .select("id, capacity, booked_count, status, deleted_at, price")
+      .select("id, capacity, booked_count, status, deleted_at, price, start_date")
       .eq("id", event_id)
       .single()
 
@@ -62,6 +62,30 @@ Deno.serve(async (req) => {
 
     if (event.deleted_at) {
       return new Response(JSON.stringify({ error: "This event has been deleted." }), {
+        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    if (event.status === "cancelled") {
+      return new Response(JSON.stringify({ error: "This event has been cancelled." }), {
+        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    if (event.status === "completed") {
+      return new Response(JSON.stringify({ error: "This event has ended." }), {
+        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    if (event.status !== "published") {
+      return new Response(JSON.stringify({ error: "This event is not available." }), {
+        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    if (event.start_date && new Date(event.start_date) < new Date()) {
+      return new Response(JSON.stringify({ error: "This event has already started." }), {
         status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }

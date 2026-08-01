@@ -1,0 +1,27 @@
+-- Step 1: Remove the old schedule that called the SQL function
+SELECT cron.unschedule('reconcile-payments');
+
+-- Note: The new Edge Function schedule is NOT created here because it
+-- requires Vault secrets (service_role_key) which need superuser privileges.
+--
+-- After this migration is applied, run this SQL manually (or via psql):
+--
+--   INSERT INTO vault.secrets (name, secret)
+--   SELECT 'reconcile_service_key', '<SERVICE_ROLE_KEY>'
+--   WHERE NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name = 'reconcile_service_key');
+--
+--   INSERT INTO vault.secrets (name, secret)
+--   SELECT 'project_url', '<PROJECT_URL>'
+--   WHERE NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name = 'project_url');
+--
+--   SELECT cron.schedule(
+--     'invoke-reconcile-payments', '*/5 * * * *',
+--     $$SELECT net.http_post(
+--         url := (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'project_url' LIMIT 1) || '/functions/v1/reconcile-payments',
+--         headers := jsonb_build_object(
+--           'Content-Type', 'application/json',
+--           'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'reconcile_service_key' LIMIT 1)
+--         ),
+--         body := '{}'::jsonb
+--       ) AS request_id;$$
+--   );

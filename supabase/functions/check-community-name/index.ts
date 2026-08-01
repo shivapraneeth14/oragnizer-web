@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
   if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
-    const { name } = await req.json()
+    const { name, community_id } = await req.json()
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return new Response(JSON.stringify({ error: "Please enter a community name." }), {
@@ -38,12 +38,17 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("communities")
       .select("id")
       .eq("name", name.trim())
       .is("deleted_at", null)
-      .maybeSingle()
+
+    if (community_id) {
+      query = query.neq("id", community_id)
+    }
+
+    const { data, error } = await query.maybeSingle()
 
     if (error) throw error
 

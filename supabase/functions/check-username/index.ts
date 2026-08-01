@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
   if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
-    const { username } = await req.json()
+    const { username, current_user_id } = await req.json()
 
     if (!username || typeof username !== "string") {
       return new Response(JSON.stringify({ error: "Please enter a username." }), {
@@ -38,12 +38,17 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("profiles")
       .select("id")
       .eq("username", username.trim())
       .is("deleted_at", null)
-      .maybeSingle()
+
+    if (current_user_id) {
+      query = query.neq("id", current_user_id)
+    }
+
+    const { data, error } = await query.maybeSingle()
 
     if (error) throw error
 

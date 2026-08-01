@@ -7,9 +7,10 @@ import EventForm from "../components/events/event-form"
 import EventDetail from "../components/events/event-detail"
 import MediaSection from "../components/media/media-section"
 import PayoutSection from "../components/payout/payout-section"
+import SettingsPage from "../components/settings/settings-page"
 import MemberRow from "../components/members/member-row"
 import { useEvents, eventToForm } from "../hooks/use-events"
-import CommunityDetailsForm, { initialCommunityData, type CommunityData } from "../components/community-details-form"
+import CommunityDetailsForm, { initialCommunityData, missingCommunityFields, type CommunityData } from "../components/community-details-form"
 import type { Event } from "shared"
 import type { EventFormData } from "../hooks/use-events"
 
@@ -36,7 +37,10 @@ const navItems = [
 export default function DashboardPage() {
   const { user, signOut, loading, clearMessages } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024)
-  const [activeSection, setActiveSection] = useState("dashboard")
+  const [activeSection, setActiveSection] = useState(() => {
+    const h = window.location.hash.replace(/^#\/?/, "")
+    return navItems.some((i) => i.id === h) ? h : "dashboard"
+  })
   const [profileOpen, setProfileOpen] = useState(false)
   const [communityId, setCommunityId] = useState<string | undefined>()
   const [community, setCommunity] = useState<{ id: string; member_count: number; name: string } | null>(null)
@@ -63,6 +67,19 @@ export default function DashboardPage() {
     const onResize = () => setSidebarOpen(window.innerWidth >= 1024)
     window.addEventListener("resize", onResize)
     return () => window.removeEventListener("resize", onResize)
+  }, [])
+
+  useEffect(() => {
+    window.location.hash = activeSection === "dashboard" ? "" : activeSection
+  }, [activeSection])
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const h = window.location.hash.replace(/^#\/?/, "")
+      setActiveSection(navItems.some((i) => i.id === h) ? h : "dashboard")
+    }
+    window.addEventListener("hashchange", onHashChange)
+    return () => window.removeEventListener("hashchange", onHashChange)
   }, [])
 
   const { events, loading: eventsLoading, loadingMore: eventsLoadingMore, hasMore: eventsHasMore, error: eventsError, refresh: refreshEvents, createEvent, updateEvent, cancelEvent, fetchNextPage } = useEvents(communityId)
@@ -198,7 +215,16 @@ export default function DashboardPage() {
       <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-8">
         <div className="w-full max-w-lg">
           <div className="rounded-xl border border-neutral-200 bg-white p-8 shadow-soft">
-            <h2 className="text-xl font-semibold text-neutral-900">Create Your Community</h2>
+            <div className="mb-1 flex items-center justify-between gap-4">
+              <h2 className="text-xl font-semibold text-neutral-900">Create Your Community</h2>
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="shrink-0 text-xs text-neutral-400 transition hover:text-neutral-600"
+              >
+                Sign out
+              </button>
+            </div>
             <p className="mt-2 text-sm text-neutral-500">Welcome! Set up your community to get started.</p>
             <div className="mt-6">
               <CommunityDetailsForm data={communityData} onChange={setCommunityData}
@@ -206,6 +232,13 @@ export default function DashboardPage() {
                   try {
                     const { supabaseFetchNoAuth } = await import("../supabase-fetch")
                     const res = await supabaseFetchNoAuth("/functions/v1/check-community-name", { name })
+                    return (await res.json()).available === true
+                  } catch { return true }
+                }}
+                checkEmail={async (email) => {
+                  try {
+                    const { supabaseFetchNoAuth } = await import("../supabase-fetch")
+                    const res = await supabaseFetchNoAuth("/functions/v1/check-community-email", { email })
                     return (await res.json()).available === true
                   } catch { return true }
                 }}
@@ -220,13 +253,14 @@ export default function DashboardPage() {
               <div className="flex-1" />
               {communityStep === 1 ? (
                 <button onClick={() => {
-                  if (!communityData.community_name.trim()) { alert("Community name is required"); return }
+                  const missing = missingCommunityFields(communityData).step1
+                  if (missing.length > 0) { alert(`Complete required fields: ${missing.join(", ")}`); return }
                   setCommunityStep(2)
                 }} className="rounded-lg bg-[#C2185B] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#A0154A]">
                   Next
                 </button>
               ) : (
-                <button onClick={handleCreateCommunity} disabled={communityCreating}
+                <button onClick={handleCreateCommunity} disabled={communityCreating || missingCommunityFields(communityData).step2.length > 0}
                   className="rounded-lg bg-[#C2185B] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#A0154A] disabled:opacity-50">
                   {communityCreating ? "Creating..." : "Create Community"}
                 </button>
@@ -573,7 +607,7 @@ export default function DashboardPage() {
             <PayoutSection communityId={communityId} />
           )}
           {activeSection === "settings" && (
-            <p className="text-neutral-500">Settings section — coming soon.</p>
+            <SettingsPage communityId={communityId} />
           )}
           {activeSection === "profile" && <ProfileSection />}
         </div>

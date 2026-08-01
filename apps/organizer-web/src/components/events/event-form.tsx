@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react"
 import { uploadToCloudinary } from "../../lib/cloudinary"
-import type { EventFormData } from "../../hooks/use-events"
-import { emptyForm } from "../../hooks/use-events"
+import type { EventFormData, DescriptionFields } from "../../hooks/use-events"
+import { emptyForm, composeDescription, parseDescription, emptyDescriptionFields } from "../../hooks/use-events"
 
 interface Props {
   initial?: EventFormData
@@ -14,14 +14,24 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
   const [form, setForm] = useState<EventFormData>(initial || emptyForm)
   const [uploading, setUploading] = useState(false)
   const [errors, setErrors] = useState<{ start?: string; end?: string }>({})
+  const [descFields, setDescFields] = useState<DescriptionFields>(() =>
+    initial?.description ? parseDescription(initial.description) : emptyDescriptionFields
+  )
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (initial) setForm(initial)
+    if (initial) {
+      setForm(initial)
+      setDescFields(initial.description ? parseDescription(initial.description) : emptyDescriptionFields)
+    }
   }, [initial])
 
   const update = <K extends keyof EventFormData>(key: K, value: EventFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const updateDesc = (key: keyof DescriptionFields, value: string) => {
+    setDescFields((prev) => ({ ...prev, [key]: value }))
   }
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,11 +56,12 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
     const errs: typeof errors = {}
     if (!form.start_date) {
       errs.start = "Start date is required"
-    } else if (!isEditing) {
+    } else {
       const now = new Date()
       const start = new Date(form.start_date)
       const minTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes())
-      if (start < minTime) {
+      const changed = !initial || form.start_date !== initial.start_date
+      if (changed && start < minTime) {
         errs.start = "Start date cannot be in the past"
       }
     }
@@ -60,7 +71,7 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
 
     setErrors(errs)
     if (Object.keys(errs).length) return
-    await onSave(form)
+    await onSave({ ...form, description: composeDescription(descFields) })
   }
 
   const isEditing = !!initial
@@ -119,12 +130,48 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
           </div>
 
           {/* Description */}
-          <div>
+          <div className="space-y-3">
             <label className="mb-1 block text-xs font-medium text-neutral-500">Description</label>
-            <textarea value={form.description} onChange={(e) => update("description", e.target.value)}
-              placeholder="Describe your event..." rows={3}
-              className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
-            />
+
+            <div>
+              <label className="mb-1 block text-xs text-neutral-400">About this event</label>
+              <textarea value={descFields.about} onChange={(e) => updateDesc("about", e.target.value)}
+                placeholder="What is this event about?" rows={2}
+                className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-neutral-400">What you'll get</label>
+              <textarea value={descFields.highlights} onChange={(e) => updateDesc("highlights", e.target.value)}
+                placeholder="Key takeaways, benefits, what attendees will gain…" rows={2}
+                className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-neutral-400">Schedule / Agenda</label>
+              <textarea value={descFields.schedule} onChange={(e) => updateDesc("schedule", e.target.value)}
+                placeholder="Timeline, session times, breaks…" rows={2}
+                className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-neutral-400">What to bring <span className="text-neutral-300">(optional)</span></label>
+              <textarea value={descFields.bring} onChange={(e) => updateDesc("bring", e.target.value)}
+                placeholder="Items attendees should bring…" rows={1}
+                className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-neutral-400">Additional info <span className="text-neutral-300">(optional)</span></label>
+              <textarea value={descFields.notes} onChange={(e) => updateDesc("notes", e.target.value)}
+                placeholder="Parking, dress code, refund policy, etc…" rows={1}
+                className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+              />
+            </div>
           </div>
 
           {/* Start / End Date */}
@@ -133,7 +180,7 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
               <label className="mb-1 block text-xs font-medium text-neutral-500">Start *</label>
               <input type="datetime-local" value={form.start_date}
                 onChange={(e) => { setErrors((p) => ({ ...p, start: undefined })); update("start_date", e.target.value) }}
-                min={isEditing ? undefined : new Date().toISOString().slice(0, 16)}
+                min={new Date().toISOString().slice(0, 16)}
                 className={`w-full rounded-lg border px-3.5 py-2 text-sm outline-none transition focus:ring-1 focus:ring-[#C2185B]/20 ${
                   errors.start ? "border-red-400 focus:border-red-500" : "border-neutral-300 focus:border-[#C2185B]"
                 }`}
@@ -194,6 +241,33 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
                   {s.charAt(0).toUpperCase() + s.slice(1)}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Discussion */}
+          <div>
+            <label className="mb-2 block text-xs font-medium text-neutral-500">Discussion</label>
+            <div className="space-y-2 rounded-lg border border-neutral-200 bg-white p-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.discussion_enabled}
+                  onChange={(e) => update("discussion_enabled", e.target.checked)}
+                  className="h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-neutral-700">Enable Discussion</span>
+              </label>
+              {form.discussion_enabled && (
+                <label className="flex items-center gap-3 cursor-pointer ml-6">
+                  <input
+                    type="checkbox"
+                    checked={form.discussion_restricted}
+                    onChange={(e) => update("discussion_restricted", e.target.checked)}
+                    className="h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-neutral-700">Restrict to admins only</span>
+                </label>
+              )}
             </div>
           </div>
 

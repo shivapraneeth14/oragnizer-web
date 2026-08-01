@@ -12,6 +12,52 @@ export type EventFormData = {
   capacity: string
   price: string
   status: "draft" | "published"
+  discussion_enabled: boolean
+  discussion_restricted: boolean
+}
+
+export interface DescriptionFields {
+  about: string
+  highlights: string
+  schedule: string
+  bring: string
+  notes: string
+}
+
+export function composeDescription(fields: DescriptionFields): string {
+  const parts: string[] = []
+  if (fields.about.trim()) parts.push(`## About\n${fields.about.trim()}`)
+  if (fields.highlights.trim()) parts.push(`## What you'll get\n${fields.highlights.trim()}`)
+  if (fields.schedule.trim()) parts.push(`## Schedule\n${fields.schedule.trim()}`)
+  if (fields.bring.trim()) parts.push(`## What to bring\n${fields.bring.trim()}`)
+  if (fields.notes.trim()) parts.push(`## Additional info\n${fields.notes.trim()}`)
+  return parts.join('\n\n')
+}
+
+export function parseDescription(description: string): DescriptionFields {
+  const fields: DescriptionFields = { about: '', highlights: '', schedule: '', bring: '', notes: '' }
+  const sectionMap: Record<string, keyof DescriptionFields> = {
+    'about': 'about',
+    "what you'll get": 'highlights',
+    'schedule': 'schedule',
+    'what to bring': 'bring',
+    'additional info': 'notes',
+  }
+  const sections = description.split(/\n(?=## )/)
+  for (const section of sections) {
+    const match = section.match(/^## (.+?)\n([\s\S]*)$/)
+    if (match) {
+      const title = match[1].toLowerCase().trim()
+      const content = match[2].trim()
+      const key = sectionMap[title]
+      if (key) fields[key] = content
+    }
+  }
+  return fields
+}
+
+export const emptyDescriptionFields: DescriptionFields = {
+  about: '', highlights: '', schedule: '', bring: '', notes: '',
 }
 
 export const emptyForm: EventFormData = {
@@ -19,6 +65,8 @@ export const emptyForm: EventFormData = {
   start_date: "", end_date: "",
   location: "", capacity: "", price: "",
   status: "draft",
+  discussion_enabled: false,
+  discussion_restricted: false,
 }
 
 export function eventToForm(e: Event): EventFormData {
@@ -32,6 +80,8 @@ export function eventToForm(e: Event): EventFormData {
     capacity: e.capacity?.toString() || "",
     price: (e.price / 100).toString(),
     status: e.status === "cancelled" || e.status === "completed" ? "draft" : e.status,
+    discussion_enabled: e.discussion_enabled,
+    discussion_restricted: e.discussion_restricted,
   }
 }
 
@@ -96,6 +146,8 @@ export function useEvents(communityId: string | undefined) {
       capacity: data.capacity ? parseInt(data.capacity) : null,
       price: Math.round(parseFloat(data.price || "0") * 100),
       status: data.status,
+      discussion_enabled: data.discussion_enabled,
+      discussion_restricted: data.discussion_restricted,
       created_by: userId,
     })
     if (error) return error.message
@@ -118,15 +170,20 @@ export function useEvents(communityId: string | undefined) {
       capacity: data.capacity ? parseInt(data.capacity) : null,
       price: Math.round(parseFloat(data.price || "0") * 100),
       status: data.status,
+      discussion_enabled: data.discussion_enabled,
+      discussion_restricted: data.discussion_restricted,
     }).eq("id", id)
     if (error) return error.message
     await fetch()
     return null
   }, [fetch])
 
-  const cancelEvent = useCallback(async (id: string) => {
-    const { error } = await supabase.from("events").update({ status: "cancelled" }).eq("id", id)
+  const cancelEvent = useCallback(async (id: string): Promise<string | null> => {
+    const { data, error } = await supabase.functions.invoke("cancel-event", {
+      body: { event_id: id },
+    })
     if (error) return error.message
+    if (data?.error) return data.error
     await fetch()
     return null
   }, [fetch])

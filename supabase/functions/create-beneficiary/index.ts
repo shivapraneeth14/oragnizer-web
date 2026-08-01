@@ -28,9 +28,14 @@ Deno.serve(async (req) => {
     const rl = await checkRateLimit(user.id, "create-beneficiary")
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
-    const { community_id, bank_account_number, bank_ifsc, bank_account_holder } = await req.json()
+    const { community_id, bank_account_number, bank_ifsc, bank_account_holder, label } = await req.json()
     if (!community_id || !bank_account_number || !bank_ifsc || !bank_account_holder) {
       return new Response(JSON.stringify({ error: "community_id, bank_account_number, bank_ifsc, bank_account_holder are required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    const ifscUpper = bank_ifsc.toUpperCase()
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscUpper)) {
+      return new Response(JSON.stringify({ error: "Invalid IFSC code format" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
     const { data: community } = await supabase
@@ -42,24 +47,74 @@ Deno.serve(async (req) => {
     if (!community) return new Response(JSON.stringify({ error: "Community not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (community.owner_id !== user.id) return new Response(JSON.stringify({ error: "Only the community owner can set up payouts" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
-    const beneficiaryId = `bene_${community_id.replace(/-/g, "")}_${Date.now()}`
-    const result = await cashfreePost("/addBeneficiary", {
-      beneId: beneficiaryId,
-      name: bank_account_holder,
-      email: user.email || "organizer@cluvo.com",
-      phone: "9999999999",
-      bankAccount: bank_account_number,
-      ifsc: bank_ifsc,
-      address: "N/A",
-      city: "N/A",
-      state: "N/A",
-      pincode: "000000",
+    const { data: existingBen } = await supabase
+      .from("community_beneficiaries")
+      .select("id")
+      .eq("community_id", community_id)
+      .eq("bank_account_number", "xxxxxx" + bank_account_number.slice(-4))
+      .eq("bank_ifsc", ifscUpper)
+      .maybeSingle()
+
+    if (existingBen) {
+      return new Response(JSON.stringify({ error: "This bank account is already added to this community." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    const beneficiaryId = crypto.randomUUID().replace(/-/g, "")
+    const result = await cashfreePost("/beneficiary", {
+      beneficiary_id: beneficiaryId,
+      beneficiary_name: bank_account_holder,
+      beneficiary_instrument_details: {
+        bank_account_number: bank_account_number,
+        bank_ifsc: ifscUpper,
+      },
+      beneficiary_contact_details: {
+        beneficiary_email: user.email || "organizer@cluvo.com",
+        beneficiary_phone: "9999999999",
+        beneficiary_country_code: "+91",
+        beneficiary_address: "N/A",
+        beneficiary_city: "N/A",
+        beneficiary_state: "N/A",
+        beneficiary_postal_code: "000000",
+      },
     })
 
-    await supabase
+    const { error: updateErr } = await supabase
       .from("communities")
       .update({ cashfree_beneficiary_id: beneficiaryId })
       .eq("id", community_id)
+
+    if (updateErr) {
+      console.error("Failed to update community cashfree_beneficiary_id:", updateErr)
+      return new Response(JSON.stringify({ error: "Failed to save beneficiary. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    const { error: deactivateErr } = await supabase
+      .from("community_beneficiaries")
+      .update({ is_active: false })
+      .eq("community_id", community_id)
+
+    if (deactivateErr) {
+      await supabase.from("communities").update({ cashfree_beneficiary_id: null }).eq("id", community_id)
+      console.error("Failed to deactivate old beneficiaries:", deactivateErr)
+      return new Response(JSON.stringify({ error: "Failed to save beneficiary. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    const { error: benInsertErr } = await supabase
+      .from("community_beneficiaries")
+      .insert({
+        community_id,
+        cashfree_beneficiary_id: beneficiaryId,
+        account_holder: bank_account_holder,
+        bank_account_number: "xxxxxx" + bank_account_number.slice(-4),
+        bank_ifsc: ifscUpper,
+        label: label || "Default Account",
+        is_active: true,
+      })
+    if (benInsertErr) {
+      await supabase.from("communities").update({ cashfree_beneficiary_id: null }).eq("id", community_id)
+      console.error("Failed to insert community_beneficiary:", benInsertErr)
+      return new Response(JSON.stringify({ error: "Failed to save beneficiary. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
 
     await supabase.from("payment_audit_log").insert({
       action: "beneficiary_created",

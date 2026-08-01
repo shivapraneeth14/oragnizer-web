@@ -2,50 +2,61 @@ import { createHmac } from "node:crypto"
 
 const CASHFREE_CLIENT_ID = Deno.env.get("CASHFREE_CLIENT_ID")!
 const CASHFREE_CLIENT_SECRET = Deno.env.get("CASHFREE_CLIENT_SECRET")!
+const CASHFREE_PUBLIC_KEY = Deno.env.get("CASHFREE_PUBLIC_KEY")
 const IS_PRODUCTION = Deno.env.get("CASHFREE_ENV") === "production"
 const BASE_URL = IS_PRODUCTION
   ? "https://api.cashfree.com/payout"
-  : "https://payout-gamma.cashfree.com/payout/v1"
+  : "https://sandbox.cashfree.com/payout"
 
-let _token: string | null = null
-let _tokenExpiry = 0
+let _signatureCache: { value: string; expires: number } | null = null
 
-async function getToken(): Promise<string> {
-  if (_token && Date.now() < _tokenExpiry) return _token
+async function generateSignature(): Promise<string> {
+  if (_signatureCache && Date.now() < _signatureCache.expires) return _signatureCache.value
 
-  const res = await fetch(`${BASE_URL}/authorize`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-client-id": CASHFREE_CLIENT_ID,
-      "x-client-secret": CASHFREE_CLIENT_SECRET,
-    },
-  })
+  const pem = CASHFREE_PUBLIC_KEY!
+  const pemBody = pem
+    .replace(/-----BEGIN PUBLIC KEY-----/, "")
+    .replace(/-----END PUBLIC KEY-----/, "")
+    .replace(/\s/g, "")
+  const raw = Uint8Array.from(atob(pemBody), (c) => c.charCodeAt(0))
 
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`Cashfree auth failed: ${res.status} ${err}`)
-  }
+  const publicKey = await crypto.subtle.importKey(
+    "spki", raw,
+    { name: "RSA-OAEP", hash: "SHA-1" },
+    false, ["encrypt"],
+  )
 
-  const data = await res.json()
-  _token = data.sub_token
-  _tokenExpiry = Date.now() + 30 * 60 * 1000
-  return _token!
+  const ts = Math.floor(Date.now() / 1000)
+  const payload = `${CASHFREE_CLIENT_ID}.${ts}`
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "RSA-OAEP" }, publicKey,
+    new TextEncoder().encode(payload),
+  )
+
+  const value = btoa(String.fromCharCode(...new Uint8Array(encrypted)))
+  _signatureCache = { value, expires: ts + 50 }
+  return value
 }
 
 export async function cashfreePost(path: string, body: Record<string, unknown>) {
-  const token = await getToken()
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-client-id": CASHFREE_CLIENT_ID,
+    "x-client-secret": CASHFREE_CLIENT_SECRET,
+    "x-api-version": "2024-01-01",
+  }
+  if (CASHFREE_PUBLIC_KEY) {
+    headers["x-cf-signature"] = await generateSignature()
+  }
+
   const res = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
     body: JSON.stringify(body),
   })
   const data = await res.json()
-  if (!res.ok) {
-    throw new Error(data.message || data.error || `Cashfree API error (${res.status})`)
+  if (!res.ok || data?.status === "ERROR") {
+    throw new Error(data.message || data.subCode || data.code || `Cashfree API error (${res.status})`)
   }
   return data
 }

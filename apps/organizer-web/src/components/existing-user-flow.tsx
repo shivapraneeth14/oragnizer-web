@@ -156,6 +156,12 @@ export default function ExistingUserFlow({ onBack }: Props) {
             const d = await res.json()
             return d.available === true
           }}
+          checkEmail={async (email) => {
+            const { supabaseFetchNoAuth } = await import("../supabase-fetch")
+            const res = await supabaseFetchNoAuth("/functions/v1/check-community-email", { email })
+            const d = await res.json()
+            return d.available === true
+          }}
           step={communityStep}
         />
       </div>

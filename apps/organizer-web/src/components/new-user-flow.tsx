@@ -1,16 +1,18 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import { supabase } from "../supabase"
-import CommunityDetailsForm, { initialCommunityData, type CommunityData } from "./community-details-form"
+import CommunityDetailsForm, { initialCommunityData, missingCommunityFields, type CommunityData } from "./community-details-form"
 
 interface Props {
   onBack: () => void
+  prefill?: { email: string; first_name: string; last_name: string } | null
+  initialStep?: "register" | "community"
 }
 
-export default function NewUserFlow({ onBack }: Props) {
-  const [step, setStep] = useState<"register" | "otp" | "community">("register")
-  const [firstName, setFirstName] = useState("")
-  const [lastName, setLastName] = useState("")
-  const [email, setEmail] = useState("")
+export default function NewUserFlow({ onBack, prefill, initialStep = "register" }: Props) {
+  const [step, setStep] = useState<"register" | "community">(initialStep)
+  const [firstName, setFirstName] = useState(prefill?.first_name ?? "")
+  const [lastName, setLastName] = useState(prefill?.last_name ?? "")
+  const [email, setEmail] = useState(prefill?.email ?? "")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [username, setUsername] = useState("")
@@ -18,11 +20,6 @@ export default function NewUserFlow({ onBack }: Props) {
   const [checkingUsername, setCheckingUsername] = useState(false)
   const [registerLoading, setRegisterLoading] = useState(false)
   const [registerError, setRegisterError] = useState("")
-
-  const [otp, setOtp] = useState(["", "", "", "", "", ""])
-  const [otpLoading, setOtpLoading] = useState(false)
-  const [otpError, setOtpError] = useState("")
-  const otpRefs = useRef<(HTMLInputElement | null)[]>([])
 
   const [communityData, setCommunityData] = useState<CommunityData>(initialCommunityData)
   const [communityStep, setCommunityStep] = useState<1 | 2>(1)
@@ -58,6 +55,17 @@ export default function NewUserFlow({ onBack }: Props) {
     }
   }, [])
 
+  const checkCommunityEmail = useCallback(async (email: string): Promise<boolean> => {
+    try {
+      const { supabaseFetchNoAuth } = await import("../supabase-fetch")
+      const res = await supabaseFetchNoAuth("/functions/v1/check-community-email", { email })
+      const d = await res.json()
+      return d.available === true
+    } catch {
+      return true
+    }
+  }, [])
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
     setRegisterError("")
@@ -66,6 +74,31 @@ export default function NewUserFlow({ onBack }: Props) {
 
     setRegisterLoading(true)
     try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        // Already authenticated via OAuth (e.g. Google) — complete the profile instead of creating a new account
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .update({
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            username: username.trim(),
+          })
+          .eq("id", session.user.id)
+        if (profileError) {
+          setRegisterError("Could not save your details. Try again.")
+          return
+        }
+        const { error: passwordError } = await supabase.auth.updateUser({ password })
+        if (passwordError) {
+          setRegisterError("Could not set your password. Try again.")
+          return
+        }
+        setAccessToken(session.access_token)
+        setStep("community")
+        return
+      }
+
       const { supabaseFetchNoAuth } = await import("../supabase-fetch")
       const res = await supabaseFetchNoAuth("/functions/v1/register", {
         email: email.trim(),
@@ -79,7 +112,17 @@ export default function NewUserFlow({ onBack }: Props) {
         setRegisterError(result.error || "Something went wrong. Try again.")
         return
       }
-      setStep("otp")
+
+      const { data: authSession, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+      if (signInError) {
+        setRegisterError("Account created. Sign in to continue.")
+        return
+      }
+      setAccessToken(authSession.session.access_token)
+      setStep("community")
     } catch {
       setRegisterError("Connection error. Check your internet and try again.")
     } finally {
@@ -87,56 +130,22 @@ export default function NewUserFlow({ onBack }: Props) {
     }
   }
 
-  const handleOtpChange = (index: number, value: string) => {
-    if (!/^\d?$/.test(value)) return
-    const newOtp = [...otp]
-    newOtp[index] = value
-    setOtp(newOtp)
-
-    if (value && index < 5) {
-      otpRefs.current[index + 1]?.focus()
-    }
-  }
-
-  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === "Backspace" && !otp[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus()
-    }
-  }
-
-  const handleVerify = async () => {
-    const code = otp.join("")
-    if (code.length < 6) return
-    setOtpLoading(true)
-    setOtpError("")
-
-    const { data, error } = await supabase.auth.verifyOtp({
-      email: email.trim(),
-      token: code,
-      type: "email",
-    })
-
-    setOtpLoading(false)
-    if (error) {
-      setOtpError(error.message.includes("otp")
-        ? "Invalid verification code. Please check and try again."
-        : error.message)
-      return
-    }
-
-    if (data.session) {
-      setAccessToken(data.session.access_token)
-      setStep("community")
-    }
-  }
-
   const handleCreate = async () => {
-    if (!communityData.agree18 || !communityData.agreeContent || !accessToken) return
+    if (!communityData.agree18 || !communityData.agreeContent) return
     setSubmitting(true)
     setSubmitError("")
     try {
+      let token = accessToken
+      if (!token) {
+        const { data: { session } } = await supabase.auth.getSession()
+        token = session?.access_token ?? null
+      }
+      if (!token) {
+        setSubmitError("Please sign in to continue.")
+        return
+      }
       const { supabaseFetch } = await import("../supabase-fetch")
-      const res = await supabaseFetch("/functions/v1/create-community", accessToken, communityData)
+      const res = await supabaseFetch("/functions/v1/create-community", token, communityData)
       const result = await res.json()
       if (!res.ok) {
         setSubmitError(result.error || "Something went wrong. Try again.")
@@ -150,18 +159,9 @@ export default function NewUserFlow({ onBack }: Props) {
     }
   }
 
-  const resendOtp = async () => {
-    setOtpLoading(true)
-    await supabase.auth.signInWithOtp({ email: email.trim() })
-    setOtpLoading(false)
-    setOtp(["", "", "", "", "", ""])
-  }
-
   return (
     <div>
-      {step !== "otp" && (
-        <button type="button" onClick={onBack} className="mb-4 text-sm text-[#C2185B] hover:underline">&larr; Back</button>
-      )}
+      <button type="button" onClick={onBack} className="mb-4 text-sm text-[#C2185B] hover:underline">&larr; Back</button>
 
       {step === "register" && (
         <>
@@ -277,60 +277,8 @@ export default function NewUserFlow({ onBack }: Props) {
         </>
       )}
 
-      {step === "otp" && (
-        <div className="py-4">
-          <h2 className="text-xl font-semibold text-neutral-900">Verify Your Email</h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            We sent a 6-digit code to <strong>{email}</strong>. Enter it below.
-          </p>
-
-          {otpError && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">{otpError}</div>
-          )}
-
-          <div className="mt-6 flex justify-center gap-2">
-            {otp.map((digit, i) => (
-              <input
-                key={i}
-                ref={(el) => { otpRefs.current[i] = el }}
-                type="text"
-                inputMode="numeric"
-                maxLength={1}
-                value={digit}
-                onChange={(e) => handleOtpChange(i, e.target.value)}
-                onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                className="h-12 w-10 rounded-lg border border-neutral-300 text-center text-lg font-semibold outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
-              />
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={handleVerify}
-            disabled={otpLoading || otp.join("").length < 6}
-            className="mt-6 w-full rounded-lg bg-[#C2185B] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#A0154A] disabled:opacity-50"
-          >
-            {otpLoading ? "Verifying..." : "Verify Email"}
-          </button>
-
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              onClick={resendOtp}
-              disabled={otpLoading}
-              className="text-sm text-[#C2185B] hover:underline disabled:opacity-50"
-            >
-              Resend code
-            </button>
-          </div>
-        </div>
-      )}
-
       {step === "community" && (
         <>
-          <button type="button" onClick={() => setStep("otp")} className="mb-4 text-sm text-[#C2185B] hover:underline">
-            &larr; Back
-          </button>
           <h2 className="text-xl font-semibold text-neutral-900">Create Your Community</h2>
           <p className="mt-1 text-sm text-neutral-500">Fill in the details for your new community.</p>
 
@@ -339,6 +287,7 @@ export default function NewUserFlow({ onBack }: Props) {
               data={communityData}
               onChange={setCommunityData}
               checkName={checkCommunityName}
+              checkEmail={checkCommunityEmail}
               step={communityStep}
             />
           </div>
@@ -363,7 +312,7 @@ export default function NewUserFlow({ onBack }: Props) {
               <button
                 type="button"
                 onClick={() => setCommunityStep(2)}
-                disabled={!communityData.community_name.trim()}
+                disabled={missingCommunityFields(communityData).step1.length > 0}
                 className="rounded-lg bg-[#C2185B] px-6 py-2 text-sm font-medium text-white transition hover:bg-[#A0154A] disabled:opacity-50"
               >
                 Next
@@ -372,12 +321,23 @@ export default function NewUserFlow({ onBack }: Props) {
               <button
                 type="button"
                 onClick={handleCreate}
-                disabled={submitting || !communityData.agree18 || !communityData.agreeContent}
+                disabled={submitting || missingCommunityFields(communityData).step2.length > 0}
                 className="rounded-lg bg-[#C2185B] px-6 py-2 text-sm font-medium text-white transition hover:bg-[#A0154A] disabled:opacity-50"
               >
                 {submitting ? "Creating..." : "Create Community"}
               </button>
             )}
+            {(() => {
+              const missing = communityStep === 1
+                ? missingCommunityFields(communityData).step1
+                : missingCommunityFields(communityData).step2
+              if (missing.length === 0) return null
+              return (
+                <div className="mt-3 text-right">
+                  <p className="text-xs text-neutral-400">Complete: {missing.join(", ")}</p>
+                </div>
+              )
+            })()}
           </div>
         </>
       )}

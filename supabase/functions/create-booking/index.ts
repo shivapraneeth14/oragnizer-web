@@ -2,6 +2,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const MIN_WITHDRAWAL_PAISE = 10000
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -28,13 +29,17 @@ Deno.serve(async (req) => {
 
     const { data: event, error: eventErr } = await supabase
       .from("events")
-      .select("id, price, status, deleted_at, capacity, booked_count, title, community_id")
+      .select("id, price, status, deleted_at, capacity, booked_count, title, community_id, start_date")
       .eq("id", event_id)
       .single()
 
     if (eventErr || !event) return new Response(JSON.stringify({ error: "Event not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (event.deleted_at) return new Response(JSON.stringify({ error: "Event has been deleted" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (event.status === "cancelled") return new Response(JSON.stringify({ error: "Event has been cancelled" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (event.status === "completed") return new Response(JSON.stringify({ error: "Event has ended" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (event.status !== "published") return new Response(JSON.stringify({ error: "Event is not available" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (event.start_date && new Date(event.start_date) < new Date()) return new Response(JSON.stringify({ error: "Event has already started" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (event.capacity !== null && event.booked_count >= event.capacity) return new Response(JSON.stringify({ error: "Event is full" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
     const { data: existing } = await supabase
       .from("registrations")

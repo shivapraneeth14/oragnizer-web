@@ -4,6 +4,7 @@ import { cashfreePost } from "../_shared/cashfree.ts"
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const MIN_WITHDRAWAL_PAISE = 100
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -32,16 +33,27 @@ Deno.serve(async (req) => {
     if (!community_id || !amount || amount <= 0) {
       return new Response(JSON.stringify({ error: "community_id and amount (> 0) are required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
+    if (amount < MIN_WITHDRAWAL_PAISE) {
+      return new Response(JSON.stringify({ error: `Minimum withdrawal amount is ₹${(MIN_WITHDRAWAL_PAISE / 100).toFixed(0)} (${MIN_WITHDRAWAL_PAISE} paise)` }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
 
     const { data: community } = await supabase
       .from("communities")
-      .select("owner_id, cashfree_beneficiary_id")
+      .select("owner_id")
       .eq("id", community_id)
       .single()
 
     if (!community) return new Response(JSON.stringify({ error: "Community not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (community.owner_id !== user.id) return new Response(JSON.stringify({ error: "Only the community owner can withdraw" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
-    if (!community.cashfree_beneficiary_id) return new Response(JSON.stringify({ error: "No beneficiary set up. Add bank details first." }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+
+    const { data: activeBeneficiary } = await supabase
+      .from("community_beneficiaries")
+      .select("id, cashfree_beneficiary_id")
+      .eq("community_id", community_id)
+      .eq("is_active", true)
+      .single()
+
+    if (!activeBeneficiary) return new Response(JSON.stringify({ error: "No bank account set up. Add bank details first." }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
     const { data: withdrawResult, error: rpcError } = await supabase
       .rpc("initiate_wallet_withdrawal", {
@@ -59,13 +71,26 @@ Deno.serve(async (req) => {
     let cashfreeResponse: any
 
     try {
-      cashfreeResponse = await cashfreePost("/requestTransfer", {
-        beneId: community.cashfree_beneficiary_id,
-        amount: (amount / 100).toFixed(2),
-        transferId,
-        transferMode: "bank",
+      cashfreeResponse = await cashfreePost("/transfers", {
+        transfer_id: transferId,
+        transfer_amount: amount / 100,
+        transfer_mode: "banktransfer",
+        transfer_currency: "INR",
+        beneficiary_details: {
+          beneficiary_id: activeBeneficiary.cashfree_beneficiary_id,
+        },
       })
     } catch (cfErr) {
+      const cfMessage = cfErr instanceof Error ? cfErr.message : String(cfErr)
+      await supabase.from("payment_audit_log").insert({
+        action: "withdrawal_failed",
+        details: {
+          payout_id: payoutId,
+          community_id,
+          amount,
+          error: cfMessage,
+        },
+      })
       const { error: refundErr } = await supabase.rpc("refund_wallet", { p_payout_id: payoutId })
       if (refundErr) console.error("refund_wallet failed after Cashfree error:", refundErr)
       throw cfErr
@@ -75,7 +100,8 @@ Deno.serve(async (req) => {
       .from("payout_items")
       .update({
         status: "processing",
-        cashfree_payout_id: cashfreeResponse?.data?.referenceId || cashfreeResponse?.referenceId || transferId,
+        beneficiary_id: activeBeneficiary.id,
+        cashfree_payout_id: cashfreeResponse?.cf_transfer_id || transferId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", payoutId)
@@ -94,7 +120,7 @@ Deno.serve(async (req) => {
       payout_id: payoutId,
       amount,
       status: "processing",
-      cashfree_reference: cashfreeResponse?.data?.referenceId || cashfreeResponse?.referenceId,
+      cashfree_reference: cashfreeResponse?.cf_transfer_id,
     }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
     console.error(err)
