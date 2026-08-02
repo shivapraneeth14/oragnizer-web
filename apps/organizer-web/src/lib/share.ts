@@ -8,5 +8,6 @@ export function shareBase(): string {
   if (isMobileDevice()) {
     return import.meta.env.VITE_APP_DEEPLINK_BASE || "cluvo://";
   }
-  return import.meta.env.VITE_APP_URL || "https://cluvo-nu.vercel.app";
+  const base = import.meta.env.VITE_APP_URL || "https://cluvo-nu.vercel.app";
+  return base.endsWith("/") ? base : `${base}/`;
 }
