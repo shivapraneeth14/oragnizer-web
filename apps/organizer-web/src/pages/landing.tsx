@@ -240,10 +240,10 @@ export default function LandingPage() {
 }
 
 function ExploreCommunityContent() {
-  const deeplink = import.meta.env.VITE_APP_DEEPLINK_BASE || "cluvo://"
+  const appUrl = import.meta.env.VITE_APP_URL || "https://cluvo-nu.vercel.app"
 
   const handleOpenApp = () => {
-    window.location.href = "https://cluvo-sand.vercel.app"
+    window.location.href = appUrl
   }
 
   return (

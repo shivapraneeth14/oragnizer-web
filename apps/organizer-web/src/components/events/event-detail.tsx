@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { supabase } from "../../supabase"
 import { copyText } from "../../lib/clipboard"
+import { shareBase, isMobileDevice } from "../../lib/share"
 import type { Event, Profile, Payment } from "shared"
 
 interface RegistrationWithDetails {
@@ -386,10 +387,8 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
               <div className="relative">
                 <button
                   onClick={async () => {
-                    const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://';
-                    const url = `${base}events/${event.id}`;
-                    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-                    if (navigator.share && isMobile) {
+                    const url = `${shareBase()}events/${event.id}`;
+                    if (navigator.share && isMobileDevice()) {
                       try {
                         await navigator.share({ title: `Check out ${event.title} on Cluvo`, url });
                       } catch {
@@ -424,8 +423,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                       <div className="p-1.5">
                         <button
                           onClick={() => {
-                            const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://';
-                            const url = encodeURIComponent(`${base}events/${event.id}`);
+                            const url = encodeURIComponent(`${shareBase()}events/${event.id}`);
                             const text = encodeURIComponent(`Check out ${event.title} on Cluvo!\n${url}`);
                             window.open(`https://wa.me/?text=${text}`, '_blank');
                             setShowShareOptions(false);
@@ -437,8 +435,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                         </button>
                         <button
                           onClick={() => {
-                            const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://';
-                            const url = encodeURIComponent(`${base}events/${event.id}`);
+                            const url = encodeURIComponent(`${shareBase()}events/${event.id}`);
                             window.location.href = `mailto:?subject=${encodeURIComponent(`Check out ${event.title} on Cluvo`)}&body=${url}`;
                             setShowShareOptions(false);
                           }}
@@ -451,8 +448,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                         </button>
                         <button
                           onClick={async () => {
-                            const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://';
-                            await copyText(`${base}events/${event.id}`);
+                            await copyText(`${shareBase()}events/${event.id}`);
                             setShareCopied(true);
                             setShowShareOptions(false);
                             setTimeout(() => setShareCopied(false), 2000);

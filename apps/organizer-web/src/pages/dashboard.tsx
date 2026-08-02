@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { useAuth } from "../auth-context"
 import { supabase } from "../supabase"
+import { shareBase, isMobileDevice } from "../lib/share"
 import ProfileSection from "../components/profile/profile-section"
 import EventList from "../components/events/event-list"
 import EventForm from "../components/events/event-form"
@@ -466,10 +467,8 @@ export default function DashboardPage() {
                   <button
                     onClick={async () => {
                       if (!communityId) return;
-                      const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://';
-                      const url = `${base}communities/${communityId}`;
-                      const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-                      if (navigator.share && isMobile) {
+                      const url = `${shareBase()}communities/${communityId}`;
+                      if (navigator.share && isMobileDevice()) {
                         try {
                           await navigator.share({ title: 'Join my community on Cluvo', url });
                         } catch {
@@ -508,8 +507,7 @@ export default function DashboardPage() {
                         <button
                           onClick={() => {
                             if (!communityId) return;
-                            const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://';
-                            const url = encodeURIComponent(`${base}communities/${communityId}`);
+                            const url = encodeURIComponent(`${shareBase()}communities/${communityId}`);
                             window.open(`https://wa.me/?text=${url}`, '_blank');
                             setShowShareOptions(false);
                           }}
@@ -521,8 +519,7 @@ export default function DashboardPage() {
                         <button
                           onClick={() => {
                             if (!communityId) return;
-                            const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://';
-                            const url = encodeURIComponent(`${base}communities/${communityId}`);
+                            const url = encodeURIComponent(`${shareBase()}communities/${communityId}`);
                             window.location.href = `mailto:?subject=${encodeURIComponent('Join my community on Cluvo')}&body=${url}`;
                             setShowShareOptions(false);
                           }}
@@ -536,8 +533,7 @@ export default function DashboardPage() {
                         <button
                           onClick={async () => {
                             if (!communityId) return;
-                            const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://';
-                            await navigator.clipboard.writeText(`${base}communities/${communityId}`);
+                            await navigator.clipboard.writeText(`${shareBase()}communities/${communityId}`);
                             setInviteCopied(true);
                             setShowShareOptions(false);
                             setTimeout(() => setInviteCopied(false), 2000);

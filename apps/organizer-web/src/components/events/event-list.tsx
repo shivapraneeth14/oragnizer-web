@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { copyText } from "../../lib/clipboard"
+import { shareBase } from "../../lib/share"
 import type { Event } from "shared"
 
 interface Props {
@@ -200,8 +201,7 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
               <div className="flex shrink-0 gap-1">
                 <button onClick={async (e) => {
                   e.stopPropagation()
-                  const base = import.meta.env.VITE_APP_DEEPLINK_BASE || 'cluvo://'
-                  const url = `${base}events/${event.id}`
+                  const url = `${shareBase()}events/${event.id}`
                   await copyText(url)
                   setCopiedId(event.id)
                   setTimeout(() => setCopiedId(null), 2000)
