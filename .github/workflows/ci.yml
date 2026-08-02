@@ -50,7 +50,10 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-      - run: supabase db lint --file supabase/migrations/*.sql
+      - run: supabase link --project-ref ofvfasdgdwkehdcjugnf
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      - run: supabase db lint --linked
 
   detect-secrets:
     name: Secret detection
@@ -58,6 +61,6 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: trufflesecurity/trufflehog@v3
+      - uses: trufflesecurity/trufflehog@v3.96.0
         with:
           extra_args: --only-verified
