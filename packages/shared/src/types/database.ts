@@ -20,6 +20,7 @@ export interface Community {
   owner_id: string
   visibility: "public" | "private"
   verification_status: "unverified" | "pending" | "verified"
+  is_hidden: boolean
   member_count: number
   event_count: number
   category: string | null
