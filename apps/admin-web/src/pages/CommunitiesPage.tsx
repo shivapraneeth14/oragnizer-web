@@ -55,6 +55,7 @@ export default function CommunitiesPage() {
                 <th className="px-4 py-3 font-medium text-neutral-600">Members</th>
                 <th className="px-4 py-3 font-medium text-neutral-600">Events</th>
                 <th className="px-4 py-3 font-medium text-neutral-600">Created</th>
+                <th className="px-4 py-3 font-medium text-neutral-600">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -69,6 +70,13 @@ export default function CommunitiesPage() {
                   <td className="px-4 py-3 text-neutral-600">{c.member_count}</td>
                   <td className="px-4 py-3 text-neutral-600">{c.event_count}</td>
                   <td className="px-4 py-3 text-neutral-600">{new Date(c.created_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-3">
+                    {c.is_hidden ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Hidden</span>
+                    ) : (
+                      <span className="text-neutral-400">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -13,6 +13,7 @@ export default function CommunityDetailPage() {
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [togglingHidden, setTogglingHidden] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -30,6 +31,19 @@ export default function CommunityDetailPage() {
       setLoading(false)
     })
   }, [id])
+
+  const handleToggleHidden = async () => {
+    if (!id) return
+    setTogglingHidden(true)
+    const { error } = await supabase
+      .from("communities")
+      .update({ is_hidden: !community?.is_hidden })
+      .eq("id", id)
+    setTogglingHidden(false)
+    if (!error && community) {
+      setCommunity({ ...community, is_hidden: !community.is_hidden })
+    }
+  }
 
   const handleDelete = async () => {
     if (!id) return
@@ -74,6 +88,18 @@ export default function CommunityDetailPage() {
             <p className="mt-1 text-sm text-neutral-500">{community.description || "No description"}</p>
           </div>
           <div className="flex items-center gap-3">
+            {community.is_hidden && (
+              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
+                Hidden from app
+              </span>
+            )}
+            <button
+              onClick={handleToggleHidden}
+              disabled={togglingHidden}
+              className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+            >
+              {togglingHidden ? "Saving..." : community.is_hidden ? "Make visible" : "Hide from app"}
+            </button>
             <button
               onClick={() => setConfirmDelete(true)}
               className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
