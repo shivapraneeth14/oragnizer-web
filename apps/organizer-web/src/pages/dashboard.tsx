@@ -519,8 +519,7 @@ export default function DashboardPage() {
                         <button
                           onClick={() => {
                             if (!communityId) return;
-                            const url = encodeURIComponent(`${shareBase()}communities/${communityId}`);
-                            window.location.href = `mailto:?subject=${encodeURIComponent('Join my community on Cluvo')}&body=${url}`;
+                            window.location.href = `mailto:?subject=${encodeURIComponent('Join my community on Cluvo')}&body=${encodeURIComponent(`${shareBase()}communities/${communityId}`)}`;
                             setShowShareOptions(false);
                           }}
                           className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-neutral-700 hover:bg-neutral-100"

@@ -423,8 +423,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                       <div className="p-1.5">
                         <button
                           onClick={() => {
-                            const url = encodeURIComponent(`${shareBase()}events/${event.id}`);
-                            const text = encodeURIComponent(`Check out ${event.title} on Cluvo!\n${url}`);
+                            const text = encodeURIComponent(`Check out ${event.title} on Cluvo!\n${shareBase()}events/${event.id}`);
                             window.open(`https://wa.me/?text=${text}`, '_blank');
                             setShowShareOptions(false);
                           }}
@@ -435,8 +434,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                         </button>
                         <button
                           onClick={() => {
-                            const url = encodeURIComponent(`${shareBase()}events/${event.id}`);
-                            window.location.href = `mailto:?subject=${encodeURIComponent(`Check out ${event.title} on Cluvo`)}&body=${url}`;
+                            window.location.href = `mailto:?subject=${encodeURIComponent(`Check out ${event.title} on Cluvo`)}&body=${encodeURIComponent(`${shareBase()}events/${event.id}`)}`;
                             setShowShareOptions(false);
                           }}
                           className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-neutral-700 hover:bg-neutral-100"
