@@ -24,10 +24,12 @@ REVOKE ALL ON FUNCTION public.is_community_hidden(uuid) FROM public;
 GRANT EXECUTE ON FUNCTION public.is_community_hidden(uuid) TO anon, authenticated;
 
 -- 1. Communities: public read excludes hidden communities
+-- NOTE: no `status` check — the column was dropped in 202607230011;
+-- policy matches 202607240001 (visibility = 'public' AND deleted_at IS NULL).
 DROP POLICY IF EXISTS "communities_public_read" ON communities;
 CREATE POLICY "communities_public_read" ON communities
   FOR SELECT USING (
-    status = 'active' AND visibility = 'public' AND deleted_at IS NULL
+    visibility = 'public' AND deleted_at IS NULL
     AND is_hidden = false
   );
 
