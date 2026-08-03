@@ -5,6 +5,7 @@ import AccountChoice from "../components/account-choice"
 import ExistingUserFlow from "../components/existing-user-flow"
 import NewUserFlow from "../components/new-user-flow"
 import DashboardLogin from "../components/dashboard-login"
+import { env } from "../config"
 
 type Flow = "choice" | "existing" | "new" | "dashboard-login" | "create"
 
@@ -240,7 +241,7 @@ export default function LandingPage() {
 }
 
 function ExploreCommunityContent() {
-  const appUrl = import.meta.env.VITE_APP_URL || "https://cluvo-nu.vercel.app"
+  const appUrl = env.appUrl
 
   const handleOpenApp = () => {
     window.location.href = appUrl

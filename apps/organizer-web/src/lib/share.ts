@@ -1,3 +1,5 @@
+import { env } from "../config"
+
 const MOBILE_RE = /Mobi|Android|iPhone|iPad/i;
 
 export function isMobileDevice(): boolean {
@@ -6,8 +8,8 @@ export function isMobileDevice(): boolean {
 
 export function shareBase(): string {
   if (isMobileDevice()) {
-    return import.meta.env.VITE_APP_DEEPLINK_BASE || "cluvo://";
+    return env.appDeepLinkBase.endsWith("/") ? env.appDeepLinkBase : `${env.appDeepLinkBase}/`;
   }
-  const base = import.meta.env.VITE_APP_URL || "https://cluvo-nu.vercel.app";
+  const base = env.appUrl;
   return base.endsWith("/") ? base : `${base}/`;
 }

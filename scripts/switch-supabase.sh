@@ -10,9 +10,11 @@ fi
 if [[ "$ENV_NAME" == "test" ]]; then
   URL="https://ofvfasdgdwkehdcjugnf.supabase.co"
   ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mdmZhc2RnZHdrZWhkY2p1Z25mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1OTkxNDcsImV4cCI6MjEwMTE3NTE0N30.oaxiWOFClGzO1WqBihmLoZV69soVpfMv6gtUMnMakxY"
+  APP_URL="https://cluvo-git-dev-shiva-praneeths-projects.vercel.app"
 else
   URL="https://vdxspyumkvwawmqwfkzr.supabase.co"
   ANON="sb_publishable_phag39UwA63y44O1703IkA_Ky6ebjwV"
+  APP_URL="https://cluvo-nu.vercel.app"
 fi
 
 cat > apps/organizer-web/.env <<EOF
@@ -23,7 +25,7 @@ VITE_SUPABASE_ANON_KEY=$ANON
 VITE_CLOUDINARY_CLOUD_NAME=djz0pypu1
 VITE_CLOUDINARY_UPLOAD_PRESET=cluvo_preset
 VITE_APP_DEEPLINK_BASE=cluvo://
-VITE_APP_URL=https://cluvo-nu.vercel.app
+VITE_APP_URL=$APP_URL
 EOF
 
 cat > apps/admin-web/.env <<EOF

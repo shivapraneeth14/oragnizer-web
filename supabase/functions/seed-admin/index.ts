@@ -1,8 +1,9 @@
+import { optionalEnv, requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const supabaseUrl = requiredEnv("SUPABASE_URL")
+const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -29,8 +30,8 @@ Deno.serve(async (req) => {
   if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
-    const adminEmail = Deno.env.get("ADMIN_EMAIL")
-    const adminPassword = Deno.env.get("ADMIN_PASSWORD")
+    const adminEmail = optionalEnv("ADMIN_EMAIL")
+    const adminPassword = optionalEnv("ADMIN_PASSWORD")
 
     if (!adminEmail || !adminPassword) {
       return new Response(JSON.stringify({ error: "Admin credentials not configured." }), {

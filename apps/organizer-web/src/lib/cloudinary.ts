@@ -1,5 +1,7 @@
-const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
-const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
+import { env } from "../config"
+
+const cloudName = env.cloudinaryCloudName
+const uploadPreset = env.cloudinaryUploadPreset
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"]

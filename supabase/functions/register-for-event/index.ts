@@ -1,7 +1,8 @@
+import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const supabaseUrl = requiredEnv("SUPABASE_URL")
+const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {

@@ -1,8 +1,9 @@
+import { optionalEnv, requiredEnv } from "./env.ts"
 import { createHmac } from "node:crypto"
 
-const CASHFREE_CLIENT_ID = Deno.env.get("CASHFREE_CLIENT_ID")!
-const CASHFREE_CLIENT_SECRET = Deno.env.get("CASHFREE_CLIENT_SECRET")!
-const CASHFREE_PUBLIC_KEY = Deno.env.get("CASHFREE_PUBLIC_KEY")
+const CASHFREE_CLIENT_ID = requiredEnv("CASHFREE_CLIENT_ID")
+const CASHFREE_CLIENT_SECRET = requiredEnv("CASHFREE_CLIENT_SECRET")
+const CASHFREE_PUBLIC_KEY = optionalEnv("CASHFREE_PUBLIC_KEY")
 const IS_PRODUCTION = Deno.env.get("CASHFREE_ENV") === "production"
 const BASE_URL = IS_PRODUCTION
   ? "https://api.cashfree.com/payout"

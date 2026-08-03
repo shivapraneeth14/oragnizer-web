@@ -1,7 +1,7 @@
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+import { env } from "./config"
 
 export async function supabaseFetch(path: string, token: string | undefined, body: unknown) {
-  const res = await fetch(`${SUPABASE_URL}${path}`, {
+  const res = await fetch(`${env.supabaseUrl}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

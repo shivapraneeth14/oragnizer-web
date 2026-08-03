@@ -1,10 +1,11 @@
+import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-const RAZORPAY_KEY_ID = Deno.env.get("RAZORPAY_KEY_ID")!
-const RAZORPAY_KEY_SECRET = Deno.env.get("RAZORPAY_KEY_SECRET")!
+const supabaseUrl = requiredEnv("SUPABASE_URL")
+const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
+const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
+const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {

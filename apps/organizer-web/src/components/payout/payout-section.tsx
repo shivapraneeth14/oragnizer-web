@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { supabase } from "../../supabase"
 import { supabaseFetch } from "../../supabase-fetch"
+import { env } from "../../config"
 
 interface Props {
   communityId: string | undefined
@@ -63,7 +64,7 @@ export default function PayoutSection({ communityId }: Props) {
     try {
       const token = (await supabase.auth.getSession()).data.session?.access_token
       if (!token) return
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-wallet-statement?community_id=${communityId}`, {
+      const res = await fetch(`${env.supabaseUrl}/functions/v1/get-wallet-statement?community_id=${communityId}`, {
         method: "GET",
         headers: { Authorization: `Bearer ${token}` },
       })

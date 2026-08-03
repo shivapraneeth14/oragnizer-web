@@ -11,6 +11,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  env-hygiene:
+    name: Environment hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-env-hygiene.sh
+
   typecheck-web:
     name: TypeScript type check
     runs-on: ubuntu-latest
@@ -31,6 +39,9 @@ jobs:
     name: Vite build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ github.ref_name == 'main' && secrets.SUPABASE_URL_PROD || secrets.SUPABASE_URL_TEST }}
+      SUPABASE_ANON_KEY: ${{ github.ref_name == 'main' && secrets.SUPABASE_ANON_KEY_PROD || secrets.SUPABASE_ANON_KEY_TEST }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,18 +50,30 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build --workspace=apps/organizer-web
+        env:
+          VITE_SUPABASE_URL: ${{ env.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ env.SUPABASE_ANON_KEY }}
+          VITE_CLOUDINARY_CLOUD_NAME: djz0pypu1
+          VITE_CLOUDINARY_UPLOAD_PRESET: cluvo_preset
+          VITE_APP_DEEPLINK_BASE: cluvo://
+          VITE_APP_URL: https://cluvo-nu.vercel.app
       - run: npm run build --workspace=apps/admin-web
+        env:
+          VITE_SUPABASE_URL: ${{ env.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ env.SUPABASE_ANON_KEY }}
 
   supabase-migrations:
     name: Supabase migration lint
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      SUPABASE_PROJECT_REF: ${{ github.ref_name == 'main' && 'vdxspyumkvwawmqwfkzr' || 'ofvfasdgdwkehdcjugnf' }}
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-      - run: supabase link --project-ref ofvfasdgdwkehdcjugnf
+      - run: supabase link --project-ref ${{ env.SUPABASE_PROJECT_REF }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       - run: supabase db lint --linked
