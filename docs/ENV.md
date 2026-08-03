@@ -47,6 +47,11 @@ Never introduce environment-specific defaults or hardcoded configuration into so
 
 **Local development (web):** `./scripts/switch-supabase.sh test|prod` writes `apps/organizer-web/.env` and `apps/admin-web/.env` with matching values (including an env-appropriate `VITE_APP_URL`). `.env` files are gitignored.
 
+**Local development (Flutter app, `apps/mobile` — separate repo):** two sanctioned launchers, both injected at build time via `--dart-define`:
+
+1. **VS Code Run button (recommended):** install the **Dart** extension once (`dart-code.dart-code`), then fully **restart VS Code** (extensions load only at startup). The committed `.vscode/launch.json` at the repo root ships the **Cluvo (TEST)** configuration whose `toolArgs` pass the four TEST defines — pick the device (bottom-right selector, e.g. Pixel_9) and press **F5**. This workspace-root config is committed via the `!.vscode/launch.json` exception in `.gitignore` (values live in tooling, not source — see permanent rule).
+2. **Terminal:** `apps/mobile/scripts/run.sh test <device-id>` (or `prod`). Never type bare `flutter run` — with no defines the app refuses to start by design (fail-fast screen).
+
 **CI (this repo, `.github/workflows/ci.yml`):**
 - `env-hygiene` job: `./scripts/check-env-hygiene.sh`.
 - `build-web` job: selects `SUPABASE_URL_PROD`/`SUPABASE_ANON_KEY_PROD` secrets on `main`, otherwise `*_TEST`; cloudinary/APP values are static because they are identical in both environments.
