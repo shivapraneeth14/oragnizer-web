@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Cluvo (TEST)",
+      "type": "dart",
+      "request": "launch",
+      "program": "apps/mobile/lib/main.dart",
+      "toolArgs": [
+        "--dart-define=SUPABASE_URL=https://ofvfasdgdwkehdcjugnf.supabase.co",
+        "--dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mdmZhc2RnZHdrZWhkY2p1Z25mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1OTkxNDcsImV4cCI6MjEwMTE3NTE0N30.oaxiWOFClGzO1WqBihmLoZV69soVpfMv6gtUMnMakxY",
+        "--dart-define=CLOUDINARY_CLOUD_NAME=djz0pypu1",
+        "--dart-define=CLOUDINARY_UPLOAD_PRESET=cluvo_preset"
+      ]
+    }
+  ]
+}
