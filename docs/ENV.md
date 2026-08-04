@@ -39,6 +39,25 @@ admin in the other — admin changes made in TEST never touch PROD and vice vers
   `admin@cluvo-test.app` exists — create additional admins via the auth admin API with a unique username,
   then set `profiles.is_admin = true`.
 
+## Auth redirect allow-list (Supabase Auth) — PERMANENT rule
+
+When a login redirect target (`redirectTo` from OAuth or a password-reset link) is **not** in the project's
+`uri_allow_list`, Supabase Auth falls back to `site_url` — which in PROD is `https://cluvo-nu.vercel.app`
+(the Flutter app). Symptom of a missing entry: admin login via Google bounces to the Flutter web app
+instead of the admin dashboard (same for `/reset-password` links).
+
+- Every surface added to an environment must have its URLs in that environment's auth `uri_allow_list`
+  (Supabase Dashboard → Auth → URL Configuration, or Management API `config/auth`).
+- **PROD** (`vdxspyumkvwawmqwfkzr`): must include `https://cluvo-admin-five.vercel.app/**` and
+  `https://cluvo-admin-*.vercel.app/**` (preview deployments), plus the existing mobile
+  (`cluvo://login`, `com.cluvo.mobile://login`, `cluvo://signup`), organizer-web
+  (`cluvo-org.vercel.app/**`), and Flutter (`cluvo-nu.vercel.app/**`) entries — do not remove them.
+- **TEST** (`ofvfasdgdwkehdcjugnf`): allow list is `localhost:5173` / `localhost:3000` only — Google
+  sign-in is intentionally not used in TEST (admin logins are email/password). If a hosted TEST surface
+  ever needs OAuth, add its URL to the allow list first.
+- `site_url` staying at `https://cluvo-nu.vercel.app` is intentional (Flutter is the main consumer app);
+  the admin portal is covered by its allow-list entries.
+
 ## Variable inventory
 
 ### apps/organizer-web — required (refuses to start without ALL of these)
