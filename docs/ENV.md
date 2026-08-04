@@ -19,6 +19,26 @@ Never introduce environment-specific defaults or hardcoded configuration into so
 | Cashfree | sandbox (secrets) | production (secrets) |
 | Vercel deploy | dev preview / `cluvo-git-dev-shiva-praneeths-projects.vercel.app` | `cluvo-nu.vercel.app` |
 
+## Admin access (admin-web) — PERMANENT per-environment rule
+
+Admin identity is **per-project**: `profiles.is_admin` lives in each project's own database, and the admin-web login
+checks it against whichever project the app is pointed at. An account that is admin in one environment is **not**
+admin in the other — admin changes made in TEST never touch PROD and vice versa.
+
+| Environment | Admin accounts (email / password) | Notes |
+|---|---|---|
+| TEST (`ofvfasdgdwkehdcjugnf`) | `shivapraneeth01@gmail.com` / `Kspr12345` | also admin in PROD? No — plain user there |
+| TEST (`ofvfasdgdwkehdcjugnf`) | `admin@cluvo-test.app` / `Kspr12345` | exists only in TEST |
+| PROD (`vdxspyumkvwawmqwfkzr`) | `shivakandala43@gmail.com` / (set via PROD seed-admin) | admin only in PROD |
+
+- Logging in locally or via a preview build (pointed at TEST) requires a TEST admin account.
+- Logging in on the production deployment requires a PROD admin account.
+- To add/change admins in one environment, use the `seed-admin` edge function against that project only
+  (`supabase secrets set ADMIN_EMAIL=... ADMIN_PASSWORD=... --project-ref <ref>` then invoke the function).
+  Note: `seed-admin` hardcodes `username: "admin"`, so it cannot create a second account while
+  `admin@cluvo-test.app` exists — create additional admins via the auth admin API with a unique username,
+  then set `profiles.is_admin = true`.
+
 ## Variable inventory
 
 ### apps/organizer-web — required (refuses to start without ALL of these)

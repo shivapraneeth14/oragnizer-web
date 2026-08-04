@@ -1,0 +1,7 @@
+node_modules
+apps/mobile
+dist
+build
+.vercel
+.env*
+*.tsbuildinfo
