@@ -17,6 +17,7 @@ export interface Community {
   description: string | null
   location: string | null
   banner_url: string | null
+  community_avatar_url: string | null
   owner_id: string
   visibility: "public" | "private"
   verification_status: "unverified" | "pending" | "verified"
