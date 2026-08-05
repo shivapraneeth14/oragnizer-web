@@ -36,10 +36,10 @@ export default function ProfileSection() {
       {/* Avatar + Name */}
       <div className="relative -mt-12 ml-8 flex items-start gap-4">
         <div className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-white bg-[#C2185B]/20 text-3xl font-bold text-[#C2185B] shadow-md">
-          {profile?.avatar_url ? (
-            <img src={profile.avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
+          {community?.community_avatar_url ? (
+            <img src={community.community_avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
           ) : (
-            user?.email?.charAt(0).toUpperCase() || "U"
+            community?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"
           )}
         </div>
         <div className="pb-1 mt-10">

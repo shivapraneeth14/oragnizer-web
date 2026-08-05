@@ -5,7 +5,7 @@ import { uploadToCloudinary } from "../../lib/cloudinary"
 
 export default function EditProfile() {
   const { user } = useAuth()
-  const { profile, community, saving, error, success, updateProfile, updateBanner, updateCommunity, clearMessages } = useProfile()
+  const { profile, community, saving, error, success, updateProfile, updateBanner, updateCommunityAvatar, updateCommunity, clearMessages } = useProfile()
 
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
@@ -115,7 +115,7 @@ export default function EditProfile() {
     setUploading(true)
     try {
       const url = await uploadToCloudinary(file)
-      await updateProfile({ avatar_url: url })
+      await updateCommunityAvatar(url)
     } catch {
       /* ignore */
     }
@@ -202,8 +202,8 @@ export default function EditProfile() {
             disabled={uploading}
             className="group relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-[#C2185B]/20 text-2xl font-bold text-[#C2185B] shadow-md transition hover:opacity-90 disabled:opacity-50"
           >
-            {profile?.avatar_url ? (
-              <img src={profile.avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
+            {community?.community_avatar_url ? (
+              <img src={community.community_avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
             ) : (
               user?.email?.charAt(0).toUpperCase() || "U"
             )}

@@ -66,6 +66,24 @@ export function useProfile() {
     setSaving(false)
   }, [community])
 
+  const updateCommunityAvatar = useCallback(async (community_avatar_url: string) => {
+    if (!community) return
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+    const { error } = await supabase
+      .from("communities")
+      .update({ community_avatar_url })
+      .eq("id", community.id)
+    if (error) {
+      setError(error.message)
+    } else {
+      setCommunity((prev) => prev ? { ...prev, community_avatar_url } : null)
+      setSuccess("Community avatar updated")
+    }
+    setSaving(false)
+  }, [community])
+
   const updateCommunity = useCallback(async (updates: Record<string, unknown>) => {
     if (!community) return
     setSaving(true)
@@ -94,5 +112,5 @@ export function useProfile() {
     setSuccess(null)
   }, [])
 
-  return { profile, community, loading, saving, error, success, updateProfile, updateBanner, updateCommunity, clearMessages }
+  return { profile, community, loading, saving, error, success, updateProfile, updateBanner, updateCommunityAvatar, updateCommunity, clearMessages }
 }
