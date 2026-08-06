@@ -9,6 +9,8 @@ export type EventFormData = {
   start_date: string
   end_date: string
   location: string
+  latitude: string
+  longitude: string
   capacity: string
   price: string
   status: "draft" | "published"
@@ -63,7 +65,7 @@ export const emptyDescriptionFields: DescriptionFields = {
 export const emptyForm: EventFormData = {
   title: "", description: "", image_url: "",
   start_date: "", end_date: "",
-  location: "", capacity: "", price: "",
+  location: "", latitude: "", longitude: "", capacity: "", price: "",
   status: "draft",
   discussion_enabled: false,
   discussion_restricted: false,
@@ -77,6 +79,8 @@ export function eventToForm(e: Event): EventFormData {
     start_date: toDatetimeLocal(e.start_date),
     end_date: e.end_date ? toDatetimeLocal(e.end_date) : "",
     location: e.location || "",
+    latitude: e.latitude?.toString() || "",
+    longitude: e.longitude?.toString() || "",
     capacity: e.capacity?.toString() || "",
     price: (e.price / 100).toString(),
     status: e.status === "cancelled" || e.status === "completed" ? "draft" : e.status,
@@ -143,6 +147,8 @@ export function useEvents(communityId: string | undefined) {
       start_date: new Date(data.start_date).toISOString(),
       end_date: data.end_date ? new Date(data.end_date).toISOString() : null,
       location: data.location.trim() || null,
+      latitude: data.latitude ? parseFloat(data.latitude) : null,
+      longitude: data.longitude ? parseFloat(data.longitude) : null,
       capacity: data.capacity ? parseInt(data.capacity) : null,
       price: Math.round(parseFloat(data.price || "0") * 100),
       status: data.status,
@@ -167,6 +173,8 @@ export function useEvents(communityId: string | undefined) {
       start_date: new Date(data.start_date).toISOString(),
       end_date: data.end_date ? new Date(data.end_date).toISOString() : null,
       location: data.location.trim() || null,
+      latitude: data.latitude ? parseFloat(data.latitude) : null,
+      longitude: data.longitude ? parseFloat(data.longitude) : null,
       capacity: data.capacity ? parseInt(data.capacity) : null,
       price: Math.round(parseFloat(data.price || "0") * 100),
       status: data.status,

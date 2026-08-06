@@ -1,4 +1,8 @@
 import { useState, useRef, useEffect } from "react"
+import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet"
+import L from "leaflet"
+import "leaflet/dist/leaflet.css"
+import type { LatLngLiteral } from "leaflet"
 import { uploadToCloudinary } from "../../lib/cloudinary"
 import type { EventFormData, DescriptionFields } from "../../hooks/use-events"
 import { emptyForm, composeDescription, parseDescription, emptyDescriptionFields } from "../../hooks/use-events"
@@ -8,6 +12,30 @@ interface Props {
   saving: boolean
   onSave: (data: EventFormData) => Promise<void>
   onClose: () => void
+}
+
+const DEFAULT_CENTER: LatLngLiteral = { lat: 17.385, lng: 78.4867 }
+
+const pinIcon = L.divIcon({
+  className: "",
+  html: `<svg width="32" height="32" viewBox="0 0 24 24" fill="#C2185B" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>`,
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
+})
+
+function MapClickHandler({ onPick }: { onPick: (p: LatLngLiteral) => void }) {
+  useMapEvents({
+    click(e) {
+      onPick({ lat: e.latlng.lat, lng: e.latlng.lng })
+    },
+  })
+  return null
+}
+
+function parseCoord(value: string): number | null {
+  if (!value.trim()) return null
+  const n = parseFloat(value)
+  return Number.isFinite(n) ? n : null
 }
 
 export default function EventForm({ initial, saving, onSave, onClose }: Props) {
@@ -206,6 +234,46 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
               placeholder="Event location"
               className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
             />
+          </div>
+
+          {/* Map picker */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-neutral-500">
+              Pin on map <span className="text-neutral-300">(optional)</span>
+            </label>
+            <div className="h-56 overflow-hidden rounded-lg border border-neutral-200">
+              <MapContainer
+                center={DEFAULT_CENTER}
+                zoom={12}
+                scrollWheelZoom
+                style={{ height: "100%", width: "100%" }}
+              >
+                <TileLayer
+                  url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                  subdomains="abcd"
+                  maxZoom={20}
+                />
+                <MapClickHandler onPick={(p) => { update("latitude", p.lat.toString()); update("longitude", p.lng.toString()) }} />
+                {form.latitude && form.longitude && (
+                  <Marker position={{ lat: parseCoord(form.latitude)!, lng: parseCoord(form.longitude)! }} icon={pinIcon} />
+                )}
+              </MapContainer>
+            </div>
+            {form.latitude && form.longitude ? (
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-xs text-neutral-500">
+                  {Number(form.latitude).toFixed(5)}, {Number(form.longitude).toFixed(5)}
+                </span>
+                <button type="button" onClick={() => { update("latitude", ""); update("longitude", "") }}
+                  className="rounded-lg px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
+                >
+                  Remove pin
+                </button>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-neutral-400">Click on the map to drop a pin.</p>
+            )}
           </div>
 
           {/* Capacity / Price */}

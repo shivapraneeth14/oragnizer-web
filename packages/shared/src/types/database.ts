@@ -66,6 +66,8 @@ export interface Event {
   start_date: string
   end_date: string | null
   location: string | null
+  latitude: number | null
+  longitude: number | null
   capacity: number | null
   price: number
   booked_count: number
