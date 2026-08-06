@@ -1,9 +1,17 @@
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import { useAuth } from "../auth-context"
 
 export default function ForgotPasswordPage() {
-  const { sendResetLink, loading, error, success, clearMessages } = useAuth()
+  const {
+    sendResetLink,
+    signInWithGoogle,
+    loading,
+    error,
+    success,
+    googleOnly,
+    clearMessages,
+  } = useAuth()
   const [email, setEmail] = useState("")
   const navigate = useNavigate()
 
@@ -25,7 +33,7 @@ export default function ForgotPasswordPage() {
           </div>
           <h1 className="text-xl font-semibold text-neutral-900">Check your email</h1>
           <p className="mt-2 text-sm text-neutral-500">
-            We've sent a magic link to <strong>{email}</strong>. Click it to reset your password.
+            We've sent a reset link to <strong>{email}</strong>. Click it to reset your password.
           </p>
           <button onClick={() => navigate("/")} className="mt-6 text-sm text-[#C2185B] hover:underline">
             Back to Sign In
@@ -42,7 +50,7 @@ export default function ForgotPasswordPage() {
           <button onClick={() => navigate("/")} className="text-sm text-[#C2185B] hover:underline">&larr; Back</button>
           <h1 className="mt-4 text-2xl font-semibold text-neutral-900">Reset Password</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Enter your email and we'll send you a magic link to reset your password.
+            Enter your email and we'll send you a link to reset your password.
           </p>
         </div>
 
@@ -58,7 +66,10 @@ export default function ForgotPasswordPage() {
             <input
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                if (googleOnly) clearMessages()
+              }}
               className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
               placeholder="Enter your email"
             />
@@ -69,8 +80,19 @@ export default function ForgotPasswordPage() {
             disabled={loading || !email.trim()}
             className="w-full rounded-lg bg-[#C2185B] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#A0154A] disabled:opacity-50"
           >
-            {loading ? "Sending..." : "Send Magic Link"}
+            {loading ? "Sending..." : "Send Reset Link"}
           </button>
+
+          {googleOnly && (
+            <button
+              type="button"
+              onClick={() => signInWithGoogle()}
+              disabled={loading}
+              className="w-full rounded-lg border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50"
+            >
+              {loading ? "Connecting..." : "Continue with Google"}
+            </button>
+          )}
         </form>
       </div>
     </div>

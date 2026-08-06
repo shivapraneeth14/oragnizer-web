@@ -10,6 +10,7 @@ interface AuthState {
   error: string | null
   success: string | null
   isRecovery: boolean
+  googleOnly: boolean
 }
 
 type Action =
@@ -18,6 +19,7 @@ type Action =
   | { type: "SET_ERROR"; error: string | null }
   | { type: "SET_SUCCESS"; success: string | null }
   | { type: "SET_RECOVERY"; isRecovery: boolean }
+  | { type: "SET_GOOGLE_ONLY"; googleOnly: boolean }
   | { type: "CLEAR_MESSAGES" }
 
 function reducer(state: AuthState, action: Action): AuthState {
@@ -32,8 +34,10 @@ function reducer(state: AuthState, action: Action): AuthState {
       return { ...state, success: action.success }
     case "SET_RECOVERY":
       return { ...state, isRecovery: action.isRecovery }
+    case "SET_GOOGLE_ONLY":
+      return { ...state, googleOnly: action.googleOnly }
     case "CLEAR_MESSAGES":
-      return { ...state, error: null, success: null }
+      return { ...state, error: null, success: null, googleOnly: false }
     default:
       return state
   }
@@ -60,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     error: null,
     success: null,
     isRecovery: false,
+    googleOnly: false,
   })
   const navigate = useNavigate()
 
@@ -155,11 +160,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "CLEAR_MESSAGES" })
     dispatch({ type: "SET_LOADING", loading: true })
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      const { supabaseFetchNoAuth } = await import("./supabase-fetch")
+      const res = await supabaseFetchNoAuth("/functions/v1/forgot-password", {
+        email: email.trim(),
         redirectTo: `${window.location.origin}/reset-password`,
+        requireOrganizer: true,
       })
-      if (error) {
-        dispatch({ type: "SET_ERROR", error: error.message })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        dispatch({ type: "SET_ERROR", error: data.error ?? "Something went wrong. Try again." })
+        return
+      }
+      if (data.kind === "google") {
+        dispatch({ type: "SET_GOOGLE_ONLY", googleOnly: true })
+        dispatch({ type: "SET_ERROR", error: "This account uses Google sign-in. Continue with Google instead." })
+        return
+      }
+      if (data.kind !== "password" && data.kind !== "both") {
+        dispatch({ type: "SET_ERROR", error: "We couldn't find an organizer account with this email address." })
         return
       }
       dispatch({ type: "SET_SUCCESS", success: "Check your email for the reset link." })
@@ -180,8 +198,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
       dispatch({ type: "SET_RECOVERY", isRecovery: false })
-      dispatch({ type: "SET_SUCCESS", success: "Password updated successfully!" })
-      setTimeout(() => { onSuccess?.(); navigate("/dashboard") }, 1500)
+      dispatch({ type: "SET_SUCCESS", success: "Password updated — sign in with your new password." })
+      setTimeout(() => { onSuccess?.(); navigate("/") }, 1500)
     } catch {
       dispatch({ type: "SET_ERROR", error: "Connection error. Check your internet and try again." })
     } finally {
