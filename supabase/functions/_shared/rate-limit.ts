@@ -21,6 +21,7 @@ const DEFAULTS: Record<string, RateLimitConfig> = {
   "cancel-registration": { maxRequests: 10, windowSeconds: 300, action: "cancel_registration" },
   "seed-admin": { maxRequests: 3, windowSeconds: 3600, action: "seed_admin" },
   "admin-delete-user": { maxRequests: 10, windowSeconds: 300, action: "admin_delete_user" },
+  "delete-account": { maxRequests: 5, windowSeconds: 300, action: "delete_account" },
   "verify-payment-webhook": { maxRequests: 30, windowSeconds: 60, action: "verify_payment_webhook" },
   "create-community": { maxRequests: 3, windowSeconds: 600, action: "create_community" },
   "check-community-email": { maxRequests: 30, windowSeconds: 60, action: "check_community_email" },
