@@ -93,7 +93,9 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
         errs.start = "Start date cannot be in the past"
       }
     }
-    if (form.end_date && form.start_date && new Date(form.end_date) <= new Date(form.start_date)) {
+    if (!form.end_date) {
+      errs.end = "End date is required"
+    } else if (form.start_date && new Date(form.end_date) <= new Date(form.start_date)) {
       errs.end = "End date must be after start date"
     }
 
@@ -216,7 +218,7 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
               {errors.start && <p className="mt-1 text-xs text-red-500">{errors.start}</p>}
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-neutral-500">End</label>
+              <label className="mb-1 block text-xs font-medium text-neutral-500">End *</label>
               <input type="datetime-local" value={form.end_date}
                 onChange={(e) => { setErrors((p) => ({ ...p, end: undefined })); update("end_date", e.target.value) }}
                 className={`w-full rounded-lg border px-3.5 py-2 text-sm outline-none transition focus:ring-1 focus:ring-[#C2185B]/20 ${

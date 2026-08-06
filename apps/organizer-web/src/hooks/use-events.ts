@@ -137,7 +137,9 @@ export function useEvents(communityId: string | undefined) {
     const startDate = new Date(data.start_date)
     if (!data.start_date || !startDate.getTime()) return "Start date is required"
     if (startDate < new Date()) return "Start date cannot be in the past"
-    if (data.end_date && new Date(data.end_date) <= startDate) return "End date must be after start date"
+    if (!data.end_date) return "End date is required"
+    const endDate = new Date(data.end_date)
+    if (!endDate.getTime() || endDate <= startDate) return "End date must be after start date"
 
     const { error } = await supabase.from("events").insert({
       community_id: communityId,
@@ -162,7 +164,10 @@ export function useEvents(communityId: string | undefined) {
   }, [communityId, fetch])
 
   const updateEvent = useCallback(async (id: string, data: EventFormData) => {
-    if (data.end_date && data.start_date && new Date(data.end_date) <= new Date(data.start_date)) {
+    if (!data.start_date || !new Date(data.start_date).getTime()) return "Start date is required"
+    if (!data.end_date) return "End date is required"
+    const endDate = new Date(data.end_date)
+    if (!endDate.getTime() || (data.start_date && endDate <= new Date(data.start_date))) {
       return "End date must be after start date"
     }
 
