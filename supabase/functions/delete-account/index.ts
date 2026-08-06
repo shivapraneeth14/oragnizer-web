@@ -90,8 +90,22 @@ Deno.serve(async (req) => {
     // Deleting the auth user cascades to profiles, which cascades memberships,
     // join requests, waitlists, wishlist and event messages. The SET NULL FKs
     // keep registrations/payments/events/audit rows intact, unlinked.
-    const { error: deleteError } = await supabase.auth.admin.deleteUser(user.id)
+    //
+    // Note: gotrue's admin.deleteUser() fails with "Database error deleting
+    // user" on this project for hard deletes, so we delete the auth row through
+    // a security-definer RPC (service-role gated) that performs the same
+    // cascade-safe hard delete proven by direct SQL.
+    const { data: deleted, error: deleteError } = await supabase.rpc(
+      "delete_user_auth_cascade",
+      { p_user_id: user.id },
+    )
     if (deleteError) throw deleteError
+    if (!deleted) {
+      return new Response(JSON.stringify({ error: "Account could not be deleted. Please try again." }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
