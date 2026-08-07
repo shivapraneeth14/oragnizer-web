@@ -52,9 +52,11 @@ instead of the admin dashboard (same for `/reset-password` links).
   `https://cluvo-admin-*.vercel.app/**` (preview deployments), plus the existing mobile
   (`cluvo://login`, `com.cluvo.mobile://login`, `cluvo://signup`), organizer-web
   (`cluvo-org.vercel.app/**`), and Flutter (`cluvo-nu.vercel.app/**`) entries — do not remove them.
-- **TEST** (`ofvfasdgdwkehdcjugnf`): allow list is `localhost:5173` / `localhost:3000` only — Google
-  sign-in is intentionally not used in TEST (admin logins are email/password). If a hosted TEST surface
-  ever needs OAuth, add its URL to the allow list first.
+- **TEST** (`ofvfasdgdwkehdcjugnf`): allow list includes `localhost:5173`, `localhost:3000`, plus the mobile
+  deep-link schemes `cluvo://login`, `cluvo://signup`, `com.cluvo.mobile://login`. Google sign-in **is** enabled
+  on TEST (existing accounts have linked Google identities) — recovery links for those accounts redirect to
+  `cluvo://login`, so the schemes must stay in the list. If a hosted TEST surface ever needs OAuth, add its URL
+  to the allow list first.
 - `site_url` staying at `https://cluvo-nu.vercel.app` is intentional (Flutter is the main consumer app);
   the admin portal is covered by its allow-list entries.
 
@@ -81,6 +83,21 @@ instead of the admin dashboard (same for `/reset-password` links).
 ### Edge functions — per-project Supabase secrets (missing ⇒ fail fast)
 
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `CASHFREE_CLIENT_ID`, `CASHFREE_CLIENT_SECRET`, `CASHFREE_PUBLIC_KEY` (optional), `CASHFREE_WEBHOOK_SECRET`, `CASHFREE_ENV` (`sandbox`|`production` — selects Cashfree base URL), `ADMIN_EMAIL`, `ADMIN_PASSWORD` (optional). `SUPABASE_ACCESS_TOKEN` / `SUPABASE_DB_PASSWORD_*` are CI/deploy-only secrets, never used at runtime.
+
+### `forgot-password` edge function
+
+Password-reset requests from every surface (mobile, Flutter web, organizer-web) call this edge function instead of
+the auth client directly, so the server can block reset emails for accounts that only have a Google identity.
+
+- Input: `{ email, redirectTo }`. `redirectTo` is validated by GoTrue against the project's `uri_allow_list`
+  (mobile passes `cluvo://login`, web passes `<origin>/reset-password`).
+- Behavior: `email` unknown → `{ kind: "none", sent: false }` (same generic UI as success — no account leak).
+  Google-only → `{ kind: "google", sent: false }` (client shows "sign in with Google" instead of an email).
+  Email-identity present → server calls GoTrue `recover` (email goes out via the project's mailer) →
+  `{ kind: "password" | "both", sent: true }`.
+- Uses only auto-injected `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` — no custom secrets.
+- GoTrue's own email rate limits still apply per environment (`rate_limit_email_sent`, default 2/hr — paced by
+  the per-recipient window; bursts from one IP can exhaust faster).
 
 ## Single source of truth
 

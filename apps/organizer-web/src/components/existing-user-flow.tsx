@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { Link } from "react-router-dom"
 import { supabase } from "../supabase"
 import CommunityDetailsForm, { initialCommunityData, type CommunityData } from "./community-details-form"
 
@@ -126,6 +127,12 @@ export default function ExistingUserFlow({ onBack }: Props) {
                 )}
               </button>
             </div>
+          </div>
+
+          <div className="text-right">
+            <Link to="/forgot-password" className="inline-block text-sm text-[#C2185B] hover:underline">
+              Forgot password?
+            </Link>
           </div>
 
           <button

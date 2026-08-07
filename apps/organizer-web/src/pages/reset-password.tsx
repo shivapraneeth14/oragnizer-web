@@ -16,7 +16,7 @@ export default function ResetPasswordPage() {
     if (!password.trim()) return
     if (password !== confirm) return
 
-    resetPassword(password, () => navigate("/dashboard"))
+    resetPassword(password, () => navigate("/"))
   }
 
   return (

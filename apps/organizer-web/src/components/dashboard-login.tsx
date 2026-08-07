@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 import { supabase } from "../supabase"
 
 interface Props {
@@ -87,6 +88,12 @@ export default function DashboardLogin({ onBack }: Props) {
               )}
             </button>
           </div>
+        </div>
+
+        <div className="text-right">
+          <Link to="/forgot-password" className="inline-block text-sm text-[#C2185B] hover:underline">
+            Forgot password?
+          </Link>
         </div>
 
         <button

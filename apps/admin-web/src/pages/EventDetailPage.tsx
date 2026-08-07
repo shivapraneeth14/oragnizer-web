@@ -20,7 +20,7 @@ export default function EventDetailPage() {
     ]).then(([eRes, rRes, pRes]) => {
       const ev = eRes.data as any
       setEvent(ev)
-      if (ev) {
+      if (ev && ev.created_by) {
         supabase.from("profiles").select("*").eq("id", ev.created_by).single().then(({ data: o }) => setOrganizer(o as Profile))
       }
       setRegistrations((rRes.data as any[] || []).map((r) => ({ ...r, user_email: r.profiles?.email })))

@@ -66,11 +66,13 @@ export interface Event {
   start_date: string
   end_date: string | null
   location: string | null
+  latitude: number | null
+  longitude: number | null
   capacity: number | null
   price: number
   booked_count: number
   status: "draft" | "published" | "cancelled" | "completed"
-  created_by: string
+  created_by: string | null
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -102,7 +104,7 @@ export interface Coupon {
 export interface Registration {
   id: string
   event_id: string
-  user_id: string
+  user_id: string | null
   status: "pending" | "confirmed" | "cancelled" | "attended"
   qr_code: string | null
   checked_in: boolean
@@ -178,7 +180,7 @@ export interface EventRestrictedUser {
   id: string
   event_id: string
   user_id: string
-  created_by: string
+  created_by: string | null
   created_at: string
 }
 
