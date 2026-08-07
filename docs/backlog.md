@@ -12,6 +12,11 @@
   no domain exists yet) before real user growth exceeds the rate limit, or before a
   Play Store launch push. Until then, keep test emails paced (2+/hr per address, same IP
   can exhaust the window faster).
+- **Confirm age minimum & DPDP compliance with legal counsel**: Age minimum and full
+  legal compliance for India's DPDP framework should be confirmed with a legal professional
+  before real public launch — 13+ is a reasonable placeholder matching Play Store's general
+  baseline, not a confirmed legal determination. (Privacy Policy at
+  `apps/organizer-web/src/pages/privacy-policy.tsx` states 13+ and India governing law.)
 
 ### Pending (not blocking current tier)
 - **Migrate Cashfree Payouts V1 → V2**: Cashfree warns V1 transfers APIs will be

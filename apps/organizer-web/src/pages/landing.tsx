@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { Link } from "react-router-dom"
 import { supabase } from "../supabase"
 import { useAuth } from "../auth-context"
 import AccountChoice from "../components/account-choice"
@@ -55,12 +56,13 @@ function deriveNames(meta: Record<string, unknown>): { first_name: string; last_
 }
 
 export default function LandingPage() {
-  const { signInWithGoogle, signOut, user, error } = useAuth()
+  const { signInWithGoogle, signOut, blockSession, user, error } = useAuth()
   const [flow, setFlow] = useState<Flow>("create")
   const [checkingSession, setCheckingSession] = useState(true)
   const [activeTab, setActiveTab] = useState<"explore" | "organizer">("explore")
   const [prefill, setPrefill] = useState<{ email: string; first_name: string; last_name: string } | null>(null)
   const [initialStep, setInitialStep] = useState<"register" | "community">("register")
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   useEffect(() => {
     const isOAuthReturn = new URLSearchParams(window.location.search).get("oauth") === "1"
@@ -80,6 +82,19 @@ export default function LandingPage() {
       if (username && ownsCommunity) {
         window.location.href = "/dashboard"
         return
+      }
+      if (username && !ownsCommunity) {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session) {
+          const { checkOrganizerSession } = await import("../supabase-fetch")
+          const verdict = await checkOrganizerSession(session.access_token)
+          if (verdict.ok && !verdict.organizer) {
+            await blockSession(verdict.message)
+            setFlow("create")
+            setCheckingSession(false)
+            return
+          }
+        }
       }
       if (!username) {
         const names = deriveNames(user.user_metadata ?? {})
@@ -185,8 +200,16 @@ export default function LandingPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={signInWithGoogle}
-                          className="flex w-full items-center justify-center gap-3 rounded-xl border border-neutral-300 px-6 py-3.5 text-sm font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50"
+                          disabled={googleLoading}
+                          onClick={async () => {
+                            setGoogleLoading(true)
+                            try {
+                              await signInWithGoogle()
+                            } finally {
+                              setGoogleLoading(false)
+                            }
+                          }}
+                          className="flex w-full items-center justify-center gap-3 rounded-xl border border-neutral-300 px-6 py-3.5 text-sm font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50 disabled:opacity-50"
                         >
                           <svg className="h-5 w-5" viewBox="0 0 24 24">
                             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -194,7 +217,7 @@ export default function LandingPage() {
                             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                           </svg>
-                          Continue with Google
+                          {googleLoading ? "Connecting..." : "Continue with Google"}
                         </button>
                         <p className="mt-6 text-sm text-neutral-400">
                           Already have a community?{" "}
@@ -236,6 +259,28 @@ export default function LandingPage() {
       </div>
 
       <FeaturesSection />
+      <LegalFooter />
+    </div>
+  )
+}
+
+function LegalFooter() {
+  return (
+    <div className="border-t border-white/15 bg-[#A0154A] px-6 py-6">
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-sm text-white/70 sm:flex-row">
+        <span>&copy; {new Date().getFullYear()} Cluvo</span>
+        <div className="flex items-center gap-6">
+          <Link to="/privacy" className="transition hover:text-white">
+            Privacy Policy
+          </Link>
+          <Link to="/terms" className="transition hover:text-white">
+            Terms
+          </Link>
+          <a href="mailto:supp.cluvo@gmail.com" className="transition hover:text-white">
+            Contact
+          </a>
+        </div>
+      </div>
     </div>
   )
 }

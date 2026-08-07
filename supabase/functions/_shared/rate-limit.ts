@@ -15,6 +15,8 @@ const DEFAULTS: Record<string, RateLimitConfig> = {
   register: { maxRequests: 5, windowSeconds: 300, action: "register" },
   "check-username": { maxRequests: 30, windowSeconds: 60, action: "check_username" },
   "check-community-name": { maxRequests: 30, windowSeconds: 60, action: "check_community_name" },
+  login: { maxRequests: 10, windowSeconds: 300, action: "login" },
+  "check-organizer": { maxRequests: 60, windowSeconds: 60, action: "check_organizer" },
   "create-payment-order": { maxRequests: 10, windowSeconds: 300, action: "create_payment_order" },
   "create-payment": { maxRequests: 10, windowSeconds: 300, action: "create_payment" },
   "cleanup-booking": { maxRequests: 10, windowSeconds: 300, action: "cleanup_booking" },

@@ -19,18 +19,31 @@ export default function DashboardLogin({ onBack }: Props) {
     if (!email.trim() || !password.trim()) return
     setLoading(true)
     try {
-      const { error: err } = await supabase.auth.signInWithPassword({
+      // Login goes through the server-side organizer gate: the edge fn checks
+      // community ownership and only returns a session for organizers.
+      const { supabaseFetchNoAuth } = await import("../supabase-fetch")
+      const res = await supabaseFetchNoAuth("/functions/v1/login", {
         email: email.trim(),
         password,
       })
+      const data = await res.json().catch(() => ({}))
       setLoading(false)
-      if (err) {
-        const msg = err.message.includes("Invalid login credentials")
-          ? "Invalid email or password. Please try again."
-          : err.message.includes("Email not confirmed")
-            ? "Please confirm your email address."
-            : err.message
+      if (!res.ok) {
+        const msg =
+          typeof data.error === "string" && data.error.includes("Invalid login credentials")
+            ? "Invalid email or password. Please try again."
+            : typeof data.error === "string"
+              ? data.error
+              : "Something went wrong. Please try again."
         setError(msg)
+        return
+      }
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      })
+      if (sessionError) {
+        setError("Could not start your session. Please try again.")
         return
       }
       window.location.href = "/dashboard"

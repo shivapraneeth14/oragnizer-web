@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import { supabase } from "../supabase"
 import CommunityDetailsForm, { initialCommunityData, missingCommunityFields, type CommunityData } from "./community-details-form"
+import TermsCheckbox from "./terms-checkbox"
+import { CONSENT_VERSION } from "../legal/consent-version"
 
 interface Props {
   onBack: () => void
@@ -20,6 +22,7 @@ export default function NewUserFlow({ onBack, prefill, initialStep = "register" 
   const [checkingUsername, setCheckingUsername] = useState(false)
   const [registerLoading, setRegisterLoading] = useState(false)
   const [registerError, setRegisterError] = useState("")
+  const [termsAccepted, setTermsAccepted] = useState(false)
 
   const [communityData, setCommunityData] = useState<CommunityData>(initialCommunityData)
   const [communityStep, setCommunityStep] = useState<1 | 2>(1)
@@ -71,6 +74,7 @@ export default function NewUserFlow({ onBack, prefill, initialStep = "register" 
     setRegisterError("")
     if (!firstName.trim() || !lastName.trim() || !email.trim() || !password.trim() || !username.trim()) return
     if (usernameAvailable === false) { setRegisterError("This username is already taken."); return }
+    if (!termsAccepted) { setRegisterError("Please accept the Privacy Policy and Terms of Service to continue."); return }
 
     setRegisterLoading(true)
     try {
@@ -94,6 +98,16 @@ export default function NewUserFlow({ onBack, prefill, initialStep = "register" 
           setRegisterError("Could not set your password. Try again.")
           return
         }
+        const { supabaseFetch } = await import("../supabase-fetch")
+        const consentRes = await supabaseFetch(
+          "/functions/v1/record-consent",
+          session.access_token,
+          { consent_version: CONSENT_VERSION, source: "web" }
+        )
+        if (!consentRes.ok) {
+          setRegisterError("Could not save consent. Try again.")
+          return
+        }
         setAccessToken(session.access_token)
         setStep("community")
         return
@@ -106,6 +120,9 @@ export default function NewUserFlow({ onBack, prefill, initialStep = "register" 
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         username: username.trim(),
+        consent_accepted: true,
+        consent_version: CONSENT_VERSION,
+        source: "web",
       })
       const result = await res.json()
       if (!res.ok) {
@@ -266,9 +283,11 @@ export default function NewUserFlow({ onBack, prefill, initialStep = "register" 
               <p className="mt-1 text-xs text-neutral-400">8+ characters, 1 capital letter</p>
             </div>
 
+            <TermsCheckbox value={termsAccepted} onChange={setTermsAccepted} />
+
             <button
               type="submit"
-              disabled={registerLoading || !firstName.trim() || !lastName.trim() || !email.trim() || !username.trim() || !password.trim() || usernameAvailable === false}
+              disabled={registerLoading || !termsAccepted || !firstName.trim() || !lastName.trim() || !email.trim() || !username.trim() || !password.trim() || usernameAvailable === false}
               className="w-full rounded-lg bg-[#C2185B] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#A0154A] disabled:opacity-50"
             >
               {registerLoading ? "Creating account..." : "Create Account"}
