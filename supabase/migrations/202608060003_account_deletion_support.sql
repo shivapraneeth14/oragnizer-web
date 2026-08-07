@@ -17,7 +17,7 @@
 alter table registrations
   alter column user_id drop not null;
 alter table registrations
-  drop constraint registrations_user_id_fkey;
+  drop constraint if exists registrations_user_id_fkey;
 alter table registrations
   add constraint registrations_user_id_fkey
     foreign key (user_id) references profiles(id) on delete set null;
@@ -26,7 +26,7 @@ alter table registrations
 alter table events
   alter column created_by drop not null;
 alter table events
-  drop constraint events_created_by_fkey;
+  drop constraint if exists events_created_by_fkey;
 alter table events
   add constraint events_created_by_fkey
     foreign key (created_by) references profiles(id) on delete set null;
@@ -35,17 +35,20 @@ alter table events
 alter table event_restricted_users
   alter column created_by drop not null;
 alter table event_restricted_users
-  drop constraint event_restricted_users_created_by_fkey;
+  drop constraint if exists event_restricted_users_created_by_fkey;
 alter table event_restricted_users
   add constraint event_restricted_users_created_by_fkey
     foreign key (created_by) references profiles(id) on delete set null;
 
 -- audit_log: keep the trail (security/ops), sever the actor link. The
 -- delete-account function additionally strips details/target_id PII.
+-- NOTE: on PROD the inline REFERENCES in 202607260002 never materialized
+-- (CREATE TABLE IF NOT EXISTS + pre-existing table), so the constraint may
+-- be absent — hence DROP CONSTRAINT IF EXISTS.
 alter table audit_log
   alter column actor_id drop not null;
 alter table audit_log
-  drop constraint audit_log_actor_id_fkey;
+  drop constraint if exists audit_log_actor_id_fkey;
 alter table audit_log
   add constraint audit_log_actor_id_fkey
     foreign key (actor_id) references profiles(id) on delete set null;
