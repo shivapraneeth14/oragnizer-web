@@ -69,9 +69,59 @@ No `ACCESS_FINE/COARSE_LOCATION`, `CAMERA`, `RECORD_AUDIO`, `READ_CONTACTS`, `SM
 
 ---
 
-## Section 4 — App bundle + offline launch — ⏳ PENDING
+## Section 4 — App bundle + offline launch — ✅ PASS (verified on Android 15 emulator, arm64)
 
-Not yet executed. To do before submission: build `flutter build appbundle --release` with `--dart-define` values, launch on a cold-start offline device (no network) and confirm no crash/blank screen, verify Play Console pre-launch report.
+**Finding:** The app builds as a real release AAB, and a cold launch with **zero network connectivity** renders the login UI with **no crash and no blank screen**. Uncaught async errors are captured by a guarded zone and never kill the process.
+
+### Release build (TEST dart-defines, verified 2026-08-08)
+
+```
+flutter build appbundle --release \
+  --dart-define=SUPABASE_URL=https://ofvfasdgdwkehdcjugnf.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=… \
+  --dart-define=CLOUDINARY_CLOUD_NAME=djz0pypu1 \
+  --dart-define=CLOUDINARY_UPLOAD_PRESET=cluvo_preset
+```
+
+- `app-release.aab` — **60.3 MB** ✓ (bundleRelease OK)
+- `app-release.apk` — **60.9 MB** ✓ (assembleRelease OK, installed for device tests)
+- ⚠️ Config guard is live: building without the required `--dart-define`s refuses to start and shows the Connection-Error screen with a Retry button (verified — the friendly error screen rendered instead of a silent misconfig or crash)
+
+### Offline cold-start test (network fully down)
+
+Setup: emulator `sdk_gphone16k_arm64` (Android 15, API 35) with airplane mode + `svc wifi/data disable`; connectivity verified dead (`ping` to 8.8.8.8 and `example.com` both exit non-zero, no replies).
+
+| Check | Result |
+|---|---|
+| Process after launch | **alive** (`pidof com.cluvo.mobile` → PID) |
+| `FATAL EXCEPTION` in logcat | **0** |
+| AndroidRuntime crash lines | **0** |
+| Rendered screen (OCR of screenshot) | **"Welcome back / Sign in to your account / Email / Password / Sign in / G Sign in with Google / Don't have an account? Sign up"** — full login UI, no blank screen |
+| Evidence artifacts | logcat dump + screenshots (`/tmp/offline_launch.png`, `/tmp/offline_final.png`) |
+
+### Global error handling (re-verified + hardened)
+
+`lib/main.dart` before: `FlutterError.onError` + `PlatformDispatcher.onError` present, but **no `runZonedGuarded`** (uncaught async errors outside the framework were unguarded). Fixed in commit `0cf7faa`:
+
+```dart
+await runZonedGuarded(_bootstrap, (error, stack) {
+  FlutterError.reportError(FlutterErrorDetails(exception: error, stack: stack, library: 'zone'));
+});
+```
+
+### Forced-error test (real, scratch commit `fafdd8e` — reverted)
+
+A scratch build threw `StateError('FORCED-ERROR-TEST')` from a `Timer` 3s after launch (uncaught, inside the guarded zone):
+
+| Check | Result |
+|---|---|
+| Error surfaced in logcat | ✅ `I flutter : Bad state: FORCED-ERROR-TEST` (via `FlutterError.reportError`) |
+| Process after the throw | **alive** (same PID) |
+| `FATAL EXCEPTION` | **0** |
+| UI after the throw | still rendering the login screen (OCR-verified) |
+| Scratch commit | deleted — `git log` back on `0cf7faa`; working tree clean |
+
+**Residual:** Play Console pre-launch report still to run at submission time (needs the release AAB uploaded); iOS side not covered here (Xcode incomplete on this machine).
 
 ---
 
@@ -163,11 +213,11 @@ Audit pending: confirm no keys in git history (`git log -p` sweep for `sbp_`, Ra
 | 1. Data Safety map | ✅ PASS |
 | 2. Account deletion | ✅ PASS (PROD-verified) |
 | 3. Permissions | ✅ PASS |
-| 4. App bundle + offline launch | ⏳ pending |
+| 4. App bundle + offline launch | ✅ PASS (release AAB built; offline cold-start no-crash verified; runZonedGuarded added `0cf7faa`) |
 | 5. Sign-in | ✅ PASS |
 | 6. Payments / Play Billing | ✅ PASS (physical-goods exemption) |
-| 7. Privacy Policy + Terms | ⏳ in progress (pages live at cluvo-org.vercel.app; consent capture ✅ server-proven on TEST) |
+| 7. Privacy Policy + Terms | ⏳ in progress (pages live at cluvo-org.vercel.app; consent capture ✅ server-proven on TEST + Google path PROD row) |
 | 8. Deep links | ⏳ pending (custom-scheme risk noted) |
 | 9. Secrets hygiene | ⏳ pending |
 
-Hard blocker remaining: none beyond completing Section 7 submission fields and Sections 4/8/9 checks.
+Hard blocker remaining: none beyond completing Section 7 submission fields and Sections 8/9 checks.
