@@ -104,15 +104,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "CLEAR_MESSAGES" })
     dispatch({ type: "SET_LOADING", loading: true })
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
-      if (error) {
+      // Login goes through the server-side organizer gate: the edge fn checks
+      // community ownership and only returns a session for organizers.
+      const { supabaseFetchNoAuth } = await import("./supabase-fetch")
+      const res = await supabaseFetchNoAuth("/functions/v1/login", {
+        email: email.trim(),
+        password,
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
         const msg =
-          error.message.includes("Invalid login credentials")
+          typeof data.error === "string" && data.error.includes("Invalid login credentials")
             ? "Invalid email or password. Please try again."
-            : error.message.includes("Email not confirmed")
-              ? "Please confirm your email address."
-              : error.message
+            : typeof data.error === "string"
+              ? data.error
+              : "Something went wrong. Please try again."
         dispatch({ type: "SET_ERROR", error: msg })
+        return
+      }
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      })
+      if (sessionError) {
+        dispatch({ type: "SET_ERROR", error: "Could not start your session. Please try again." })
         return
       }
       navigate("/dashboard")
