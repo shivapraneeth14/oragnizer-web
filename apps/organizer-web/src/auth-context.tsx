@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useReducer, useCallback, type Rea
 import { useNavigate } from "react-router-dom"
 import { supabase } from "./supabase"
 import type { Session, User } from "@supabase/supabase-js"
+import { CONSENT_VERSION } from "./legal/consent-version"
 
 interface AuthState {
   user: User | null
@@ -51,6 +52,7 @@ interface AuthContextType extends AuthState {
   resetPassword: (password: string, onSuccess?: () => void) => Promise<void>
   checkUsername: (username: string) => Promise<boolean>
   checkCommunityName: (name: string) => Promise<boolean>
+  recordConsent: (source: "web") => Promise<boolean>
   clearMessages: () => void
 }
 
@@ -231,6 +233,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearMessages = useCallback(() => dispatch({ type: "CLEAR_MESSAGES" }), [])
 
+  const recordConsent = useCallback(async (source: "web"): Promise<boolean> => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return false
+    try {
+      const { supabaseFetch } = await import("./supabase-fetch")
+      const res = await supabaseFetch("/functions/v1/record-consent", session.access_token, {
+        consent_version: CONSENT_VERSION,
+        source,
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }, [])
+
   return (
     <AuthContext.Provider
       value={{
@@ -242,6 +259,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         resetPassword,
         checkUsername,
         checkCommunityName,
+        recordConsent,
         clearMessages,
       }}
     >

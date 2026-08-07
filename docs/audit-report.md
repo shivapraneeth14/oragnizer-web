@@ -117,6 +117,30 @@ Not yet executed. To do before submission: build `flutter build appbundle --rele
 - Terms: `https://cluvo-org.vercel.app/terms`.
 - In-app links: Profile → Privacy Policy / Terms (opens pages).
 - Play Console: paste both URLs into App content / Data safety (privacy policy URL is required before submission).
+- **Known issue:** live URLs return HTTP 200 but only serve the SPA shell (Vercel rewrite) — the pages render fully only after PR #3 (dev→main) merges; check the deployed bundle, not just the status code.
+
+### Consent capture (server-side proof) — ✅ PASS (implemented, TEST-verified)
+
+The "I agree to the Privacy Policy and Terms of Service" checkbox gates every account-creation path, and each consent is proven by a server-side row, not client trust.
+
+**Design:**
+- Consent checkbox appears **only on signup forms** (mobile signup screen, web register form); **sign-in screens ask nothing** — no checkbox on login (mobile or web), existing-user flow, dashboard login, or forgot-password flows.
+- `consent_log` table (migration `supabase/migrations/202608070001_consent_log.sql`): `user_id` (FK auth.users, ON DELETE CASCADE), `consent_version` (text, server constant from `supabase/functions/_shared/consent.ts`, currently `2026-08-07`), `accepted_at` (server default `now()`), `source` (check `'mobile'|'web'`). RLS on, **zero policies, anon/authenticated REVOKED** — only edge functions (service role) read/write it.
+- `register` edge fn rejects `consent_accepted !== true` (HTTP 400, "Please accept the Privacy Policy and Terms of Service to continue.") and mismatched `consent_version` (400); inserts the consent row server-side after account creation.
+- Google OAuth accounts created outside `register` (gotrue creates them during sign-in) are covered once by a post-login consent gate (mobile + web) that shows **only while no consent row exists** for the account — returning users never see it. Recording goes through `record-consent` edge fn — idempotent, `user_id` from JWT, forged `accepted_at`/`consent_version` ignored, invalid `source` falls back to `mobile`.
+- Policies open in-app in dialogs (`legal_dialog.dart`, `legal-dialog.tsx`) — no external redirect for consent.
+
+**Evidence (live on TEST, all items passed):**
+1. Schema live-verified: 5 columns, FK CASCADE, check constraint, index, RLS enabled, 0 policies, privileges: anon/authenticated revoked.
+2. Email/password signup → `consent_log` row with `ids_match=true`; Google-path (gotrue admin-created users) → GET status `false` → POST `created:true` → GET `true`; second POST idempotent `created:false`; forged `accepted_at`/`consent_version` ignored (server values stored).
+3. Fake client timestamp `1970-01-01` ignored — row stored with server `now()`.
+4. `consent_version` bump (`2026-08-07` → `-v2`, deployed, old clients rejected 400, new row v2, old rows kept `2026-08-07`), then reverted — version constant is canonical and auditable.
+5–6. anon `SELECT`/`INSERT`/`UPDATE` and authenticated `UPDATE` all rejected: `42501 permission denied for table consent_log` (401/403).
+7. `consent_accepted:false` → 400 with **zero** auth.users and **zero** consent rows created; wrong version → 400, no rows.
+
+UI/UX: signup buttons disabled until checked; sign-in screens have no consent prompt; in-dialog policy text is the same content as the public pages (shared modules `src/legal/privacy-content.tsx`, `terms-content.tsx`).
+
+**Verdict:** ✅ consent flow implemented end-to-end and server-proven; remaining work = user's own emulator walkthrough + merging PR #3.
 
 ---
 
@@ -142,7 +166,7 @@ Audit pending: confirm no keys in git history (`git log -p` sweep for `sbp_`, Ra
 | 4. App bundle + offline launch | ⏳ pending |
 | 5. Sign-in | ✅ PASS |
 | 6. Payments / Play Billing | ✅ PASS (physical-goods exemption) |
-| 7. Privacy Policy + Terms | ⏳ in progress (pages live at cluvo-org.vercel.app) |
+| 7. Privacy Policy + Terms | ⏳ in progress (pages live at cluvo-org.vercel.app; consent capture ✅ server-proven on TEST) |
 | 8. Deep links | ⏳ pending (custom-scheme risk noted) |
 | 9. Secrets hygiene | ⏳ pending |
 

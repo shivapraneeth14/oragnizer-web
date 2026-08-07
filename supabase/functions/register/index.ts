@@ -1,6 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { CONSENT_VERSION, isValidConsentSource } from "../_shared/consent.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -30,7 +31,13 @@ Deno.serve(async (req) => {
   if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
-    const { email, password, first_name, last_name, username } = await req.json()
+    // NOTE: only these fields are read from the client. Any client-supplied
+    // timestamp (e.g. "accepted_at") is deliberately ignored — the consent
+    // record's accepted_at is always set server-side (column default now()).
+    const {
+      email, password, first_name, last_name, username,
+      consent_accepted, consent_version, source,
+    } = await req.json()
 
     const errors: string[] = []
     if (!email || typeof email !== "string") errors.push("Please enter your email address.")
@@ -38,6 +45,12 @@ Deno.serve(async (req) => {
     if (!first_name || typeof first_name !== "string") errors.push("Please enter your first name.")
     if (!last_name || typeof last_name !== "string") errors.push("Please enter your last name.")
     if (!username || typeof username !== "string") errors.push("Please enter a username.")
+    if (consent_accepted !== true) {
+      errors.push("Please accept the Privacy Policy and Terms of Service to continue.")
+    }
+    if (consent_version !== CONSENT_VERSION) {
+      errors.push("Please accept the current version of the Privacy Policy and Terms of Service.")
+    }
 
     if (errors.length > 0) {
       return new Response(JSON.stringify({ error: errors[0] }), {
@@ -116,6 +129,15 @@ Deno.serve(async (req) => {
       target_type: "user",
       target_id: authData.user!.id,
       details: { email: email.trim().toLowerCase() },
+    })
+
+    // Consent record: server-side insert. accepted_at is the column default
+    // (now()) — never a client-supplied value; consent_version is the server
+    // constant, validated above against the client's copy.
+    await supabase.from("consent_log").insert({
+      user_id: authData.user!.id,
+      consent_version: CONSENT_VERSION,
+      source: isValidConsentSource(source) ? source : "mobile",
     })
 
     return new Response(JSON.stringify({ success: true, user_id: authData.user!.id }), {
