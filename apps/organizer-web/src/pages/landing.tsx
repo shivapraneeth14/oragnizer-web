@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { Link } from "react-router-dom"
 import { supabase } from "../supabase"
 import { useAuth } from "../auth-context"
 import AccountChoice from "../components/account-choice"
@@ -236,6 +237,28 @@ export default function LandingPage() {
       </div>
 
       <FeaturesSection />
+      <LegalFooter />
+    </div>
+  )
+}
+
+function LegalFooter() {
+  return (
+    <div className="border-t border-white/15 bg-[#A0154A] px-6 py-6">
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-sm text-white/70 sm:flex-row">
+        <span>&copy; {new Date().getFullYear()} Cluvo</span>
+        <div className="flex items-center gap-6">
+          <Link to="/privacy" className="transition hover:text-white">
+            Privacy Policy
+          </Link>
+          <Link to="/terms" className="transition hover:text-white">
+            Terms
+          </Link>
+          <a href="mailto:supp.cluvo@gmail.com" className="transition hover:text-white">
+            Contact
+          </a>
+        </div>
+      </div>
     </div>
   )
 }
