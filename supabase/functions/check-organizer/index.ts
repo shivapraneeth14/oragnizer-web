@@ -22,6 +22,13 @@ const jsonResponse = (body: Record<string, unknown>, status = 200) =>
     headers: { "Content-Type": "application/json", ...corsHeaders },
   })
 
+function isGoogleIdentity(user: { app_metadata?: Record<string, unknown>; identities?: Array<{ provider: string }> | null }): boolean {
+  return (
+    user.app_metadata?.provider === "google" ||
+    (Array.isArray(user.identities) && user.identities.some((i) => i.provider === "google"))
+  )
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
@@ -32,46 +39,32 @@ Deno.serve(async (req) => {
   }
 
   const ip = getClientIp(req)
-  const rl = await checkRateLimit(ip, "login")
+  const rl = await checkRateLimit(ip, "check-organizer")
   if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
-    const { email, password } = await req.json()
-    if (typeof email !== "string" || email.trim() === "") {
-      return jsonResponse({ error: "Please enter your email address." }, 400)
-    }
-    if (typeof password !== "string" || password === "") {
-      return jsonResponse({ error: "Please enter your password." }, 400)
+    const authHeader = req.headers.get("Authorization") ?? ""
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim()
+    if (!token) {
+      return jsonResponse({ error: "Missing session token." }, 401)
     }
 
-    const { data, error } = await anonClient.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    })
-    if (error) {
-      return jsonResponse({ error: error.message }, 400)
+    const { data, error } = await anonClient.auth.getUser(token)
+    if (error || !data.user) {
+      return jsonResponse({ error: "Invalid or expired session." }, 401)
     }
 
     const user = data.user
-    if (!user) {
-      return jsonResponse({ error: "Something went wrong. Try again." }, 500)
+    // Google identities are exempt from the organizer check — Google sign-in
+    // is the public signup path for new organizers.
+    if (isGoogleIdentity(user)) {
+      return jsonResponse({ organizer: true, exempt: true })
     }
 
-    // Organizer gate: only users who own a community (or platform admins) may
-    // use the organizer web. The session is revoked server-side so a
-    // community-less user never leaves with a usable token.
-    const isOrganizer = await isOrganizerAccount(supabase, user.id)
-    if (!isOrganizer) {
-      await supabase.auth.admin.signOut(data.session.access_token)
-      return jsonResponse({ error: NOT_ORGANIZER_MESSAGE }, 403)
-    }
-
-    return jsonResponse({
-      access_token: data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      expires_at: Math.floor(data.session.expires_at ?? 0),
-      token_type: "bearer",
-    })
+    const organizer = await isOrganizerAccount(supabase, user.id)
+    return organizer
+      ? jsonResponse({ organizer: true })
+      : jsonResponse({ organizer: false, message: NOT_ORGANIZER_MESSAGE })
   } catch (err) {
     console.error(err)
     return jsonResponse({ error: "Something went wrong. Try again." }, 500)

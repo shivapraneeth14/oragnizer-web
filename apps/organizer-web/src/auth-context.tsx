@@ -48,6 +48,7 @@ interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>
   signInWithGoogle: () => Promise<void>
   signOut: () => Promise<void>
+  blockSession: (message: string) => Promise<void>
   sendResetLink: (email: string) => Promise<void>
   resetPassword: (password: string, onSuccess?: () => void) => Promise<void>
   checkUsername: (username: string) => Promise<boolean>
@@ -172,6 +173,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const blockSession = useCallback(async (message: string) => {
+    try {
+      await supabase.auth.signOut()
+    } catch {
+      // best effort — supabase-js clears the local session regardless
+    }
+    dispatch({ type: "SET_ERROR", error: message })
+  }, [])
+
   const sendResetLink = async (email: string) => {
     if (state.loading) return
     dispatch({ type: "CLEAR_MESSAGES" })
@@ -270,6 +280,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signInWithGoogle,
         signOut,
+        blockSession,
         sendResetLink,
         resetPassword,
         checkUsername,

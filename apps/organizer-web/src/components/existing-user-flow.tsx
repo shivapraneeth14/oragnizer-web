@@ -31,30 +31,47 @@ export default function ExistingUserFlow({ onBack }: Props) {
     setLoginError("")
     if (!email.trim() || !password.trim()) return
     setLoginLoading(true)
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    })
-    setLoginLoading(false)
-    if (error) {
-      const msg = error.message.includes("Invalid login credentials")
-        ? "Invalid email or password. Please try again."
-        : error.message.includes("Email not confirmed")
-          ? "Please confirm your email address."
-          : error.message
-      setLoginError(msg)
-      return
-    }
-    if (data.session) {
-      setAccessToken(data.session.access_token)
+    try {
+      // Login goes through the server-side organizer gate: the edge fn checks
+      // community ownership and only returns a session for organizers.
+      const { supabaseFetchNoAuth } = await import("../supabase-fetch")
+      const res = await supabaseFetchNoAuth("/functions/v1/login", {
+        email: email.trim(),
+        password,
+      })
+      const data = await res.json().catch(() => ({}))
+      setLoginLoading(false)
+      if (!res.ok) {
+        const msg =
+          typeof data.error === "string" && data.error.includes("Invalid login credentials")
+            ? "Invalid email or password. Please try again."
+            : typeof data.error === "string"
+              ? data.error
+              : "Something went wrong. Please try again."
+        setLoginError(msg)
+        return
+      }
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      })
+      if (sessionError) {
+        setLoginError("Could not start your session. Please try again.")
+        return
+      }
+      setAccessToken(data.access_token)
       const { supabaseFetch } = await import("../supabase-fetch")
-      const res = await supabaseFetch("/functions/v1/check-ownership", data.session.access_token, {})
-      const result = await res.json()
+      const checkRes = await supabaseFetch("/functions/v1/check-ownership", data.access_token, {})
+      const result = await checkRes.json()
       if (result.hasCommunity) {
         setLoginError("You already own a community. Each account can only create one.")
         return
       }
       setStep("community")
+    } catch {
+      setLoginError("Connection error. Check your internet and try again.")
+    } finally {
+      setLoginLoading(false)
     }
   }
 
