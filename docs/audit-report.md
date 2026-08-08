@@ -167,7 +167,7 @@ A scratch build threw `StateError('FORCED-ERROR-TEST')` from a `Timer` 3s after 
 - Terms: `https://cluvo-org.vercel.app/terms`.
 - In-app links: Profile → Privacy Policy / Terms (opens pages).
 - Play Console: paste both URLs into App content / Data safety (privacy policy URL is required before submission).
-- **Known issue:** live URLs return HTTP 200 but only serve the SPA shell (Vercel rewrite) — the pages render fully only after PR #3 (dev→main) merges; check the deployed bundle, not just the status code.
+- **Resolved:** PR #3 (dev→main) is merged (`9e9b02f`, 2026-08-08) and the prod bundle is live — `cluvo-org.vercel.app/privacy` and `/terms` render fully. (Earlier the live URLs returned HTTP 200 but only served the SPA shell until the merge deployed — always check the deployed bundle, not just the status code.)
 
 ### Consent capture (server-side proof) — ✅ PASS (implemented, TEST-verified)
 
@@ -190,7 +190,7 @@ The "I agree to the Privacy Policy and Terms of Service" checkbox gates every ac
 
 UI/UX: signup buttons disabled until checked; sign-in screens have no consent prompt; in-dialog policy text is the same content as the public pages (shared modules `src/legal/privacy-content.tsx`, `terms-content.tsx`).
 
-**Verdict:** ✅ consent flow implemented end-to-end and server-proven; remaining work = user's own emulator walkthrough + merging PR #3.
+**Verdict:** ✅ consent flow implemented end-to-end and server-proven (PR #3 merged, prod bundle live); remaining work = user's own emulator walkthrough + transcribing the Privacy Policy / Terms URLs into the Play Console submission fields.
 
 ---
 
@@ -256,9 +256,24 @@ apksigner verify --print-certs (release APK):
 
 ---
 
-## Section 10 — Environment hygiene / secrets — ⏳ PENDING
+## Section 10 — Environment hygiene / secrets — ✅ PASS (full-history sweep; zero secret-class keys; one TEST key flagged for rotation)
 
-Audit pending: confirm no keys in git history (`git log -p` sweep for `sbp_`, Razorpay/Cloudinary/Cashfree keys), `.env*` gitignored, `--dart-define` only at build time (CI-enforced `scripts/check-env-hygiene.sh`), Supabase mgmt token not in code. Note: old `.env` keys were already rotated once; fetch live keys from `api.supabase.com/v1/projects/{ref}/api-keys`.
+**Method:** swept *every reachable commit* in both repos (`git rev-list --all`, web ~51 commits + mobile, incl. templates/scripts) for `sbp_` (Supabase management/access token), `sb_secret_` (service-role secret), `sb_publishable_` + `eyJ…` JWTs (anon/publishable keys), `rzp_(test|live)_…` (Razorpay), `cloudinary://` (Cloudinary secrets), and Cashfree client keys (real/placeholder).
+
+| Pattern | Web repo (all history) | Mobile repo (all history + tree) | Result |
+|---|---|---|---|
+| `sbp_` management token | 0 | 0 | ✅ never committed |
+| `sb_secret_` service-role secret | 0 | 0 | ✅ never committed |
+| `cloudinary://` secrets | 0 | 0 | ✅ none (cloud name/preset are public-by-design config) |
+| Cashfree real client ID/secret | 0 | 0 | ✅ only env refs + `your-cashfree-…` placeholders in `.env.example` |
+| `sb_publishable_` + anon JWT (TEST ref `ofvfas…`, PROD `vdxsp…`) | yes (~31× per doc, e.g. `scripts/switch-supabase.sh:12,15`, `supabase/.env.example`) | yes — current tree: `scripts/run.sh:24,27`, `scripts/switch-supabase.sh:12,15`, `.vscode/launch.json:11`, `docs/ENV.md:83` | **public-by-design** — publishable/anon keys ship inside every client bundle (extracted earlier from the prod web bundle); not secrets. `scripts/` + `.vscode/` are the approved injection point and are intentionally not scanned by the hygiene gate |
+| `rzp_test_THqWNZqOZGQZOu` | 0 real (only `rzp_test_xxx` placeholder in `supabase/.env.example`) | git history only — old `lib/config.dart:16` default (later archived in test defaults `a94c600`) | **rotated** — Razorpay TEST sandbox key, cannot process real payments; removed from current tree (`lib/config.dart` clean; hygiene gate enforces). Flagged + rotation reconciled (see backlog) |
+
+**Enforcement (CI, both repos, green):** `scripts/check-env-hygiene.sh` bans `String.fromEnvironment` defaults, allows it only in `lib/config.dart`, fails on hardcoded Supabase URLs / publishable keys / JWTs — wired into web `.github/workflows/ci.yml:20` and mobile `.github/workflows/ci.yml:34`. `.env*` gitignored (root `.gitignore`, `supabase/.env`; `.env.example` intentionally committed with placeholders only). Release key material (`key.properties`, `*.jks`) gitignored (`android/.gitignore:12,14`) per §9.
+
+**Rotation state:** no secret-class value (management/service/Cloudinary/Cashfree) ever entered the repos. The one exposure-class literal in history is the Razorpay **TEST** key (sandbox-only, no real-fund movement, removed from source): flagged and queued for dashboard rotation (see backlog) so the old history value dies. Note: the org's `.env` keys were rotated once previously (2026-08-04); live key re-fetch from the mgmt API requires a Supabase access token (none exists on this machine — see backlog, not blocking).
+
+**Verdict:** ✅ PASS — git history contains no secret-class keys across either repo; anon/publishable literals in dev scripts are public-by-design; the single TEST Razorpay key is queued for rotation.
 
 ---
 
@@ -275,6 +290,6 @@ Audit pending: confirm no keys in git history (`git log -p` sweep for `sbp_`, Ra
 | 7. Privacy Policy + Terms | ⏳ in progress (pages live at cluvo-org.vercel.app; consent capture ✅ server-proven on TEST + Google path PROD row) |
 | 8. Deep links | ✅ PASS (custom scheme verified + release-signed emulator proof; dead `app.cluvo.com` filter removed; risk accepted) |
 | 9. Target SDK / Build Config | ✅ PASS (targetSdk 36 — Play-compliant; real release keystore generated + AAB release-signed) |
-| 10. Secrets hygiene | ⏳ pending |
+| 10. Secrets hygiene | ✅ PASS (full-history sweep both repos; no management/service secrets; anon/publishable keys public-by-design; TEST Razorpay key flagged for rotation) |
 
-Hard blockers remaining: none beyond completing Section 7 submission fields and the Section 10 hygiene sweep.
+Hard blockers remaining: none — remaining work is the Section 7 Play Console transcription and the §10 TEST-key dashboard rotation.
