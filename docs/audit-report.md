@@ -194,13 +194,69 @@ UI/UX: signup buttons disabled until checked; sign-in screens have no consent pr
 
 ---
 
-## Section 8 — Deep links — ⏳ PENDING (risk noted)
+## Section 8 — Deep links — ✅ PASS (custom scheme verified; dead https filter removed)
 
-The app declares custom-scheme intent filters (`cluvo://`, `com.cluvo.mobile://`) plus an HTTPS App Link attempt on `app.cluvo.com` (assetlinks verification not confirmed). Custom schemes are user-installable-fallback fallback; review risk + consider adding assetlinks for the HTTPS domain before submission.
+**Question (as asked):** is `cluvo://` (custom scheme) or a verified `https://` App Link the actual implementation, and does the custom-scheme approach carry a real hijacking risk worth fixing pre-submission?
+
+**What is actually implemented (traced):**
+- **Functional deep links = custom scheme `cluvo://` only.** Android manifest: single `<intent-filter>` on `MainActivity` with `scheme="cluvo"` + `DEFAULT`/`BROWSABLE` (AndroidManifest.xml:30-35). iOS: `CFBundleURLSchemes = [cluvo]` (Info.plist:13-21). No `associated-domains`/AASA file exists for iOS.
+- **Credential-bearing link (password recovery)** = `cluvo://login`: `redirectTo: 'cluvo://login'` in `forgot_password_screen.dart:54`, `login_screen.dart:148`, `signup_screen.dart:214` (auth_provider.dart:265). Supabase Flutter intercepts the URI internally, PKCE-exchanges the code, fires `passwordRecovery`, router redirects to `/reset-password` (app.dart:255-261).
+- **Share links** = `cluvo:///community|event/<id>` (`config.dart:48`, format asserted in `test/widget_test.dart:31`), consumed by `deep_link_service.dart` → router.
+- **Removed:** the inert `https://app.cluvo.com` intent-filter (`android:autoVerify`) was deleted 2026-08-08 — `app.cluvo.com` has no DNS records and `cluvo.com` (registered 2010 via Cloudflare, expiry 2028) times out on all requests; the filter could never verify or route.
+
+**Risk assessment (documented, accepted):**
+| Vector | Exposure |
+|---|---|
+| Link-code theft (recovery) | **Blocked by PKCE** — an intercepted `code` is unusable without the verifier held by the legit app |
+| Android chooser phishing | Real but bounded: a hostile app registering `cluvo` triggers a chooser (Android 6+); credible only with a malicious app already on-device + user error |
+| iOS pre-install hijack | First-installed app wins the scheme; at pre-launch scale with zero distribution this is theoretical |
+| Likelihood at current scale | Negligible — no real users, brand-specific scheme, `app.cluvo.com`/`cluvo.com` not third-party registrable |
+
+**Verification (release-signed APK, emulator-5554, Android 15):**
+- `cmd package resolve-activity -a VIEW -d cluvo://login` → **`com.cluvo.mobile/.MainActivity`** (sole resolver, no chooser)
+- `cmd package resolve-activity -d cluvo:///event/abc123` → **`com.cluvo.mobile/.MainActivity`**
+- `cmd package resolve-activity -d https://app.cluvo.com/x` → **Chrome** — Cluvo no longer declares anything for that host (dead filter provably gone; only `Scheme: "cluvo"` remains on MainActivity per `dumpsys` + `aapt dump xmltree`)
+- Cold-start launch via `cluvo://login` and `cluvo:///event/abc123`: both **Status: ok**, process alive, **0 FATAL EXCEPTION**, screenshots OCR to the login screen ("Welcome back / Sign in to your account / Email / Password")
+- Note: freshly-installed (never-launched) apps don't resolve implicit intents until first launch — stock Android stopped-package behavior, not an app defect
+
+**Decision:** ✅ acceptable at current scale — no fix required pre-submission. Verified App Links migrated later once `cluvo.com` has a live origin (see backlog).
 
 ---
 
-## Section 9 — Environment hygiene / secrets — ⏳ PENDING
+## Section 9 — Target SDK / Build Config — ✅ PASS (release-signed AAB verified)
+
+**Build config (Flutter 3.44.0 stable):**
+| Property | Value | Source |
+|---|---|---|
+| compileSdk / targetSdk | **36 (Android 16)** | `flutter.compileSdkVersion` / `flutter.targetSdkVersion` (FlutterExtension.kt) |
+| minSdk | **24 (Android 7.0)** | `flutter.minSdkVersion` |
+| AGP / Kotlin / Java | 9.0.1 / 2.3.20 / 17 (target + jvmTarget) | `android/settings.gradle.kts:22-23`, `app/build.gradle.kts:14-17,68-72` |
+| R8 | minify + shrinkResources ON (`proguard-rules.pro`) | `app/build.gradle.kts:53-58` |
+| Version | 1.0.0+1 | pubspec.yaml:19 |
+
+**Play Console compliance:** new apps *and* updates must target **API 36** from **2026-08-31** (extension period to 2026-11-01) → **already compliant**.
+
+**Evidence from the built artifacts (not config alone), `app-release.apk`:**
+```
+aapt badging: package: com.cluvo.mobile  versionCode='1'  versionName='1.0.0'  compileSdkVersion='36'
+              sdkVersion:'24'  targetSdkVersion:'36'
+              native-code: 'arm64-v8a' 'armeabi-v7a' 'x86_64'   (AAB 60.3 MB / APK 60.9 MB)
+```
+
+**Release signing (new, 2026-08-08):** `release.jks` generated (RSA-4096, alias `cluvo`, validity 30y through 31-Jul-2056); `key.properties` populated, `chmod 600`, both gitignored (`android/.gitignore:12,14`); backed up to Bitwarden (secure note + `.jks` attachment) at creation time.
+```
+keytool -list:  cluvo PrivateKeyEntry — SHA-256 D0:7F:5B:1F:B6:CB:B8:F1:80:7C:1E:4A:62:F0:52:DC:22:83:1B:9D:05:70:89:BB:2A:24:EF:52:58:B3:D8:B8
+apksigner verify --print-certs (release APK):
+  Signer #1 certificate DN: CN=Cluvo Mobile, OU=Mobile, O=Cluvo, C=IN
+  Signer #1 certificate SHA-256: d07f5b1fb6cbb8f1807c1e4a62f052dc22831b9d057089bb2a24ef5258b3d8b8
+  ← equals the keystore fingerprint → the release APK/AAB is signed with the real production keystore, not the debug key
+```
+
+**Residual:** pre-launch only items — Play App Signing enrolment at first upload, and running the Play Console pre-launch report on this AAB.
+
+---
+
+## Section 10 — Environment hygiene / secrets — ⏳ PENDING
 
 Audit pending: confirm no keys in git history (`git log -p` sweep for `sbp_`, Razorpay/Cloudinary/Cashfree keys), `.env*` gitignored, `--dart-define` only at build time (CI-enforced `scripts/check-env-hygiene.sh`), Supabase mgmt token not in code. Note: old `.env` keys were already rotated once; fetch live keys from `api.supabase.com/v1/projects/{ref}/api-keys`.
 
@@ -217,7 +273,8 @@ Audit pending: confirm no keys in git history (`git log -p` sweep for `sbp_`, Ra
 | 5. Sign-in | ✅ PASS |
 | 6. Payments / Play Billing | ✅ PASS (physical-goods exemption) |
 | 7. Privacy Policy + Terms | ⏳ in progress (pages live at cluvo-org.vercel.app; consent capture ✅ server-proven on TEST + Google path PROD row) |
-| 8. Deep links | ⏳ pending (custom-scheme risk noted) |
-| 9. Secrets hygiene | ⏳ pending |
+| 8. Deep links | ✅ PASS (custom scheme verified + release-signed emulator proof; dead `app.cluvo.com` filter removed; risk accepted) |
+| 9. Target SDK / Build Config | ✅ PASS (targetSdk 36 — Play-compliant; real release keystore generated + AAB release-signed) |
+| 10. Secrets hygiene | ⏳ pending |
 
-Hard blocker remaining: none beyond completing Section 7 submission fields and Sections 8/9 checks.
+Hard blockers remaining: none beyond completing Section 7 submission fields and the Section 10 hygiene sweep.
