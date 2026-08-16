@@ -25,13 +25,20 @@ interface Transaction {
   debit_amount: number | null
   description: string
   running_balance: number
+  event_id?: string | null
+  payment_id?: string | null
 }
+
+type TypeFilter = "all" | "credit" | "debit" | "refund"
 
 export default function PayoutSection({ communityId }: Props) {
   const [walletBalance, setWalletBalance] = useState(0)
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [transactionsLoading, setTransactionsLoading] = useState(false)
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all")
+  const [events, setEvents] = useState<{ id: string; title: string }[]>([])
+  const [eventFilter, setEventFilter] = useState("all")
 
   const [withdrawAmount, setWithdrawAmount] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -47,24 +54,26 @@ export default function PayoutSection({ communityId }: Props) {
   async function loadData() {
     if (!communityId) return
 
-    const [balanceRes, benRes] = await Promise.all([
+    const [balanceRes, benRes, eventsRes] = await Promise.all([
       supabase.from("communities").select("wallet_balance").eq("id", communityId).single(),
       supabase.from("community_beneficiaries").select("*").eq("community_id", communityId).order("created_at", { ascending: false }),
+      supabase.from("events").select("id, title").eq("community_id", communityId).order("created_at", { ascending: false }),
     ])
 
     if (balanceRes.data) setWalletBalance(balanceRes.data.wallet_balance || 0)
     if (benRes.data) setBeneficiaries(benRes.data as Beneficiary[])
+    if (eventsRes.data) setEvents(eventsRes.data as { id: string; title: string }[])
 
-    loadTransactions()
+    loadTransactions(eventFilter === "all" ? undefined : eventFilter)
   }
 
-  async function loadTransactions() {
+  async function loadTransactions(eventId?: string) {
     if (!communityId) return
     setTransactionsLoading(true)
     try {
       const token = (await supabase.auth.getSession()).data.session?.access_token
       if (!token) return
-      const res = await fetch(`${env.supabaseUrl}/functions/v1/get-wallet-statement?community_id=${communityId}`, {
+      const res = await fetch(`${env.supabaseUrl}/functions/v1/get-wallet-statement?community_id=${communityId}${eventId ? `&event_id=${eventId}` : ""}`, {
         method: "GET",
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -149,9 +158,38 @@ export default function PayoutSection({ communityId }: Props) {
 
       <div className="mt-8">
         <h4 className="font-semibold text-neutral-800 mb-3">Transaction History</h4>
+        <div className="mb-3 flex gap-2 items-center">
+          <div className="flex gap-2">
+            {(["all", "credit", "debit", "refund"] as TypeFilter[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => setTypeFilter(f)}
+                className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
+                  typeFilter === f ? "bg-[#C2185B] text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                }`}
+              >
+                {f === "all" ? "All" : f === "credit" ? "Money In" : f === "debit" ? "Withdrawals" : "Refunds"}
+              </button>
+            ))}
+          </div>
+          <select
+            value={eventFilter}
+            onChange={(e) => {
+              const value = e.target.value
+              setEventFilter(value)
+              loadTransactions(value === "all" ? undefined : value)
+            }}
+            className="ml-auto rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 bg-white focus:border-[#C2185B] focus:outline-none"
+          >
+            <option value="all">All events</option>
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>{ev.title}</option>
+            ))}
+          </select>
+        </div>
         {transactionsLoading ? (
           <p className="text-sm text-neutral-400">Loading...</p>
-        ) : transactions.length === 0 ? (
+        ) : transactions.filter((t) => typeFilter === "all" || t.type === typeFilter).length === 0 ? (
           <p className="text-sm text-neutral-400">No transactions yet.</p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white">
@@ -166,12 +204,19 @@ export default function PayoutSection({ communityId }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {transactions.map((t, i) => (
-                  <tr key={i} className="border-b border-neutral-100">
+                {transactions.filter((t) => typeFilter === "all" || t.type === typeFilter).map((t, i) => (
+                  <tr key={i} className={`border-b border-neutral-100 ${t.type === "refund" ? "bg-red-50/40" : ""}`}>
                     <td className="px-4 py-3 text-neutral-500 whitespace-nowrap">
                       {new Date(t.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
-                    <td className="px-4 py-3 text-neutral-700">{t.description}</td>
+                    <td className="px-4 py-3 text-neutral-700">
+                      {t.description}
+                      {t.event_id && events.some((ev) => ev.id === t.event_id) && (
+                        <div className="text-xs text-neutral-400 mt-0.5">
+                          {events.find((ev) => ev.id === t.event_id)?.title}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right text-green-700 font-medium">
                       {t.credit_amount ? `₹${(t.credit_amount / 100).toFixed(0)}` : ""}
                     </td>

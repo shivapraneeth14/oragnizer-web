@@ -195,7 +195,14 @@ export function useEvents(communityId: string | undefined) {
     const { data, error } = await supabase.functions.invoke("cancel-event", {
       body: { event_id: id },
     })
-    if (error) return error.message
+    if (error) {
+      let msg = error.message
+      try {
+        const body = await (error as { context?: Response }).context?.clone().json()
+        if (body?.error) msg = body.error
+      } catch {}
+      return msg
+    }
     if (data?.error) return data.error
     await fetch()
     return null

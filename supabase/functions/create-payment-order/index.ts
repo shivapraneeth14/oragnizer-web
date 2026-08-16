@@ -77,12 +77,14 @@ Deno.serve(async (req) => {
 
     const { data: event } = await supabase
       .from("events")
-      .select("id, price, title, community_id, status")
+      .select("id, price, title, community_id, status, start_date, deleted_at")
       .eq("id", registration.event_id)
       .single()
 
     if (!event || event.price <= 0) return new Response(JSON.stringify({ error: "Event is free or not found" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (event.deleted_at) return new Response(JSON.stringify({ error: "Event has been deleted" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (event.status !== "published") return new Response(JSON.stringify({ error: "Event is not available" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (event.start_date && new Date(event.start_date) < new Date()) return new Response(JSON.stringify({ error: "Event has already started" }), { status: 410, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
     const amount = event.price
     let finalAmount = amount

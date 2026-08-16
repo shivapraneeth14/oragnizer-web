@@ -29,6 +29,57 @@ async function razorpayPost(path: string, body: any) {
   return data
 }
 
+function mapRefundStatus(status: string | undefined): string {
+  switch (status) {
+    case "processed":
+      return "processed"
+    case "pending":
+    case "queued":
+      return "pending"
+    case "failed":
+    case "reversed":
+      return "failed"
+    default:
+      return "pending"
+  }
+}
+
+// Organizer-initiated cancellation refunds EVERY confirmed registration in
+// FULL (customer gets the complete amount back, platform fee included). The
+// organizer's wallet is debited by their share only; the platform's
+// commission record for the transaction is zeroed via commission_reversed.
+async function rebalanceRefund(
+  community: { id: string; commission_percent: number | null },
+  payment: { id: string; amount: number },
+  via: "registration_cancellation" | "event_cancellation",
+  eventId: string,
+) {
+  const platformFee = Math.floor(Number(payment.amount) * Number(community.commission_percent ?? 10) / 100)
+  const organizerShare = Number(payment.amount) - platformFee
+
+  const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
+    p_community_id: community.id,
+    p_amount: organizerShare,
+    p_reason: `${via}_refund`,
+    p_event_id: eventId,
+  })
+  if (debitError || debitResult?.error) {
+    throw new Error(debitResult?.error || debitError?.message || "Wallet debit failed")
+  }
+
+  if (platformFee > 0) {
+    await supabase.from("payment_audit_log").insert({
+      action: "commission_reversed",
+      payment_id: payment.id,
+      details: {
+        commission_amount: platformFee,
+        reason: via,
+        note: `Platform commission zeroed — customer refunded the full ₹${(Number(payment.amount) / 100).toFixed(0)} including our fee`,
+      },
+    })
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: { "Content-Type": "application/json", ...corsHeaders } })
@@ -49,7 +100,7 @@ Deno.serve(async (req) => {
 
     const { data: event, error: eventErr } = await supabase
       .from("events")
-      .select("id, community_id, status")
+      .select("id, community_id, start_date, status")
       .eq("id", event_id)
       .single()
 
@@ -58,7 +109,7 @@ Deno.serve(async (req) => {
 
     const { data: community } = await supabase
       .from("communities")
-      .select("id, owner_id, wallet_balance, commission_percent")
+      .select("id, owner_id, commission_percent")
       .eq("id", event.community_id)
       .single()
 
@@ -114,65 +165,69 @@ Deno.serve(async (req) => {
     let failed = 0
     const errors: string[] = []
 
+    // No exceptions: every confirmed registration gets a full refund.
     for (const payment of payments) {
-      let paymentRefunded = false
       try {
-        if (payment.razorpay_payment_id) {
-          const refund = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, { amount: payment.amount })
+        if (!payment.razorpay_payment_id) throw new Error(`Payment ${payment.id} has no razorpay_payment_id`)
 
-          if (community) {
-            const platformFee = Math.floor(Number(payment.amount) * Number(community.commission_percent) / 100)
-            const organizerShare = Number(payment.amount) - platformFee
-            const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
-              p_community_id: community.id,
-              p_amount: organizerShare,
-              p_reason: "event_cancellation_refund",
-            })
-            if (debitError || debitResult?.error) {
-              throw new Error(debitResult?.error || debitError?.message || "Wallet debit failed")
-            }
-          }
+        const refund = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, { amount: payment.amount, receipt: `ref_${payment.id}` })
 
-          await supabase.from("payments").update({
-            status: "refunded",
-            refund_status: "processed",
-            razorpay_refund_id: refund.id,
-            refunded_amount: payment.amount,
-          }).eq("id", payment.id)
+        const mappedStatus = mapRefundStatus(refund.status)
 
+        // Record the truthful refund state FIRST (Razorpay accepted it), then
+        // rebalance the wallet so a clawback failure is surfaced in the audit
+        // log instead of round-tripping into a duplicate-receipt retry.
+        await supabase.from("payments").update({
+          status: "refunded",
+          refund_status: mappedStatus,
+          refund_attempt_count: 0,
+          razorpay_refund_id: refund.id,
+          refunded_amount: payment.amount,
+        }).eq("id", payment.id)
+
+        await supabase.from("payment_audit_log").insert({
+          action: "refund_issued",
+          payment_id: payment.id,
+          details: { refund_id: refund.id, amount: payment.amount, refund_status: mappedStatus, event_id, triggered_by: "event_cancellation" },
+        })
+
+        // Organizer-cancelled events refund EVERYONE in full (fee included),
+        // so the platform fee record for each transaction is zeroed.
+        try {
+          await rebalanceRefund(community, payment, "event_cancellation", event_id)
+        } catch (clawbackErr) {
           await supabase.from("payment_audit_log").insert({
-            action: "refund_issued",
+            action: "refund_wallet_debit_failed",
             payment_id: payment.id,
-            details: { refund_id: refund.id, amount: payment.amount, event_id, triggered_by: "event_cancellation" },
+            details: {
+              refund_id: refund.id,
+              amount: payment.amount,
+              reason: "event_cancellation",
+              error: (clawbackErr as Error).message,
+              note: "Customer refunded but organizer wallet clawback failed - manual follow-up required",
+            },
           })
-
-          refunded++
-          paymentRefunded = true
         }
+
+        refunded++
       } catch (err) {
         console.error(`Refund failed for payment ${payment.id}:`, err)
         errors.push(`Payment ${payment.id}: ${(err as Error).message}`)
-        await supabase.from("payments").update({ refund_status: "requested" }).eq("id", payment.id)
+        await supabase.from("payments").update({ refund_status: "failed", refund_attempt_count: 1 }).eq("id", payment.id)
         await supabase.from("payment_audit_log").insert({
           action: "refund_failed",
           payment_id: payment.id,
           details: { error: String(err), event_id, triggered_by: "event_cancellation" },
         })
         failed++
-        // Still cancel the registration and decrement count
-        paymentRefunded = true
       }
+      // Always cancel the registration and decrement count
+      await supabase.from("registrations").update({
+        status: "cancelled",
+        deleted_at: new Date().toISOString(),
+      }).eq("id", payment.registration_id)
 
-      // Always cancel registration and decrement booked_count for processed payments,
-      // regardless of whether the refund succeeded or failed
-      if (paymentRefunded || payment.razorpay_payment_id) {
-        await supabase.from("registrations").update({
-          status: "cancelled",
-          deleted_at: new Date().toISOString(),
-        }).eq("id", payment.registration_id)
-
-        await supabase.rpc("decrement_event_booked", { p_event_id: event_id })
-      }
+      await supabase.rpc("decrement_event_booked", { p_event_id: event_id })
     }
 
     const paidRegIds = new Set(payments.map(p => p.registration_id))
