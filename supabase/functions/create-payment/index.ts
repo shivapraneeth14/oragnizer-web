@@ -46,6 +46,45 @@ async function createRazorpayOrder(amount: number, registrationId: string) {
   }
 }
 
+async function razorpayGet(path: string): Promise<any> {
+  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
+    },
+    signal: AbortSignal.timeout(15000),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: { description: `HTTP ${res.status}` } }))
+    throw new Error(err.error?.description || `Razorpay error (${res.status})`)
+  }
+  return res.json()
+}
+
+// "Path C": if the pending order is actually paid and captured, CONFIRM the
+// registration (money already moved) instead of reusing a dead order.
+async function confirmPaidOrder(paymentId: string, orderId: string): Promise<{ confirmed: boolean } | null> {
+  try {
+    const order = await razorpayGet(`orders/${orderId}`)
+    if (order.status !== "paid" || (order.amount_paid || 0) <= 0) return null
+
+    const payBody = await razorpayGet(`orders/${orderId}/payments`)
+    const captured = payBody?.items?.find((p: any) => p.status === "captured")
+    if (!captured) return null
+
+    await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", paymentId)
+    const { data: confirmResult, error: confirmErr } = await supabase
+      .rpc("confirm_payment", { p_payment_id: paymentId })
+    if (confirmErr) throw confirmErr
+    if (confirmResult?.error) throw new Error(confirmResult.error)
+    if (confirmResult?.action === "refund_required") return { confirmed: false }
+    return { confirmed: true }
+  } catch (err) {
+    console.error(`confirmPaidOrder failed for payment ${paymentId}:`, err)
+    return null
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: { "Content-Type": "application/json", ...corsHeaders } })
@@ -154,6 +193,15 @@ Deno.serve(async (req) => {
       if (existingPayment.status === "pending" && existingPayment.razorpay_order_id) {
         const orderAge = Date.now() - new Date(existingPayment.created_at).getTime()
         if (orderAge < 24 * 60 * 60 * 1000) {
+          // Path C: if the money already landed, confirm instead of reusing
+          // the order (the success callback may have been lost).
+          const confirmed = await confirmPaidOrder(existingPayment.id, existingPayment.razorpay_order_id)
+          if (confirmed?.confirmed) {
+            return new Response(JSON.stringify({ exists: true, payment_status: "confirmed", registration_id: registrationId }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          }
+          if (confirmed !== null) {
+            return new Response(JSON.stringify({ error: "Your payment was received but could not be confirmed. Payment will be refunded." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          }
           return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: existingPayment.razorpay_order_id, amount: finalAmount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }

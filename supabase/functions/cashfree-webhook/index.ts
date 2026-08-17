@@ -62,25 +62,51 @@ Deno.serve(async (req) => {
     if (!payout) return new Response("Payout not found", { status: 404 })
 
     const newStatus = payload.data?.status
+    const utr = payload.data?.transferUtr ?? payload.data?.utr ?? null
+    const statusReason = payload.data?.statusDescription ?? payload.data?.statusInformation ?? payload.data?.message ?? null
+
     if (newStatus === "SUCCESS") {
       if (payout.status === "success") return new Response("Already processed", { status: 200 })
 
       await supabase
         .from("payout_items")
-        .update({ status: "success", updated_at: new Date().toISOString() })
+        .update({
+          status: "success",
+          utr,
+          cashfree_status: newStatus,
+          status_reason: statusReason,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", payout.id)
 
       await supabase.from("payment_audit_log").insert({
         action: "payout_success",
-        details: { payout_id: payout.id, community_id: payout.community_id, amount: payout.amount },
+        details: { payout_id: payout.id, community_id: payout.community_id, amount: payout.amount, utr, status: newStatus },
       })
-    } else if (["FAILED", "REJECTED", "REVERSED"].includes(newStatus)) {
-      await supabase.rpc("refund_wallet", { p_payout_id: payout.id })
-
-      await supabase.from("payment_audit_log").insert({
-        action: "payout_failed",
-        details: { payout_id: payout.id, community_id: payout.community_id, amount: payout.amount, status: newStatus },
+    } else if (["FAILED", "REJECTED", "REVERSED", "CANCELLED"].includes(newStatus)) {
+      // Single guarded path (shared with the status poller): atomic capture of
+      // Cashfree's verbatim status + reason, wallet restore, and audit — the
+      // wallet can never be credited twice even if webhook and poller race.
+      const { error: syncErr } = await supabase.rpc("sync_payout_status_update", {
+        p_payout_id: payout.id,
+        p_cashfree_status: newStatus,
+        p_utr: utr,
+        p_status_reason: statusReason,
       })
+      if (syncErr) {
+        console.error("sync_payout_status_update failed:", syncErr)
+        return new Response("Internal error", { status: 500 })
+      }
+    } else {
+      // In-flight states (TO_PROCESS, DISPATCHED, INITIATED, PROCESSING, …):
+      // mirror Cashfree's word verbatim; row stays `processing` locally.
+      await supabase
+        .from("payout_items")
+        .update({
+          cashfree_status: newStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", payout.id)
     }
 
     return new Response("OK", { status: 200 })

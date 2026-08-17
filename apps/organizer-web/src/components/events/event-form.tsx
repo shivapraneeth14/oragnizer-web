@@ -298,6 +298,35 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
             </div>
           </div>
 
+          {/* Live revenue split preview */}
+          {(() => {
+            const price = Math.max(0, parseFloat(form.price) || 0)
+            if (price <= 0) return null
+            const fee = Math.floor(price * 10) / 100
+            const share = price - fee
+            return (
+              <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">Per-ticket split</p>
+                <div className="flex justify-between text-neutral-700">
+                  <span>Attendee pays</span>
+                  <span className="font-semibold">₹{price.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-neutral-500">
+                  <span>Platform fee (10%)</span>
+                  <span>− ₹{fee.toFixed(2)}</span>
+                </div>
+                <div className="mt-1 flex justify-between border-t border-neutral-200 pt-1 text-neutral-800">
+                  <span className="font-medium">You receive</span>
+                  <span className="font-semibold text-green-700">₹{share.toFixed(2)}</span>
+                </div>
+                <p className="mt-2 text-xs text-neutral-400">
+                  Refund policy: you refund the full ticket on organizer cancellation; a customer self-cancel refunds
+                  your share to them (fee is kept). Razorpay charges ≈2.36% (2% + 18% GST) on top.
+                </p>
+              </div>
+            )
+          })()}
+
           {/* Status */}
           <div>
             <label className="mb-1 block text-xs font-medium text-neutral-500">Status</label>

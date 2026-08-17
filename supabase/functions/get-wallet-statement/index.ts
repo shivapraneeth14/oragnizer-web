@@ -31,6 +31,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url)
     const communityId = url.searchParams.get("community_id")
     if (!communityId) return new Response(JSON.stringify({ error: "community_id query param is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    const eventId = url.searchParams.get("event_id")
 
     const { data: community } = await supabase
       .from("communities")
@@ -43,6 +44,7 @@ Deno.serve(async (req) => {
 
     const { data: rows, error: queryErr } = await supabase.rpc("get_wallet_statement", {
       p_community_id: communityId,
+      p_event_id: eventId ?? null,
     })
 
     if (queryErr) throw queryErr

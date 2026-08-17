@@ -4,6 +4,8 @@ import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
+const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
+const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -11,6 +13,27 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-client-info",
   "Access-Control-Max-Age": "86400",
+}
+
+// "Path C": before treating a pending booking as abandoned, ask RAZORPAY
+// (the source of truth) whether the money actually landed. A payment that was
+// captured but never confirmed must be CONFIRMED, never cancelled.
+async function checkOrderStatus(orderId: string): Promise<"paid" | "open" | "failed" | "unknown"> {
+  try {
+    const res = await fetch(`https://api.razorpay.com/v1/orders/${orderId}`, {
+      headers: {
+        Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
+      },
+      signal: AbortSignal.timeout(15000),
+    })
+    const order = await res.json()
+    if (!res.ok) return "unknown"
+    if (order.status === "paid" && (order.amount_paid || 0) > 0) return "paid"
+    if (order.status === "attempted") return "open"
+    return order.status === "created" ? "open" : "failed"
+  } catch (_) {
+    return "unknown"
+  }
 }
 
 Deno.serve(async (req) => {
@@ -48,11 +71,57 @@ Deno.serve(async (req) => {
 
     const { data: payment } = await supabase
       .from("payments")
-      .select("id, status, coupon_id")
+      .select("id, status, coupon_id, razorpay_order_id")
       .eq("registration_id", registration.id)
       .maybeSingle()
 
     if (payment && (payment.status === "pending" || payment.status === "created")) {
+      // Path C: the customer may have paid even though the app lost the
+      // success callback. Razorpay is the source of truth - if the order is
+      // paid with a captured payment, CONFIRM instead of cancelling.
+      if (payment.razorpay_order_id) {
+        const orderState = await checkOrderStatus(payment.razorpay_order_id)
+        if (orderState === "paid") {
+          const payRes = await fetch(
+            `https://api.razorpay.com/v1/orders/${payment.razorpay_order_id}/payments`,
+            {
+              headers: {
+                Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
+              },
+              signal: AbortSignal.timeout(15000),
+            },
+          )
+          const payBody = await payRes.json()
+          const captured = payBody?.items?.find((p: any) => p.status === "captured")
+          if (captured) {
+            await supabase.from("payments").update({
+              razorpay_payment_id: captured.id,
+            }).eq("id", payment.id)
+
+            const { data: confirmResult, error: confirmErr } = await supabase
+              .rpc("confirm_payment", { p_payment_id: payment.id })
+
+            if (!confirmErr && confirmResult?.action === "confirmed") {
+              await supabase.from("payment_audit_log").insert({
+                action: "booking_reconciled",
+                details: {
+                  event_id,
+                  registration_id: registration.id,
+                  payment_id: payment.id,
+                  note: "Order was already paid - confirmed instead of cancelled (Path C)",
+                },
+              })
+              return new Response(JSON.stringify({ success: true, cleaned: false, reconciled: true }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+            }
+            if (!confirmErr && confirmResult?.action === "refund_required") {
+              // Capacity full or event cancelled - never cancel a PAID
+              // booking silently; the webhook auto-refund path covers it.
+              return new Response(JSON.stringify({ success: true, cleaned: false, reconciled: "refund_required" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+            }
+          }
+        }
+      }
+
       const { error: payErr } = await supabase
         .from("payments")
         .update({ status: "failed", updated_at: new Date().toISOString() })

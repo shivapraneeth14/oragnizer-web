@@ -233,10 +233,25 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
         body: { event_id: event.id },
       })
       if (error) {
-        setCancelError(error.message)
+        let msg = error.message
+        try {
+          const body = await (error as { context?: Response }).context?.clone().json()
+          if (body?.error) msg = body.error
+        } catch {}
+        setCancelError(msg)
       } else if (data?.error) {
         setCancelError(data.error)
       } else {
+        const refundedCount = data?.payments_refunded ?? 0
+        const failedCount = data?.payments_failed ?? 0
+        if (failedCount > 0) {
+          alert(
+            `Event cancelled. ${refundedCount} refund(s) issued, but ${failedCount} payment(s) failed to refund.\n\n` +
+            "The refund retry job will keep trying (up to 5 attempts). Keep this event's payments in your Payout tab to follow up."
+          )
+        } else if (refundedCount > 0) {
+          alert(`Event cancelled. ${refundedCount} refund(s) initiated — attendees will see updates in their payment details.`)
+        }
         setShowCancelModal(false)
         setCancelConfirmText("")
         onCancel()
@@ -547,9 +562,16 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                           </td>
                           <td className="px-4 py-3">
                             {reg.payments && reg.payments.length > 0 ? (
-                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${payStatusColors[reg.payments[0].status]}`}>
-                                {reg.payments[0].status.charAt(0).toUpperCase() + reg.payments[0].status.slice(1)}
-                              </span>
+                              <>
+                                <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${payStatusColors[reg.payments[0].status]}`}>
+                                  {reg.payments[0].status.charAt(0).toUpperCase() + reg.payments[0].status.slice(1)}
+                                </span>
+                                {reg.payments[0].amount > 0 && (
+                                  <span className="ml-2 text-xs font-medium text-neutral-600">
+                                    ₹{(reg.payments[0].amount / 100).toFixed(0)}
+                                  </span>
+                                )}
+                              </>
                             ) : (
                               <span className="text-xs text-neutral-400">—</span>
                             )}
