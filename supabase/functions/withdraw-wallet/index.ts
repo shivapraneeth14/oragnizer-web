@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
     const { community_id, amount } = await req.json()
-    if (!community_id || !amount || amount <= 0) {
+    if (!community_id || !amount || amount <= 0 || !Number.isInteger(amount)) {
       return new Response(JSON.stringify({ error: "community_id and amount (> 0) are required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
     if (amount < MIN_WITHDRAWAL_PAISE) {

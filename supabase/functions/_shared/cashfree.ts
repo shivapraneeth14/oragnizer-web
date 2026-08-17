@@ -9,7 +9,14 @@ const BASE_URL = IS_PRODUCTION
   ? "https://api.cashfree.com/payout"
   : "https://sandbox.cashfree.com/payout"
 
+// Read APIs (authorize + getTransferStatus) live on the official API hosts;
+// the sandbox host above proxies writes but rejects token-based auth.
+const READ_BASE = IS_PRODUCTION
+  ? "https://payout-api.cashfree.com"
+  : "https://payout-gamma.cashfree.com"
+
 let _signatureCache: { value: string; expires: number } | null = null
+let _tokenCache: { value: string; expires: number } | null = null
 
 async function generateSignature(): Promise<string> {
   if (_signatureCache && Date.now() < _signatureCache.expires) return _signatureCache.value
@@ -39,7 +46,57 @@ async function generateSignature(): Promise<string> {
   return value
 }
 
+// Payouts v1.2 read APIs need an Authorization bearer token obtained from
+// /authorize using the RSA signature (X-Cf-Signature) + client credentials.
+async function authorizeToken(): Promise<string> {
+  if (_tokenCache && Date.now() < _tokenCache.expires) return _tokenCache.value
+
+  const res = await fetch(`${READ_BASE}/payout/v1/authorize`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": CASHFREE_CLIENT_ID,
+      "x-client-secret": CASHFREE_CLIENT_SECRET,
+      "x-cf-signature": await generateSignature(),
+    },
+  })
+  const data = await res.json()
+  if (!res.ok || data?.status === "ERROR" || !(data?.data?.token ?? data?.token)) {
+    throw new Error(data.message || data.subCode || data.code || `Cashfree authorize failed (${res.status})`)
+  }
+
+  const value = data?.data?.token ?? data?.token
+  _tokenCache = { value, expires: Date.now() + 50 * 1000 }
+  return value
+}
+
 export async function cashfreePost(path: string, body: Record<string, unknown>) {
+  const res = await cashfreeFetch(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+  return res
+}
+
+export async function cashfreeGet(path: string) {
+  // v1.2 read APIs (e.g. getTransferStatus) authenticate with a signed
+  // Bearer token obtained from /authorize.
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-client-id": CASHFREE_CLIENT_ID,
+    "x-api-version": "2024-01-01",
+    Authorization: `Bearer ${await authorizeToken()}`,
+  }
+
+  const res = await fetch(`${READ_BASE}/payout/v1.1${path}`, { method: "GET", headers })
+  const data = await res.json()
+  if (!res.ok || data?.status === "ERROR") {
+    throw new Error(data.message || data.subCode || data.code || `Cashfree API error (${res.status})`)
+  }
+  return data
+}
+
+async function cashfreeFetch(path: string, init: { method: string; body?: string }) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "x-client-id": CASHFREE_CLIENT_ID,
@@ -51,9 +108,9 @@ export async function cashfreePost(path: string, body: Record<string, unknown>) 
   }
 
   const res = await fetch(`${BASE_URL}${path}`, {
-    method: "POST",
+    method: init.method,
     headers,
-    body: JSON.stringify(body),
+    body: init.body,
   })
   const data = await res.json()
   if (!res.ok || data?.status === "ERROR") {
