@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../../supabase"
 import { copyText } from "../../lib/clipboard"
 import { shareBase, isMobileDevice } from "../../lib/share"
@@ -10,7 +10,7 @@ interface RegistrationWithDetails {
   status: "pending" | "confirmed" | "cancelled" | "attended"
   registered_at: string
   profiles: Pick<Profile, "email" | "first_name" | "last_name">
-  payments: Pick<Payment, "amount" | "status">[] | null
+  payments: Pick<Payment, "amount" | "status" | "platform_fee" | "organizer_share">[] | null
 }
 
 interface MessageWithProfile {
@@ -102,12 +102,9 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
   const [sending, setSending] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [descTabIndex, setDescTabIndex] = useState(0)
-  const [showCancelModal, setShowCancelModal] = useState(false)
-  const [cancelConfirmText, setCancelConfirmText] = useState("")
-  const [cancelling, setCancelling] = useState(false)
-  const [cancelError, setCancelError] = useState<string | null>(null)
   const [showShareOptions, setShowShareOptions] = useState(false)
   const [shareCopied, setShareCopied] = useState(false)
+  const regIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => { setDescTabIndex(0) }, [event.id])
 
@@ -117,23 +114,48 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
     })
   }, [])
 
-  useEffect(() => {
-    setLoading(true)
-    supabase
+  const loadRegistrations = useCallback(async () => {
+    const { data, error } = await supabase
       .from("registrations")
-      .select("id, user_id, status, registered_at, profiles(email, first_name, last_name), payments(amount, status)")
+      .select("id, user_id, status, registered_at, profiles(email, first_name, last_name), payments(amount, status, platform_fee, organizer_share)")
       .eq("event_id", event.id)
       .is("deleted_at", null)
       .order("registered_at", { ascending: false })
-      .then(({ data, error }) => {
-        if (error) {
-          setError(error.message)
-        } else {
-          setRegistrations(data as unknown as RegistrationWithDetails[])
-        }
-        setLoading(false)
-      })
+    if (error) {
+      setError(error.message)
+    } else {
+      setRegistrations(data as unknown as RegistrationWithDetails[])
+      regIdsRef.current = new Set(((data || []) as { id: string }[]).map((r) => r.id))
+    }
+    setLoading(false)
   }, [event.id])
+
+  useEffect(() => {
+    setLoading(true)
+    loadRegistrations()
+  }, [loadRegistrations])
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`event-registrations-live-${event.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "registrations", filter: `event_id=eq.${event.id}` },
+        () => { loadRegistrations() }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "payments" },
+        (payload: { new: { registration_id?: string } | null; old: { registration_id?: string } | null }) => {
+          const row = payload.new ?? payload.old
+          if (row?.registration_id && regIdsRef.current.has(row.registration_id)) {
+            loadRegistrations()
+          }
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [event.id, loadRegistrations])
 
   useEffect(() => {
     if (activeTab !== "discussion") return
@@ -225,43 +247,6 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
     }
   }
 
-  async function handleCancelEvent() {
-    setCancelling(true)
-    setCancelError(null)
-    try {
-      const { data, error } = await supabase.functions.invoke("cancel-event", {
-        body: { event_id: event.id },
-      })
-      if (error) {
-        let msg = error.message
-        try {
-          const body = await (error as { context?: Response }).context?.clone().json()
-          if (body?.error) msg = body.error
-        } catch {}
-        setCancelError(msg)
-      } else if (data?.error) {
-        setCancelError(data.error)
-      } else {
-        const refundedCount = data?.payments_refunded ?? 0
-        const failedCount = data?.payments_failed ?? 0
-        if (failedCount > 0) {
-          alert(
-            `Event cancelled. ${refundedCount} refund(s) issued, but ${failedCount} payment(s) failed to refund.\n\n` +
-            "The refund retry job will keep trying (up to 5 attempts). Keep this event's payments in your Payout tab to follow up."
-          )
-        } else if (refundedCount > 0) {
-          alert(`Event cancelled. ${refundedCount} refund(s) initiated — attendees will see updates in their payment details.`)
-        }
-        setShowCancelModal(false)
-        setCancelConfirmText("")
-        onCancel()
-      }
-    } catch (e) {
-      setCancelError((e as Error).message)
-    }
-    setCancelling(false)
-  }
-
   async function sendMessage() {
     const text = newMessage.trim()
     if (!text) return
@@ -312,6 +297,11 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
   }
 
   const restrictedUserIds = new Set(restrictedUsers.map((r) => r.user_id))
+
+  const paidRegs = registrations.filter((r) => r.payments?.[0]?.status === "success")
+  const totalGross = paidRegs.reduce((s, r) => s + (r.payments?.[0]?.amount || 0), 0)
+  const totalFee = paidRegs.reduce((s, r) => s + (r.payments?.[0]?.platform_fee ?? 0), 0)
+  const totalNet = paidRegs.reduce((s, r) => s + (r.payments?.[0]?.organizer_share ?? 0), 0)
 
   return (
     <div>
@@ -389,7 +379,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                     Edit
                   </button>
                   <button
-                    onClick={() => setShowCancelModal(true)}
+                    onClick={onCancel}
                     className="flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
                   >
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -521,6 +511,13 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
           {/* Registrations tab */}
           {activeTab === "registrations" && (
             <div>
+              {totalGross > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-neutral-50 px-4 py-2.5 text-xs text-neutral-600">
+                  <span>Collected <span className="font-semibold text-neutral-900">₹{(totalGross / 100).toFixed(0)}</span></span>
+                  <span>Platform fees <span className="font-semibold text-neutral-900">₹{(totalFee / 100).toFixed(0)}</span></span>
+                  <span>Your net <span className="font-semibold text-[#C2185B]">₹{(totalNet / 100).toFixed(0)}</span></span>
+                </div>
+              )}
               {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
               {loading ? (
                 <div className="flex justify-center py-10">
@@ -570,6 +567,11 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                                   <span className="ml-2 text-xs font-medium text-neutral-600">
                                     ₹{(reg.payments[0].amount / 100).toFixed(0)}
                                   </span>
+                                )}
+                                {reg.payments[0].amount > 0 && reg.payments[0].organizer_share != null && (
+                                  <div className="mt-0.5 text-[11px] text-neutral-400">
+                                    You get ₹{(reg.payments[0].organizer_share / 100).toFixed(0)} · fee ₹{((reg.payments[0].platform_fee ?? 0) / 100).toFixed(0)}
+                                  </div>
                                 )}
                               </>
                             ) : (
@@ -826,47 +828,6 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
         </div>
       </div>
 
-      {showCancelModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-semibold text-neutral-900">Cancel Event</h3>
-            <p className="mt-2 text-sm text-neutral-600">
-              This will cancel the event, refund all paid registrations, and notify attendees.
-              Type <span className="font-bold text-red-600">END EVENT</span> to confirm.
-            </p>
-            <input
-              type="text"
-              value={cancelConfirmText}
-              onChange={(e) => setCancelConfirmText(e.target.value)}
-              placeholder="Type END EVENT"
-              className="mt-4 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
-            />
-            {cancelError && (
-              <p className="mt-2 text-sm text-red-500">{cancelError}</p>
-            )}
-            <div className="mt-4 flex gap-3">
-              <button
-                onClick={() => {
-                  setShowCancelModal(false)
-                  setCancelConfirmText("")
-                  setCancelError(null)
-                }}
-                className="flex-1 rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-                disabled={cancelling}
-              >
-                Keep Event
-              </button>
-              <button
-                onClick={handleCancelEvent}
-                className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                disabled={cancelConfirmText !== "END EVENT" || cancelling}
-              >
-                {cancelling ? "Cancelling..." : "Confirm Cancel"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

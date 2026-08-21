@@ -123,6 +123,8 @@ export interface Payment {
   razorpay_order_id: string | null
   razorpay_payment_id: string | null
   status: "pending" | "success" | "failed" | "refunded"
+  platform_fee: number | null
+  organizer_share: number | null
   refund_status: "requested" | "approved" | "processed" | "denied" | null
   created_at: string
   updated_at: string
