@@ -98,18 +98,18 @@ export default function CancelEventConfirmDialog({ event, onClose, onCancelled }
         <p className="mt-3 text-sm text-neutral-600">
           Are you sure? This will cancel the event and notify attendees.
         </p>
-        <div className="mt-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
-          {summaryLoading ? (
-            "Calculating refunds..."
-          ) : refundCount > 0 ? (
-            <>
-              <span className="font-bold">₹{((refundTotal || 0) / 100).toLocaleString("en-IN")}</span>
-              {" "}will be refunded to {refundCount} attendee{refundCount !== 1 ? "s" : ""}.
-            </>
-          ) : (
-            "No paid registrations to refund."
-          )}
-        </div>
+        {(summaryLoading || refundCount > 0) && (
+          <div className="mt-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+            {summaryLoading ? (
+              "Calculating refunds..."
+            ) : (
+              <>
+                <span className="font-bold">₹{((refundTotal || 0) / 100).toLocaleString("en-IN")}</span>
+                {" "}will be refunded to {refundCount} attendee{refundCount !== 1 ? "s" : ""}.
+              </>
+            )}
+          </div>
+        )}
         {error && (
           <p className="mt-2 text-sm text-red-500">{error}</p>
         )}

@@ -29,6 +29,21 @@ async function razorpayPost(path: string, body: any) {
   return data
 }
 
+async function razorpayGet(path: string): Promise<any> {
+  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
+    },
+    signal: AbortSignal.timeout(15000),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: { description: `HTTP ${res.status}` } }))
+    throw new Error(err.error?.description || `Razorpay error (${res.status})`)
+  }
+  return res.json()
+}
+
 function mapRefundStatus(status: string | undefined): string {
   switch (status) {
     case "processed":
@@ -144,29 +159,67 @@ Deno.serve(async (req) => {
 
     const { data: registrations } = await supabase
       .from("registrations")
-      .select("id, user_id")
+      .select("id, user_id, status")
       .eq("event_id", event_id)
-      .eq("status", "confirmed")
       .is("deleted_at", null)
 
-    const confirmedRegs = registrations || []
+    const liveRegs = registrations || []
 
     let payments: any[] = []
-    if (confirmedRegs.length > 0) {
+    if (liveRegs.length > 0) {
       const { data: p } = await supabase
         .from("payments")
-        .select("id, amount, razorpay_payment_id, registration_id, status")
-        .in("registration_id", confirmedRegs.map(r => r.id))
-        .eq("status", "success")
+        .select("id, amount, razorpay_payment_id, razorpay_order_id, registration_id, status")
+        .in("registration_id", liveRegs.map(r => r.id))
       payments = p || []
+    }
+
+    // Rescue sweep: a payment can sit "pending" locally while its money is
+    // already captured at Razorpay (webhook delay). Ask Razorpay directly so
+    // paid attendees are never stranded without a refund when the event dies.
+    const rescuedRegIds = new Set<string>()
+    const alreadyPaidRegIds = new Set(payments.filter(p => p.status === "success").map(p => p.registration_id))
+    for (const payment of payments.filter(p => p.status === "pending" && p.razorpay_order_id && !alreadyPaidRegIds.has(p.registration_id))) {
+      if (rescuedRegIds.has(payment.registration_id)) continue
+      try {
+        const order = await razorpayGet(`orders/${payment.razorpay_order_id}`)
+        if (order.status !== "paid" || (order.amount_paid || 0) <= 0) continue
+
+        const payBody = await razorpayGet(`orders/${payment.razorpay_order_id}/payments`)
+        const captured = payBody?.items?.find((p: any) => p.status === "captured")
+        if (!captured) continue
+
+        await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", payment.id)
+
+        // confirm_payment is idempotent and keeps the wallet/transfer ledger
+        // correct (books capacity, credits organizer share).
+        const { data: confirmResult, error: confirmErr } = await supabase.rpc("confirm_payment", { p_payment_id: payment.id })
+        if (confirmErr) throw confirmErr
+        if (confirmResult?.error) throw new Error(confirmResult.error)
+
+        payment.status = "success"
+        payment.razorpay_payment_id = captured.id
+        rescuedRegIds.add(payment.registration_id)
+        const reg = liveRegs.find(r => r.id === payment.registration_id)
+        if (reg && reg.status !== "confirmed") reg.status = "confirmed"
+      } catch (err) {
+        console.error(`Pending-payment sweep failed for ${payment.id}:`, err)
+        await supabase.from("payment_audit_log").insert({
+          action: "pending_sweep_failed",
+          payment_id: payment.id,
+          details: { error: String(err), event_id, triggered_by: "event_cancellation" },
+        })
+      }
     }
 
     let refunded = 0
     let failed = 0
     const errors: string[] = []
 
-    // No exceptions: every confirmed registration gets a full refund.
-    for (const payment of payments) {
+    const refundable = payments.filter(p => p.status === "success")
+
+    // No exceptions: every paid registration gets a full refund.
+    for (const payment of refundable) {
       try {
         if (!payment.razorpay_payment_id) throw new Error(`Payment ${payment.id} has no razorpay_payment_id`)
 
@@ -230,26 +283,30 @@ Deno.serve(async (req) => {
       await supabase.rpc("decrement_event_booked", { p_event_id: event_id })
     }
 
-    const paidRegIds = new Set(payments.map(p => p.registration_id))
-    for (const reg of confirmedRegs) {
-      if (paidRegIds.has(reg.id)) continue
+    const refundedRegIds = new Set(refundable.map(p => p.registration_id))
+    for (const reg of liveRegs) {
+      if (refundedRegIds.has(reg.id)) continue
       await supabase.from("registrations").update({
         status: "cancelled",
         deleted_at: new Date().toISOString(),
       }).eq("id", reg.id)
-      await supabase.rpc("decrement_event_booked", { p_event_id: event_id })
+      // Only regs that counted against capacity get decremented; pending
+      // unpaid ones were never booked.
+      if (reg.status === "confirmed") {
+        await supabase.rpc("decrement_event_booked", { p_event_id: event_id })
+      }
     }
 
     await supabase.from("events").update({ status: "cancelled" }).eq("id", event_id)
 
     await supabase.from("payment_audit_log").insert({
       action: "event_cancelled",
-      details: { event_id, user_id: user.id, registrations_cancelled: confirmedRegs.length, payments_refunded: refunded, payments_failed: failed },
+      details: { event_id, user_id: user.id, registrations_cancelled: liveRegs.length, payments_refunded: refunded, payments_failed: failed },
     })
 
     return new Response(JSON.stringify({
       success: true,
-      registrations_cancelled: confirmedRegs.length,
+      registrations_cancelled: liveRegs.length,
       payments_refunded: refunded,
       payments_failed: failed,
       errors: errors.length > 0 ? errors : undefined,
