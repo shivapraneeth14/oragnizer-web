@@ -131,6 +131,15 @@ export function useEvents(communityId: string | undefined) {
 
   useEffect(() => { fetch() }, [fetch])
 
+  useEffect(() => {
+    if (!communityId) return
+    const channel = supabase
+      .channel(`events-live-${communityId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `community_id=eq.${communityId}` }, () => { fetch() })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [communityId, fetch])
+
   const fetchNextPage = useCallback(() => fetch(true), [fetch])
 
   const createEvent = useCallback(async (data: EventFormData, userId: string) => {

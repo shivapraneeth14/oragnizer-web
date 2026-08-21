@@ -6,6 +6,7 @@ import ProfileSection from "../components/profile/profile-section"
 import EventList from "../components/events/event-list"
 import EventForm from "../components/events/event-form"
 import EventDetail from "../components/events/event-detail"
+import CancelEventConfirmDialog from "../components/events/cancel-event-confirm-dialog"
 import MediaSection from "../components/media/media-section"
 import PayoutSection from "../components/payout/payout-section"
 import SettingsPage from "../components/settings/settings-page"
@@ -49,6 +50,8 @@ export default function DashboardPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | null>(null)
   const [viewingEvent, setViewingEvent] = useState<Event | null>(null)
+  const [cancelTarget, setCancelTarget] = useState<Event | null>(null)
+  const [statsKey, setStatsKey] = useState(0)
   const [members, setMembers] = useState<Member[]>([])
   const [membersLoading, setMembersLoading] = useState(false)
   const [formSaving, setFormSaving] = useState(false)
@@ -83,7 +86,7 @@ export default function DashboardPage() {
     return () => window.removeEventListener("hashchange", onHashChange)
   }, [])
 
-  const { events, loading: eventsLoading, loadingMore: eventsLoadingMore, hasMore: eventsHasMore, error: eventsError, refresh: refreshEvents, createEvent, updateEvent, cancelEvent, fetchNextPage } = useEvents(communityId)
+  const { events, loading: eventsLoading, loadingMore: eventsLoadingMore, hasMore: eventsHasMore, error: eventsError, refresh: refreshEvents, createEvent, updateEvent, fetchNextPage } = useEvents(communityId)
 
   useEffect(() => {
     if (!user) return
@@ -117,7 +120,7 @@ export default function DashboardPage() {
           setUpcomingCount(count || 0)
         }
       })
-  }, [communityId])
+  }, [communityId, statsKey])
 
   useEffect(() => {
     if (!communityId || activeSection !== "members") return
@@ -170,8 +173,9 @@ export default function DashboardPage() {
     setShowForm(true)
   }
 
-  const handleCancelEvent = async (id: string) => {
-    await cancelEvent(id)
+  const handleCancelEvent = (id: string) => {
+    const target = events.find((e) => e.id === id)
+    if (target) setCancelTarget(target)
   }
 
   const handleViewDetail = (event: Event) => {
@@ -185,10 +189,8 @@ export default function DashboardPage() {
     setShowForm(true)
   }
 
-  const handleDetailCancel = async () => {
-    if (!viewingEvent) return
-    await cancelEvent(viewingEvent.id)
-    setViewingEvent(null)
+  const handleDetailCancel = () => {
+    if (viewingEvent) setCancelTarget(viewingEvent)
   }
 
   const handleCreateCommunity = async () => {
@@ -615,6 +617,19 @@ export default function DashboardPage() {
           saving={formSaving}
           onSave={handleFormSave}
           onClose={() => { setShowForm(false); setEditingEvent(null); setFormError(null) }}
+        />
+      )}
+      {/* Cancel Event Confirmation */}
+      {cancelTarget && (
+        <CancelEventConfirmDialog
+          event={cancelTarget}
+          onClose={() => setCancelTarget(null)}
+          onCancelled={() => {
+            refreshEvents()
+            setStatsKey((k) => k + 1)
+            if (viewingEvent?.id === cancelTarget.id) setViewingEvent(null)
+            setCancelTarget(null)
+          }}
         />
       )}
       {formError && (
