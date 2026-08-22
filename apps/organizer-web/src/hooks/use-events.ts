@@ -134,7 +134,7 @@ export function useEvents(communityId: string | undefined) {
   useEffect(() => {
     if (!communityId) return
     const channel = supabase
-      .channel(`events-live-${communityId}`)
+      .channel(`events-live-${communityId}-${crypto.randomUUID().slice(0, 8)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `community_id=eq.${communityId}` }, () => { fetch() })
       .subscribe()
     return () => { supabase.removeChannel(channel) }

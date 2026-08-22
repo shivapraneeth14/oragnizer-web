@@ -85,7 +85,7 @@ export default function PayoutSection({ communityId }: Props) {
   useEffect(() => {
     if (!communityId) return
     const channel = supabase
-      .channel("payout-live")
+      .channel(`payout-live-${crypto.randomUUID().slice(0, 8)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "payout_items", filter: `community_id=eq.${communityId}` },
@@ -105,7 +105,7 @@ export default function PayoutSection({ communityId }: Props) {
   useEffect(() => {
     if (!communityId) return
     const channel = supabase
-      .channel("wallet-live")
+      .channel(`wallet-live-${crypto.randomUUID().slice(0, 8)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "payments" }, () => {
         refreshLive()
       })

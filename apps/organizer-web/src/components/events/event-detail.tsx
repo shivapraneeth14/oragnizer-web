@@ -137,7 +137,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
 
   useEffect(() => {
     const channel = supabase
-      .channel(`event-registrations-live-${event.id}`)
+      .channel(`event-registrations-live-${event.id}-${crypto.randomUUID().slice(0, 8)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "registrations", filter: `event_id=eq.${event.id}` },
