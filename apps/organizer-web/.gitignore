@@ -11,3 +11,5 @@ dist/
 
 # Vercel CLI local state
 .vercel/
+.vercel
+.env*
