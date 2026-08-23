@@ -32,6 +32,9 @@ supabase/.branches
 supabase/.temp
 supabase/.env
 
+# Local secrets backup (keystore + credentials) — NEVER commit
+cluvo-keys/
+
 # Flutter app (extracted to its own repo: github.com/shivapraneeth14/cluvo)
 apps/mobile/
 
