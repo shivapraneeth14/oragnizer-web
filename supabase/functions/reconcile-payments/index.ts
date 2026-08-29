@@ -1,4 +1,4 @@
-import { requiredEnv } from "../_shared/env.ts"
+import { optionalEnv, requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -6,11 +6,12 @@ const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
 const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
+const RECONCILE_SECRET = optionalEnv("RECONCILE_SECRET")
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-reconcile-secret",
 }
 
 async function razorpayGet(path: string): Promise<any> {
@@ -349,17 +350,55 @@ async function retryPendingRefunds(): Promise<number> {
   return handled
 }
 
-Deno.serve(async (_req) => {
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
+
+  if (req.headers.get("x-reconcile-secret") !== RECONCILE_SECRET) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    })
+  }
+
   try {
     let totalActions = 0
 
     // --- Step 1: Check stale pending payments against Razorpay ---
+    // Give up on payments pending >2h — log for manual review.
+    const { data: gaveUpPayments } = await supabase
+      .from("payments")
+      .select("id")
+      .eq("status", "pending")
+      .not("razorpay_order_id", "is", null)
+      .is("deleted_at", null)
+      .lt("created_at", new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+
+    for (const pay of gaveUpPayments || []) {
+      const { data: alreadyLogged } = await supabase
+        .from("payment_audit_log")
+        .select("id")
+        .eq("payment_id", pay.id)
+        .eq("action", "payment_reconcile_gave_up")
+        .maybeSingle()
+      if (alreadyLogged) continue
+
+      await supabase.from("payments").update({ status: "failed" }).eq("id", pay.id)
+      await supabase.from("payment_audit_log").insert({
+        action: "payment_reconcile_gave_up",
+        payment_id: pay.id,
+        details: { note: "Pending >2h — manual review required" },
+      })
+      totalActions++
+    }
+
+    // Check payments 10 min–2h old against Razorpay
     const { data: stalePayments, error: queryErr } = await supabase
       .from("payments")
       .select("id, razorpay_order_id, registration_id, coupon_id, created_at")
       .eq("status", "pending")
       .not("razorpay_order_id", "is", null)
       .is("deleted_at", null)
+      .gt("created_at", new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
       .lt("created_at", new Date(Date.now() - 10 * 60 * 1000).toISOString())
 
     if (queryErr) throw queryErr
@@ -529,7 +568,7 @@ Deno.serve(async (_req) => {
     })
   } catch (err) {
     console.error("reconcile-payments error:", err)
-    return new Response(JSON.stringify({ error: String(err) }), {
+    return new Response(JSON.stringify({ error: "Reconciliation failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })

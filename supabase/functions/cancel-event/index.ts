@@ -277,6 +277,7 @@ Deno.serve(async (req) => {
       // Always cancel the registration and decrement count
       await supabase.from("registrations").update({
         status: "cancelled",
+        qr_code: null,
         deleted_at: new Date().toISOString(),
       }).eq("id", payment.registration_id)
 
@@ -288,6 +289,7 @@ Deno.serve(async (req) => {
       if (refundedRegIds.has(reg.id)) continue
       await supabase.from("registrations").update({
         status: "cancelled",
+        qr_code: null,
         deleted_at: new Date().toISOString(),
       }).eq("id", reg.id)
       // Only regs that counted against capacity get decremented; pending

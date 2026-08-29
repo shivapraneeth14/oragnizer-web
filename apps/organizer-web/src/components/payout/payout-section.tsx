@@ -264,7 +264,7 @@ export default function PayoutSection({ communityId }: Props) {
               {submitting ? "Processing..." : "Withdraw"}
             </button>
           </div>
-          <p className="text-xs text-neutral-400">Enter amount in rupees (e.g. 500 = ₹500.00). Minimum withdrawal: ₹1.</p>
+          <p className="text-xs text-neutral-400">Enter amount in rupees (e.g. 500 = ₹500.00). Minimum withdrawal: ₹100.</p>
           {!activeBeneficiary && beneficiaries.length === 0 && (
             <p className="text-xs text-neutral-500">Add a bank account in Settings → Payment Accounts to start withdrawing funds.</p>
           )}
