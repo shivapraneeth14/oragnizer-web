@@ -63,14 +63,19 @@ function mapRefundStatus(status: string | undefined): string {
 // FULL (customer gets the complete amount back, platform fee included). The
 // organizer's wallet is debited by their share only; the platform's
 // commission record for the transaction is zeroed via commission_reversed.
+// The split READ from the payment row (persisted at order creation) — never
+// recomputed from commission_percent.
 async function rebalanceRefund(
-  community: { id: string; commission_percent: number | null },
-  payment: { id: string; amount: number },
+  community: { id: string },
+  payment: { id: string; amount: number; platform_fee: number | null; organizer_share: number | null },
   via: "registration_cancellation" | "event_cancellation",
   eventId: string,
 ) {
-  const platformFee = Math.floor(Number(payment.amount) * Number(community.commission_percent ?? 10) / 100)
-  const organizerShare = Number(payment.amount) - platformFee
+  const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
+  const organizerShare = Math.max(
+    payment.organizer_share != null ? Number(payment.organizer_share) : Number(payment.amount) - platformFee,
+    0,
+  )
 
   const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
     p_community_id: community.id,
@@ -124,7 +129,7 @@ Deno.serve(async (req) => {
 
     const { data: community } = await supabase
       .from("communities")
-      .select("id, owner_id, commission_percent")
+      .select("id, owner_id")
       .eq("id", event.community_id)
       .single()
 
@@ -169,7 +174,7 @@ Deno.serve(async (req) => {
     if (liveRegs.length > 0) {
       const { data: p } = await supabase
         .from("payments")
-        .select("id, amount, razorpay_payment_id, razorpay_order_id, registration_id, status")
+        .select("id, amount, razorpay_payment_id, razorpay_order_id, registration_id, status, platform_fee, organizer_share")
         .in("registration_id", liveRegs.map(r => r.id))
       payments = p || []
     }

@@ -28,19 +28,18 @@ const REFUND_STATUS_MAP: Record<string, string> = {
 }
 
 async function processRefund(paymentId: string, amount: number) {
-  const { data: payment } = await supabase.from("payments").select("id, razorpay_payment_id, amount, registration_id").eq("id", paymentId).single()
+  const { data: payment } = await supabase.from("payments").select("id, razorpay_payment_id, amount, registration_id, platform_fee, organizer_share").eq("id", paymentId).single()
   if (!payment?.razorpay_payment_id) return
 
   const { data: registration } = await supabase.from("registrations").select("event_id, user_id").eq("id", payment.registration_id).single()
 
-  let community: any = null
+  let communityId: string | null = null
   let eventTitle: string | null = null
   if (registration) {
     const { data: event } = await supabase.from("events").select("community_id, title").eq("id", registration.event_id).single()
     if (event) {
       eventTitle = event.title
-      const { data: c } = await supabase.from("communities").select("id, commission_percent, commission_on").eq("id", event.community_id).single()
-      community = c
+      communityId = event.community_id
     }
   }
 
@@ -71,16 +70,21 @@ async function processRefund(paymentId: string, amount: number) {
     })
 
     // Full refund to the customer — claw back the organizer's share and
-    // zero the platform commission for this transaction. A failure here is
-    // surfaced in payment_audit_log for manual follow-up; it must not block
-    // the webhook ack (Razorpay redelivery would hit the duplicate-receipt
-    // branch and never re-run the clawback).
-    if (community) {
+    // zero the platform commission for this transaction. The split is the
+    // one persisted when the order was created (never recomputed from a
+    // percentage). A failure here is surfaced in payment_audit_log for
+    // manual follow-up; it must not block the webhook ack (Razorpay
+    // redelivery would hit the duplicate-receipt branch and never re-run
+    // the clawback).
+    if (communityId) {
       const baseAmount = Number(payment.amount)
-      const platformFee = Math.floor(baseAmount * Number(community.commission_percent) / 100)
-      const organizerShare = baseAmount - platformFee
+      const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
+      const organizerShare = Math.max(
+        payment.organizer_share != null ? Number(payment.organizer_share) : baseAmount - platformFee,
+        0,
+      )
       const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
-        p_community_id: community.id,
+        p_community_id: communityId,
         p_amount: organizerShare,
         p_reason: "capacity_full_refund",
         p_event_id: registration?.event_id ?? null,

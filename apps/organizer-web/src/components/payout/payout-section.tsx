@@ -233,7 +233,9 @@ export default function PayoutSection({ communityId }: Props) {
     <div>
       <h3 className="text-xl font-semibold text-neutral-900">Payout Settings</h3>
       <p className="mt-2 text-sm text-neutral-500">
-        Revenue from paid events is credited to your wallet. A 10% platform commission is applied.
+        Revenue from paid events is credited to your wallet — 100% of the ticket price you set.
+        A flat platform fee (₹20 + 18% GST) per paid ticket is added to the buyer at checkout and never
+        comes out of your share.
       </p>
 
       <div className="mt-6 rounded-xl border border-neutral-200 bg-white p-6">

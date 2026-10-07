@@ -53,9 +53,9 @@ function mapRefundStatus(status: string | undefined): string {
 // organizer's share goes back to the customer, so there is no
 // commission_reversed record here (unlike organizer-initiated cancellation,
 // where the full amount is refunded and the fee record is zeroed).
+// `refundAmount` IS the organizer share (amount − persisted platform fee).
 async function rebalanceRefund(
   communityId: string,
-  commissionPercent: number,
   payment: { id: string; amount: number },
   refundAmount: number,
   via: "registration_cancellation" | "event_cancellation",
@@ -120,16 +120,11 @@ Deno.serve(async (req) => {
       }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
-    const { data: community, error: commError } = await supabase
-      .from("communities")
-      .select("id, commission_percent")
-      .eq("id", eventInfo.community_id)
-      .single()
-
-    const commissionPercent = commError || !community ? 10 : Number(community.commission_percent)
+    // The split (fee vs ticket) was persisted when the order was created —
+    // read it; never re-derive money from commission_percent.
     const payment = await supabase
       .from("payments")
-      .select("id, status, razorpay_payment_id, amount")
+      .select("id, status, razorpay_payment_id, amount, platform_fee")
       .eq("registration_id", registration.id)
       .maybeSingle()
       .then((r) => r.data)
@@ -138,11 +133,11 @@ Deno.serve(async (req) => {
 
     if (payment && payment.status === "success" && payment.razorpay_payment_id) {
       try {
-        // POLICY: customer self-cancellation refunds the organizer's share
-        // only. The platform fee taken at confirm_payment is NOT refundable
-        // on a self-cancel — it stays with the platform.
-        const fee = Math.floor(Number(payment.amount) * commissionPercent / 100)
-        const refundAmount = Number(payment.amount) - fee
+        // POLICY: customer self-cancellation refunds the ticket only — the
+        // platform fee (flat fee + GST, persisted at order creation) is
+        // NOT refundable on a self-cancel; it stays with the platform.
+        const fee = Math.max(Number(payment.platform_fee ?? 0), 0)
+        const refundAmount = Math.max(Number(payment.amount) - fee, 0)
 
         const refundRes = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, { amount: refundAmount, receipt: `ref_${payment.id}` })
 
@@ -178,7 +173,7 @@ Deno.serve(async (req) => {
         }
 
         try {
-          await rebalanceRefund(eventInfo.community_id, commissionPercent, payment, refundAmount, "registration_cancellation", eventInfo.id)
+          await rebalanceRefund(eventInfo.community_id, payment, refundAmount, "registration_cancellation", eventInfo.id)
         } catch (clawbackErr) {
           await supabase.from("payment_audit_log").insert({
             action: "refund_wallet_debit_failed",

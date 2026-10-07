@@ -58,9 +58,11 @@ const REFUND_STATUS_MAP: Record<string, string> = {
 // Claw back the organizer's share of a refunded payment from the community
 // wallet and reverse the platform commission record. Mirrors the webhook
 // path: the customer is refunded in FULL (fee included), so the fee record
-// for this transaction is zeroed rather than kept.
+// for this transaction is zeroed rather than kept. The split is read from
+// the payment row (persisted when the order was created) — never recomputed
+// from commission_percent.
 async function rebalanceRefund(
-  payment: { id: string; registration_id: string; amount: number },
+  payment: { id: string; registration_id: string; amount: number; platform_fee: number | null; organizer_share: number | null },
   reason: string,
 ): Promise<void> {
   const { data: registration } = await supabase
@@ -77,19 +79,14 @@ async function rebalanceRefund(
     .single()
   if (!event) return
 
-  const { data: community } = await supabase
-    .from("communities")
-    .select("id, commission_percent")
-    .eq("id", event.community_id)
-    .single()
-  if (!community) return
-
-  const commissionPercent = community.commission_percent ?? 10
-  const platformFee = Math.floor(Number(payment.amount) * Number(commissionPercent) / 100)
-  const organizerShare = Number(payment.amount) - platformFee
+  const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
+  const organizerShare = Math.max(
+    payment.organizer_share != null ? Number(payment.organizer_share) : Number(payment.amount) - platformFee,
+    0,
+  )
 
   const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
-    p_community_id: community.id,
+    p_community_id: event.community_id,
     p_amount: organizerShare,
     p_reason: `${reason}_refund`,
     p_event_id: event.id,
@@ -115,7 +112,7 @@ async function rebalanceRefund(
 async function processRefund(paymentId: string, amount: number, reason: string): Promise<void> {
   const { data: payment } = await supabase
     .from("payments")
-    .select("id, razorpay_payment_id, refund_attempt_count, registration_id, amount")
+    .select("id, razorpay_payment_id, refund_attempt_count, registration_id, amount, platform_fee, organizer_share")
     .eq("id", paymentId)
     .single()
 
@@ -280,7 +277,9 @@ async function retryPendingRefunds(): Promise<number> {
     .select("id, refund_status, refund_attempt_count")
     // 'refunded': cancellation refund failed. 'failed': money captured but
     // never confirmed (event cancelled) - owed back to the customer.
-    .in("status", ["refunded", "failed"])
+    // 'success': money captured AND refund attempt already failed - the
+    // retry must NOT skip these, or the customer is stranded forever.
+    .in("status", ["refunded", "failed", "success"])
     .in("refund_status", ["requested", "pending", "failed", "queued"])
     .lt("refund_attempt_count", 5)
     // Recooldown: skip rows being re-ordered by create-payment (it bumps

@@ -96,7 +96,7 @@ export default function EventDetailPage() {
       )}
 
       <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-soft">
-        <h4 className="text-sm font-semibold text-neutral-900">Revenue</h4>
+        <h4 className="text-sm font-semibold text-neutral-900">Revenue (gross, incl. platform fees)</h4>
         <p className="mt-2 text-2xl font-bold text-neutral-900">₹{(totalRevenue / 100).toFixed(2)}</p>
         <p className="text-xs text-neutral-400">{payments.filter((p) => p.status === "success").length} successful payments</p>
       </div>

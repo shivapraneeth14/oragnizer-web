@@ -65,23 +65,25 @@ Payout page.
 
 ### B. Self-cancel FEE-KEEP rule
 
-1. Register + pay ₹1000 (test card) for an event starting in >24h.
+1. Register + pay **₹1023.60** (₹1000 ticket + ₹23.60 fee = ₹20 flat fee +
+   18% GST; test card) for an event starting in >24h.
 2. Cancel from the event page → preview dialog shows
-   **Refund ₹900 · booking fee ₹100 not refundable**.
+   **Refund ₹1000 · platform fee ₹23.60 not refundable**.
 3. DB after cancel:
    - `payments`: status `refunded`, `refund_status` pending/queued/processed,
-     `razorpay_refund_id` set, `refunded_amount = 90000`.
-   - `payment_audit_log` has `refund_issued` (amount 90000),
-     `platform_fee_kept` (fee_amount 10000), `wallet_debited` with
+     `razorpay_refund_id` set, `refunded_amount = 100000`.
+   - `payment_audit_log` has `refund_issued` (amount 100000),
+     `platform_fee_kept` (fee_amount 2360), `wallet_debited` with
      `details.event_id` set.
    - NO `commission_reversed` row.
-   - Razorpay dashboard (test): refund of ₹900, receipt `ref_<payment_id>`.
+   - Razorpay dashboard (test): refund of ₹1000, receipt `ref_<payment_id>`.
 4. Notifications: `refund_initiated` for the customer with the fee-kept copy.
 
 ### C. Organizer-cancel full refund (regression + receipts)
 
 1. Organizer cancels an event with 2 paid registrations + 1 free one.
-2. Expect: 2 Razorpay refunds of ₹1000 & ₹900 **receipt `ref_<payment_id>`**;
+2. Expect: 2 Razorpay refunds of **₹1023.60 each** (full amount incl. fee)
+   **receipt `ref_<payment_id>`**;
    `commission_reversed` x2 with `commission_amount`; `wallet_debited` x2
    (organizer share only); free registration cancelled, no refund.
 3. EventDetail now shows the amount column; the browser alert reports
@@ -128,7 +130,7 @@ Payout page.
    refresh** (needs 202608100005 deployed).
 2. My Payments: refund chip shows "Refunded", "Refund Processing", etc. —
    no raw `refund_status` strings.
-3. My Registrations: cancelled + refunded shows `Cancelled · refunded ₹900`.
+3. My Registrations: cancelled + refunded shows `Cancelled · refunded ₹1000`.
 
 ### H. QR ticket
 
@@ -139,7 +141,8 @@ Payout page.
 ### I. Refund policy copy (mobile)
 
 1. Event page for a paid event shows the disclosure under the Pay button,
-   **calculated from the community's real commission_percent**.
+   **calculated from the community's flat `platform_fee_amount` + 18% GST
+   (fee-on-top: buyer pays ticket + fee, organizer keeps the ticket)**.
 2. Cancel flow shows the exact refund amount in the preview dialog.
 
 ## Earlier scenarios (still valid — see the updated refund math above)

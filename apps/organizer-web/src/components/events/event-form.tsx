@@ -3,6 +3,8 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import type { LatLngLiteral } from "leaflet"
+import { supabase } from "../../supabase"
+import { feeBreakdown, formatMoney } from "shared"
 import { uploadToCloudinary } from "../../lib/cloudinary"
 import type { EventFormData, DescriptionFields } from "../../hooks/use-events"
 import { emptyForm, composeDescription, parseDescription, emptyDescriptionFields } from "../../hooks/use-events"
@@ -10,6 +12,7 @@ import { emptyForm, composeDescription, parseDescription, emptyDescriptionFields
 interface Props {
   initial?: EventFormData
   saving: boolean
+  communityId?: string
   onSave: (data: EventFormData) => Promise<void>
   onClose: () => void
 }
@@ -38,10 +41,13 @@ function parseCoord(value: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-export default function EventForm({ initial, saving, onSave, onClose }: Props) {
+export default function EventForm({ initial, saving, communityId, onSave, onClose }: Props) {
   const [form, setForm] = useState<EventFormData>(initial || emptyForm)
   const [uploading, setUploading] = useState(false)
   const [errors, setErrors] = useState<{ start?: string; end?: string }>({})
+  // Flat platform fee (paise) for this community — sourced from the DB, the
+  // same column create-payment charges with. NULL until loaded / unavailable.
+  const [feeAmountPaise, setFeeAmountPaise] = useState<number | null>(null)
   const [descFields, setDescFields] = useState<DescriptionFields>(() =>
     initial?.description ? parseDescription(initial.description) : emptyDescriptionFields
   )
@@ -53,6 +59,18 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
       setDescFields(initial.description ? parseDescription(initial.description) : emptyDescriptionFields)
     }
   }, [initial])
+
+  useEffect(() => {
+    if (!communityId) return
+    let alive = true
+    supabase
+      .from("communities")
+      .select("platform_fee_amount")
+      .eq("id", communityId)
+      .maybeSingle()
+      .then(({ data, error }) => { if (alive) setFeeAmountPaise(error ? null : data?.platform_fee_amount ?? null) })
+    return () => { alive = false }
+  }, [communityId])
 
   const update = <K extends keyof EventFormData>(key: K, value: EventFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -298,30 +316,35 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
             </div>
           </div>
 
-          {/* Live revenue split preview */}
+          {/* Live pricing preview — fee-on-top model */}
           {(() => {
-            const price = Math.max(0, parseFloat(form.price) || 0)
-            if (price <= 0) return null
-            const fee = Math.floor(price * 10) / 100
-            const share = price - fee
+            const ticket = Math.round(Math.max(0, parseFloat(form.price) || 0) * 100)
+            if (ticket <= 0) return null
+            const fee = feeBreakdown(feeAmountPaise)
+            const charge = ticket + fee.total
             return (
               <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm">
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">Per-ticket split</p>
-                <div className="flex justify-between text-neutral-700">
-                  <span>Attendee pays</span>
-                  <span className="font-semibold">₹{price.toFixed(2)}</span>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">Per-ticket breakdown</p>
+                <div className="flex justify-between text-neutral-500">
+                  <span>Ticket price (you set)</span>
+                  <span>{formatMoney(ticket)}</span>
                 </div>
                 <div className="flex justify-between text-neutral-500">
-                  <span>Platform fee (10%)</span>
-                  <span>− ₹{fee.toFixed(2)}</span>
+                  <span>Platform fee + 18% GST (added to buyer)</span>
+                  <span>+ {formatMoney(fee.total)}</span>
+                </div>
+                <div className="flex justify-between text-neutral-700">
+                  <span>Buyer pays</span>
+                  <span className="font-semibold">{formatMoney(charge)}</span>
                 </div>
                 <div className="mt-1 flex justify-between border-t border-neutral-200 pt-1 text-neutral-800">
                   <span className="font-medium">You receive</span>
-                  <span className="font-semibold text-green-700">₹{share.toFixed(2)}</span>
+                  <span className="font-semibold text-green-700">{formatMoney(ticket)}</span>
                 </div>
                 <p className="mt-2 text-xs text-neutral-400">
-                  Refund policy: you refund the full ticket on organizer cancellation; a customer self-cancel refunds
-                  your share to them (fee is kept). Razorpay charges ≈2.36% (2% + 18% GST) on top.
+                  The fee is charged to the buyer on top of your price — it never comes out of your share.
+                  Self-cancel refunds your ticket to the buyer (fee is kept); if you cancel the event, the buyer
+                  gets the full amount back. Razorpay's ~2.36% charge is absorbed by the platform.
                 </p>
               </div>
             )

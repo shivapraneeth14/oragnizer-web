@@ -24,6 +24,7 @@ export interface Community {
   is_hidden: boolean
   member_count: number
   event_count: number
+  platform_fee_amount: number
   category: string | null
   country: string | null
   state: string | null
@@ -124,6 +125,7 @@ export interface Payment {
   razorpay_payment_id: string | null
   status: "pending" | "success" | "failed" | "refunded"
   platform_fee: number | null
+  platform_fee_gst: number | null
   organizer_share: number | null
   refund_status: "requested" | "approved" | "processed" | "denied" | null
   created_at: string
