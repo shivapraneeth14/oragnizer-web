@@ -621,7 +621,6 @@ export default function DashboardPage() {
         <EventForm
           initial={editingEvent ? eventToForm(editingEvent) : undefined}
           saving={formSaving}
-          communityId={communityId}
           onSave={handleFormSave}
           onClose={() => { setShowForm(false); setEditingEvent(null); setFormError(null) }}
         />
