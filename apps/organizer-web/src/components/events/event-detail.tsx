@@ -3,7 +3,6 @@ import { supabase } from "../../supabase"
 import { copyText } from "../../lib/clipboard"
 import { shareBase, isMobileDevice } from "../../lib/share"
 import type { Event, Profile, Payment } from "shared"
-import { formatMoney } from "shared"
 
 interface RegistrationWithDetails {
   id: string
@@ -11,7 +10,7 @@ interface RegistrationWithDetails {
   status: "pending" | "confirmed" | "cancelled" | "attended"
   registered_at: string
   profiles: Pick<Profile, "email" | "first_name" | "last_name">
-  payments: Pick<Payment, "amount" | "status" | "platform_fee" | "organizer_share">[] | null
+  payments: Pick<Payment, "amount" | "status">[] | null
 }
 
 interface MessageWithProfile {
@@ -119,7 +118,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
   const loadRegistrations = useCallback(async () => {
     const { data, error } = await supabase
       .from("registrations")
-      .select("id, user_id, status, registered_at, profiles(email, first_name, last_name), payments(amount, status, platform_fee, organizer_share)")
+      .select("id, user_id, status, registered_at, profiles(email, first_name, last_name), payments(amount, status)")
       .eq("event_id", event.id)
       .is("deleted_at", null)
       .order("registered_at", { ascending: false })
@@ -299,11 +298,6 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
   }
 
   const restrictedUserIds = new Set(restrictedUsers.map((r) => r.user_id))
-
-  const paidRegs = registrations.filter((r) => r.payments?.[0]?.status === "success")
-  const totalGross = paidRegs.reduce((s, r) => s + (r.payments?.[0]?.amount || 0), 0)
-  const totalFee = paidRegs.reduce((s, r) => s + (r.payments?.[0]?.platform_fee ?? 0), 0)
-  const totalNet = paidRegs.reduce((s, r) => s + (r.payments?.[0]?.organizer_share ?? 0), 0)
 
   return (
     <div>
@@ -524,13 +518,6 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
           {/* Registrations tab */}
           {activeTab === "registrations" && (
             <div>
-              {totalGross > 0 && (
-                <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-neutral-50 px-4 py-2.5 text-xs text-neutral-600">
-                  <span>Collected <span className="font-semibold text-neutral-900">{formatMoney(totalGross)}</span></span>
-                  <span>Platform fees <span className="font-semibold text-neutral-900">{formatMoney(totalFee)}</span></span>
-                  <span>Your net <span className="font-semibold text-[#C2185B]">{formatMoney(totalNet)}</span></span>
-                </div>
-              )}
               {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
               {loading ? (
                 <div className="flex justify-center py-10">
@@ -580,11 +567,6 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                                   <span className="ml-2 text-xs font-medium text-neutral-600">
                                     ₹{(reg.payments[0].amount / 100).toFixed(0)}
                                   </span>
-                                )}
-                                {reg.payments[0].amount > 0 && reg.payments[0].organizer_share != null && (
-                                  <div className="mt-0.5 text-[11px] text-neutral-400">
-                                    You get {formatMoney(reg.payments[0].organizer_share)} · fee {formatMoney(reg.payments[0].platform_fee ?? 0)} incl. GST
-                                  </div>
                                 )}
                               </>
                             ) : (
