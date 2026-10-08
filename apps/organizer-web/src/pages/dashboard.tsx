@@ -9,6 +9,7 @@ import EventDetail from "../components/events/event-detail"
 import CancelEventConfirmDialog from "../components/events/cancel-event-confirm-dialog"
 import MediaSection from "../components/media/media-section"
 import PayoutSection from "../components/payout/payout-section"
+import CheckInPage from "../pages/check-in-page"
 import SettingsPage from "../components/settings/settings-page"
 import MemberRow from "../components/members/member-row"
 import { useEvents, eventToForm } from "../hooks/use-events"
@@ -32,6 +33,7 @@ const navItems = [
   { id: "members", label: "Members", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" },
   { id: "media", label: "Media", icon: "M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" },
   { id: "payout", label: "Payout", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
+  { id: "check-in", label: "Check-In", icon: "M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" },
   { id: "settings", label: "Settings", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" },
   { id: "profile", label: "Profile", icon: "M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" },
 ]
@@ -441,6 +443,7 @@ export default function DashboardPage() {
                 onEdit={handleDetailEdit}
                 onCancel={handleDetailCancel}
                 onClose={() => setViewingEvent(null)}
+                onCheckIn={() => { setViewingEvent(null); setActiveSection("check-in") }}
               />
             ) : (
               <EventList
@@ -603,6 +606,9 @@ export default function DashboardPage() {
           {activeSection === "payout" && (
             <PayoutSection communityId={communityId} />
           )}
+          {activeSection === "check-in" && (
+            <CheckInPage communityId={communityId} />
+          )}
           {activeSection === "settings" && (
             <SettingsPage communityId={communityId} />
           )}
@@ -615,6 +621,7 @@ export default function DashboardPage() {
         <EventForm
           initial={editingEvent ? eventToForm(editingEvent) : undefined}
           saving={formSaving}
+          communityId={communityId}
           onSave={handleFormSave}
           onClose={() => { setShowForm(false); setEditingEvent(null); setFormError(null) }}
         />

@@ -3,7 +3,6 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const MIN_WITHDRAWAL_PAISE = 10000
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {

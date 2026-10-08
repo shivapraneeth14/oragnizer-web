@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
 
     const { data: payment, error: paymentErr } = await supabase
       .from("payments")
-      .select("id, status, refund_status, refund_attempt_count, razorpay_payment_id, amount, registration_id")
+      .select("id, status, refund_status, refund_attempt_count, razorpay_payment_id, amount, registration_id, platform_fee, organizer_share")
       .eq("id", payment_id)
       .maybeSingle()
     if (paymentErr || !payment) return new Response(JSON.stringify({ error: "Payment not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
@@ -125,12 +125,6 @@ Deno.serve(async (req) => {
     if (!await isAuthorized(user.id, event.community_id)) {
       return new Response(JSON.stringify({ error: "Not authorized to refund this payment" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
-
-    const { data: community } = await supabase
-      .from("communities")
-      .select("id, commission_percent")
-      .eq("id", event.community_id)
-      .maybeSingle()
 
     const attempt = (payment.refund_attempt_count ?? 0) + 1
     const refund = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, {
@@ -161,8 +155,12 @@ Deno.serve(async (req) => {
     })
 
     const baseAmount = Number(payment.amount)
-    const platformFee = Math.floor(baseAmount * Number(community?.commission_percent ?? 10) / 100)
-    const organizerShare = baseAmount - platformFee
+    // Split persisted at order creation — read it, never recompute a %.
+    const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
+    const organizerShare = Math.max(
+      payment.organizer_share != null ? Number(payment.organizer_share) : baseAmount - platformFee,
+      0,
+    )
 
     try {
       const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {

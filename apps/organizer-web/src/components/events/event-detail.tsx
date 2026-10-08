@@ -3,6 +3,7 @@ import { supabase } from "../../supabase"
 import { copyText } from "../../lib/clipboard"
 import { shareBase, isMobileDevice } from "../../lib/share"
 import type { Event, Profile, Payment } from "shared"
+import { formatMoney } from "shared"
 
 interface RegistrationWithDetails {
   id: string
@@ -35,6 +36,7 @@ interface Props {
   onEdit: () => void
   onCancel: () => void
   onClose: () => void
+  onCheckIn?: () => void
 }
 
 const statusColors: Record<string, string> = {
@@ -81,7 +83,7 @@ function formatTimeAgo(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" })
 }
 
-export default function EventDetail({ event, onEdit, onCancel, onClose }: Props) {
+export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckIn }: Props) {
   const [activeTab, setActiveTab] = useState<"registrations" | "discussion">("registrations")
   const [registrations, setRegistrations] = useState<RegistrationWithDetails[]>([])
   const [loading, setLoading] = useState(true)
@@ -387,6 +389,17 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                     </svg>
                     Cancel
                   </button>
+                  {onCheckIn && (
+                    <button
+                      onClick={onCheckIn}
+                      className="flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100 transition-colors"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                      </svg>
+                      Check In
+                    </button>
+                  )}
                 </>
               )}
               <div className="relative">
@@ -513,9 +526,9 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
             <div>
               {totalGross > 0 && (
                 <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-neutral-50 px-4 py-2.5 text-xs text-neutral-600">
-                  <span>Collected <span className="font-semibold text-neutral-900">₹{(totalGross / 100).toFixed(0)}</span></span>
-                  <span>Platform fees <span className="font-semibold text-neutral-900">₹{(totalFee / 100).toFixed(0)}</span></span>
-                  <span>Your net <span className="font-semibold text-[#C2185B]">₹{(totalNet / 100).toFixed(0)}</span></span>
+                  <span>Collected <span className="font-semibold text-neutral-900">{formatMoney(totalGross)}</span></span>
+                  <span>Platform fees <span className="font-semibold text-neutral-900">{formatMoney(totalFee)}</span></span>
+                  <span>Your net <span className="font-semibold text-[#C2185B]">{formatMoney(totalNet)}</span></span>
                 </div>
               )}
               {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
@@ -570,7 +583,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose }: Props)
                                 )}
                                 {reg.payments[0].amount > 0 && reg.payments[0].organizer_share != null && (
                                   <div className="mt-0.5 text-[11px] text-neutral-400">
-                                    You get ₹{(reg.payments[0].organizer_share / 100).toFixed(0)} · fee ₹{((reg.payments[0].platform_fee ?? 0) / 100).toFixed(0)}
+                                    You get {formatMoney(reg.payments[0].organizer_share)} · fee {formatMoney(reg.payments[0].platform_fee ?? 0)} incl. GST
                                   </div>
                                 )}
                               </>

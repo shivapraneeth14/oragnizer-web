@@ -1,4 +1,4 @@
-import { requiredEnv } from "../_shared/env.ts"
+import { optionalEnv, requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -6,11 +6,12 @@ const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
 const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
+const RECONCILE_SECRET = optionalEnv("RECONCILE_SECRET")
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-reconcile-secret",
 }
 
 async function razorpayGet(path: string): Promise<any> {
@@ -57,9 +58,11 @@ const REFUND_STATUS_MAP: Record<string, string> = {
 // Claw back the organizer's share of a refunded payment from the community
 // wallet and reverse the platform commission record. Mirrors the webhook
 // path: the customer is refunded in FULL (fee included), so the fee record
-// for this transaction is zeroed rather than kept.
+// for this transaction is zeroed rather than kept. The split is read from
+// the payment row (persisted when the order was created) — never recomputed
+// from commission_percent.
 async function rebalanceRefund(
-  payment: { id: string; registration_id: string; amount: number },
+  payment: { id: string; registration_id: string; amount: number; platform_fee: number | null; organizer_share: number | null },
   reason: string,
 ): Promise<void> {
   const { data: registration } = await supabase
@@ -76,19 +79,14 @@ async function rebalanceRefund(
     .single()
   if (!event) return
 
-  const { data: community } = await supabase
-    .from("communities")
-    .select("id, commission_percent")
-    .eq("id", event.community_id)
-    .single()
-  if (!community) return
-
-  const commissionPercent = community.commission_percent ?? 10
-  const platformFee = Math.floor(Number(payment.amount) * Number(commissionPercent) / 100)
-  const organizerShare = Number(payment.amount) - platformFee
+  const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
+  const organizerShare = Math.max(
+    payment.organizer_share != null ? Number(payment.organizer_share) : Number(payment.amount) - platformFee,
+    0,
+  )
 
   const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
-    p_community_id: community.id,
+    p_community_id: event.community_id,
     p_amount: organizerShare,
     p_reason: `${reason}_refund`,
     p_event_id: event.id,
@@ -114,7 +112,7 @@ async function rebalanceRefund(
 async function processRefund(paymentId: string, amount: number, reason: string): Promise<void> {
   const { data: payment } = await supabase
     .from("payments")
-    .select("id, razorpay_payment_id, refund_attempt_count, registration_id, amount")
+    .select("id, razorpay_payment_id, refund_attempt_count, registration_id, amount, platform_fee, organizer_share")
     .eq("id", paymentId)
     .single()
 
@@ -279,7 +277,9 @@ async function retryPendingRefunds(): Promise<number> {
     .select("id, refund_status, refund_attempt_count")
     // 'refunded': cancellation refund failed. 'failed': money captured but
     // never confirmed (event cancelled) - owed back to the customer.
-    .in("status", ["refunded", "failed"])
+    // 'success': money captured AND refund attempt already failed - the
+    // retry must NOT skip these, or the customer is stranded forever.
+    .in("status", ["refunded", "failed", "success"])
     .in("refund_status", ["requested", "pending", "failed", "queued"])
     .lt("refund_attempt_count", 5)
     // Recooldown: skip rows being re-ordered by create-payment (it bumps
@@ -349,17 +349,55 @@ async function retryPendingRefunds(): Promise<number> {
   return handled
 }
 
-Deno.serve(async (_req) => {
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
+
+  if (req.headers.get("x-reconcile-secret") !== RECONCILE_SECRET) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    })
+  }
+
   try {
     let totalActions = 0
 
     // --- Step 1: Check stale pending payments against Razorpay ---
+    // Give up on payments pending >2h — log for manual review.
+    const { data: gaveUpPayments } = await supabase
+      .from("payments")
+      .select("id")
+      .eq("status", "pending")
+      .not("razorpay_order_id", "is", null)
+      .is("deleted_at", null)
+      .lt("created_at", new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+
+    for (const pay of gaveUpPayments || []) {
+      const { data: alreadyLogged } = await supabase
+        .from("payment_audit_log")
+        .select("id")
+        .eq("payment_id", pay.id)
+        .eq("action", "payment_reconcile_gave_up")
+        .maybeSingle()
+      if (alreadyLogged) continue
+
+      await supabase.from("payments").update({ status: "failed" }).eq("id", pay.id)
+      await supabase.from("payment_audit_log").insert({
+        action: "payment_reconcile_gave_up",
+        payment_id: pay.id,
+        details: { note: "Pending >2h — manual review required" },
+      })
+      totalActions++
+    }
+
+    // Check payments 10 min–2h old against Razorpay
     const { data: stalePayments, error: queryErr } = await supabase
       .from("payments")
       .select("id, razorpay_order_id, registration_id, coupon_id, created_at")
       .eq("status", "pending")
       .not("razorpay_order_id", "is", null)
       .is("deleted_at", null)
+      .gt("created_at", new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
       .lt("created_at", new Date(Date.now() - 10 * 60 * 1000).toISOString())
 
     if (queryErr) throw queryErr
@@ -529,7 +567,7 @@ Deno.serve(async (_req) => {
     })
   } catch (err) {
     console.error("reconcile-payments error:", err)
-    return new Response(JSON.stringify({ error: String(err) }), {
+    return new Response(JSON.stringify({ error: "Reconciliation failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })

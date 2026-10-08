@@ -152,6 +152,12 @@ Deno.serve(async (req) => {
       registrationId = inserted.id
     }
 
+    // Generate QR code for free event registration
+    const qrPayload = new TextEncoder().encode(`free${event_id}${registrationId}`)
+    const qrHash = await crypto.subtle.digest("SHA-256", qrPayload)
+    const qrCode = Array.from(new Uint8Array(qrHash)).map(b => b.toString(16).padStart(2, "0")).join("")
+    await supabase.from("registrations").update({ qr_code: qrCode }).eq("id", registrationId)
+
     // Atomic capacity check + booked_count increment
     const { data: bookResult, error: bookError } = await supabase
       .rpc('increment_event_booked', { p_event_id: event_id })

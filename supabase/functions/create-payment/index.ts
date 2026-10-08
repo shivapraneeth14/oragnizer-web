@@ -1,6 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { feeBreakdown } from "../_shared/fees.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -16,6 +17,8 @@ const corsHeaders = {
 }
 
 async function createRazorpayOrder(amount: number, registrationId: string) {
+  // Key includes the receipt (registration + attempt) so a re-quote with a
+  // different amount can never be answered with the stale order.
   const idempotencyKey = `order_${registrationId}`
   const body: any = { amount, currency: "INR", receipt: registrationId }
 
@@ -118,6 +121,13 @@ Deno.serve(async (req) => {
     if (event.capacity !== null && event.booked_count >= event.capacity) return new Response(JSON.stringify({ error: "Event is full" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (event.price <= 0) return new Response(JSON.stringify({ error: "Event is free" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
+    const { data: community } = await supabase
+      .from("communities")
+      .select("id, platform_fee_amount")
+      .eq("id", event.community_id)
+      .maybeSingle()
+    const fee = feeBreakdown(community?.platform_fee_amount)
+
     const { data: existing } = await supabase
       .from("registrations")
       .select("id, status")
@@ -146,7 +156,7 @@ Deno.serve(async (req) => {
     }
 
     const amount = event.price
-    let finalAmount = amount
+    let ticket = amount
     let couponId: string | null = null
 
     if (coupon_code) {
@@ -176,14 +186,22 @@ Deno.serve(async (req) => {
           discount = coupon.discount_value
         }
 
-        finalAmount = Math.max(amount - discount, 0)
+        ticket = Math.max(amount - discount, 0)
         couponId = coupon.id
       }
     }
 
+    // Fee-on-top: the organizer's ticket (post-coupon) plus a flat platform
+    // fee + 18% GST is what the customer is charged. The split is computed
+    // HERE, once, and persisted — confirm_payment only reads it back.
+    if (ticket <= 0) {
+      return new Response(JSON.stringify({ error: "Coupon covers the full ticket. Register for free instead." }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+    const finalAmount = ticket + fee.total
+
     const { data: existingPayment } = await supabase
       .from("payments")
-      .select("id, razorpay_order_id, status, created_at, attempt_count")
+      .select("id, razorpay_order_id, status, created_at, attempt_count, amount")
       .eq("registration_id", registrationId)
       .maybeSingle()
 
@@ -192,7 +210,10 @@ Deno.serve(async (req) => {
 
       if (existingPayment.status === "pending" && existingPayment.razorpay_order_id) {
         const orderAge = Date.now() - new Date(existingPayment.created_at).getTime()
-        if (orderAge < 24 * 60 * 60 * 1000) {
+        // Only reuse the order if it was quoted at today's math (fee or price
+        // may have changed since) — otherwise fall through and re-quote.
+        const reusable = orderAge < 24 * 60 * 60 * 1000 && Number(existingPayment.amount) === finalAmount
+        if (reusable) {
           // Path C: if the money already landed, confirm instead of reusing
           // the order (the success callback may have been lost).
           const confirmed = await confirmPaidOrder(existingPayment.id, existingPayment.razorpay_order_id)
@@ -202,7 +223,7 @@ Deno.serve(async (req) => {
           if (confirmed !== null) {
             return new Response(JSON.stringify({ error: "Your payment was received but could not be confirmed. Payment will be refunded." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
           }
-          return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: existingPayment.razorpay_order_id, amount: finalAmount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: existingPayment.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
     }
@@ -218,6 +239,8 @@ Deno.serve(async (req) => {
             razorpay_order_id: order.id,
             status: "pending",
             amount: finalAmount,
+            platform_fee: fee.total,
+            platform_fee_gst: fee.gst,
             coupon_id: couponId,
             attempt_count: attemptCount,
             created_at: new Date().toISOString(),
@@ -229,6 +252,8 @@ Deno.serve(async (req) => {
           .insert({
             registration_id: registrationId,
             amount: finalAmount,
+            platform_fee: fee.total,
+            platform_fee_gst: fee.gst,
             razorpay_order_id: order.id,
             status: "pending",
             coupon_id: couponId,
@@ -247,13 +272,13 @@ Deno.serve(async (req) => {
           .eq("registration_id", registrationId)
           .single()
         if (recovered) {
-          return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: recovered.razorpay_order_id, amount: finalAmount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: recovered.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
       throw insertErr
     }
 
-    return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: order.id, amount: finalAmount }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: order.id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
     console.error(err)
     return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })

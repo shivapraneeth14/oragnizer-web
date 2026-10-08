@@ -5,7 +5,7 @@ import { cashfreePost } from "../_shared/cashfree.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const MIN_WITHDRAWAL_PAISE = 100
+const MIN_WITHDRAWAL = 100
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -34,8 +34,8 @@ Deno.serve(async (req) => {
     if (!community_id || !amount || amount <= 0 || !Number.isInteger(amount)) {
       return new Response(JSON.stringify({ error: "community_id and amount (> 0) are required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
-    if (amount < MIN_WITHDRAWAL_PAISE) {
-      return new Response(JSON.stringify({ error: `Minimum withdrawal amount is ₹${(MIN_WITHDRAWAL_PAISE / 100).toFixed(0)} (${MIN_WITHDRAWAL_PAISE} paise)` }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (amount < MIN_WITHDRAWAL * 100) {
+      return new Response(JSON.stringify({ error: `Minimum withdrawal amount is ₹${MIN_WITHDRAWAL}` }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
     const { data: community } = await supabase

@@ -425,3 +425,6 @@ verify_jwt = false
 
 [functions.reconcile-payments]
 verify_jwt = false
+
+[functions.sync-payout-status]
+verify_jwt = false
