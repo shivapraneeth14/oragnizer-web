@@ -1,5 +1,6 @@
 import { optionalEnv, requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
+import { recordAlert } from "../_shared/alerts.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -331,6 +332,12 @@ async function retryPendingRefunds(): Promise<number> {
       handled++
     } catch (err) {
       console.error(`Refund retry failed for ${pay.id}:`, err)
+      await recordAlert(supabase, {
+        severity: "warning",
+        category: "payment",
+        title: "Refund retry failed for payment",
+        details: { payment_id: pay.id, error: err instanceof Error ? err.message : String(err) },
+      })
       const { data: after } = await supabase
         .from("payments")
         .select("refund_attempt_count")
@@ -353,6 +360,12 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
 
   if (req.headers.get("x-reconcile-secret") !== RECONCILE_SECRET) {
+    await recordAlert(supabase, {
+      severity: "critical",
+      category: "payment",
+      title: "reconcile-payments cron rejected (x-reconcile-secret mismatch)",
+      details: { hint: "the payment reconciliation cron is not running" },
+    })
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -441,6 +454,12 @@ Deno.serve(async (req) => {
                 totalActions++
               } catch (refundErr) {
                 console.error(`Auto-refund failed for ${pay.id}:`, refundErr)
+                await recordAlert(supabase, {
+                  severity: "warning",
+                  category: "payment",
+                  title: "Auto-refund failed for payment",
+                  details: { payment_id: pay.id, error: refundErr instanceof Error ? refundErr.message : String(refundErr) },
+                })
               }
             } else {
               console.log(`Reconciled payment ${pay.id} — captured via Razorpay, confirmed`)
@@ -521,6 +540,12 @@ Deno.serve(async (req) => {
       const { error: refundErr } = await supabase.rpc("refund_wallet", { p_payout_id: payout.id })
       if (refundErr) {
         console.error(`refund_wallet failed for payout ${payout.id}:`, refundErr)
+        await recordAlert(supabase, {
+          severity: "warning",
+          category: "payout",
+          title: "refund_wallet failed for payout",
+          details: { payout_id: payout.id, error: refundErr.message },
+        })
       } else {
         totalActions++
       }
@@ -542,6 +567,12 @@ Deno.serve(async (req) => {
       const { error: refundErr } = await supabase.rpc("refund_wallet", { p_payout_id: payout.id })
       if (refundErr) {
         console.error(`refund_wallet failed for stale processing payout ${payout.id}:`, refundErr)
+        await recordAlert(supabase, {
+          severity: "warning",
+          category: "payout",
+          title: "refund_wallet failed for payout",
+          details: { payout_id: payout.id, error: refundErr.message },
+        })
       } else {
         totalActions++
       }
@@ -567,6 +598,12 @@ Deno.serve(async (req) => {
     })
   } catch (err) {
     console.error("reconcile-payments error:", err)
+    await recordAlert(supabase, {
+      severity: "critical",
+      category: "payment",
+      title: "reconcile-payments unhandled error",
+      details: { error: err instanceof Error ? err.message : String(err) },
+    })
     return new Response(JSON.stringify({ error: "Reconciliation failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },
