@@ -33,26 +33,20 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "qr_code is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
-    // Call the RPC to validate and check in
-    const { data: result, error: rpcErr } = await supabase
-      .rpc("check_in_registration", { p_qr_code: qr_code })
-      .single()
+    // Authorize BEFORE mutating: look up the registration's event (read-only)
+    // and confirm the caller can manage check-ins for that community.
+    const { data: reg } = await supabase
+      .from("registrations")
+      .select("event_id")
+      .eq("qr_code", qr_code)
+      .is("deleted_at", null)
+      .maybeSingle()
 
-    if (rpcErr) {
-      console.error("check_in_registration RPC error:", rpcErr)
-      return new Response(JSON.stringify({ error: "Check-in failed" }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
-    }
-
-    if (!result) {
-      return new Response(JSON.stringify({ error: "Invalid QR code" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
-    }
-
-    // If check-in succeeded, verify the caller is authorized for this event
-    if (result.success && result.event_id) {
+    if (reg?.event_id) {
       const { data: event } = await supabase
         .from("events")
         .select("community_id")
-        .eq("id", result.event_id)
+        .eq("id", reg.event_id)
         .single()
 
       if (event) {
@@ -88,6 +82,21 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({ error: "Not authorized to check in" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
+    }
+
+    // Authorized (or QR unknown -> let the RPC return the canonical message):
+    // now validate and mark attendance.
+    const { data: result, error: rpcErr } = await supabase
+      .rpc("check_in_registration", { p_qr_code: qr_code })
+      .single()
+
+    if (rpcErr) {
+      console.error("check_in_registration RPC error:", rpcErr)
+      return new Response(JSON.stringify({ error: "Check-in failed" }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    if (!result) {
+      return new Response(JSON.stringify({ error: "Invalid QR code" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
     return new Response(JSON.stringify({

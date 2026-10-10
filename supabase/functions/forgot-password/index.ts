@@ -45,6 +45,22 @@ async function isOrganizerAccount(userId: string): Promise<boolean> {
   return membership !== null
 }
 
+async function findUserByEmail(email: string) {
+  let page = 1
+  const perPage = 1000
+  const maxPages = 100 // safety cap to avoid unbounded scans
+  while (page <= maxPages) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage })
+    if (error) throw error
+    if (!data?.users) break
+    const found = data.users.find((u) => (u.email ?? "").toLowerCase() === email)
+    if (found) return found
+    if (data.users.length < perPage) break
+    page++
+  }
+  return null
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
@@ -70,14 +86,7 @@ Deno.serve(async (req) => {
 
     const normalizedEmail = email.trim().toLowerCase()
 
-    const { data: userList, error: listError } = await supabase.auth.admin.listUsers({
-      page: 1,
-      perPage: 1000,
-    })
-    if (listError) throw listError
-    if (!userList?.users) throw new Error("User lookup returned no data")
-
-    const user = userList.users.find((u) => (u.email ?? "").toLowerCase() === normalizedEmail)
+    const user = await findUserByEmail(normalizedEmail)
     if (!user) {
       return jsonResponse({ kind: "none", sent: false })
     }

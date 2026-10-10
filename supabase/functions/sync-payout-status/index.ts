@@ -2,6 +2,7 @@ import { optionalEnv, requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { cashfreeGet } from "../_shared/cashfree.ts"
+import { recordAlert } from "../_shared/alerts.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -36,6 +37,12 @@ async function checkTransfer(id: string, cfRef?: string | null): Promise<Record<
     // Fallback: look up by Cashfree's own reference id.
     if (!cfRef) {
       const msg = firstErr instanceof Error ? firstErr.message : String(firstErr)
+      await recordAlert(supabase, {
+        severity: "warning",
+        category: "payout",
+        title: "Cashfree status check failed for payout",
+        details: { payout_id: id, error: msg },
+      })
       return { payout_id: id, checked: false, error: msg }
     }
     try {
@@ -43,6 +50,12 @@ async function checkTransfer(id: string, cfRef?: string | null): Promise<Record<
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`status check failed for ${id}:`, msg)
+      await recordAlert(supabase, {
+        severity: "warning",
+        category: "payout",
+        title: "Cashfree status check failed for payout",
+        details: { payout_id: id, error: msg },
+      })
       return { payout_id: id, checked: false, error: msg }
     }
   }
@@ -66,6 +79,12 @@ async function checkTransfer(id: string, cfRef?: string | null): Promise<Record<
 
   if (rpcErr) {
     console.error(`RPC failed for ${id}:`, rpcErr)
+    await recordAlert(supabase, {
+      severity: "warning",
+      category: "payout",
+      title: "sync_payout_status_update RPC failed for payout",
+      details: { payout_id: id, error: rpcErr.message },
+    })
     return { payout_id: id, checked: false, error: rpcErr.message }
   }
 
@@ -80,25 +99,39 @@ Deno.serve(async (req) => {
     const results: Record<string, unknown>[] = []
 
     // Mode 1: cron (pg_cron) — internal secret header, full scan of stuck rows.
-    if (req.headers.get("x-sync-secret") === PAYOUT_SYNC_SECRET) {
-      const stuckBefore = new Date(Date.now() - STUCK_AFTER_MS).toISOString()
-      const { data: rows, error } = await supabase
-        .from("payout_items")
-        .select("id, status, community_id, cashfree_payout_id")
-        .in("status", ["processing", "in_progress"])
-        .lt("created_at", stuckBefore)
-        .limit(50)
+    const syncSecret = req.headers.get("x-sync-secret")
+    if (syncSecret) {
+      if (syncSecret === PAYOUT_SYNC_SECRET) {
+        const stuckBefore = new Date(Date.now() - STUCK_AFTER_MS).toISOString()
+        const { data: rows, error } = await supabase
+          .from("payout_items")
+          .select("id, status, community_id, cashfree_payout_id")
+          .in("status", ["processing", "in_progress"])
+          .lt("created_at", stuckBefore)
+          .limit(50)
 
-      if (error) throw error
+        if (error) throw error
 
-      for (const row of rows ?? []) {
-        results.push(await checkTransfer(row.id, row.cashfree_payout_id))
+        for (const row of rows ?? []) {
+          results.push(await checkTransfer(row.id, row.cashfree_payout_id))
+        }
+
+        return new Response(JSON.stringify({ mode: "cron", checked: results.length, results }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
       }
 
-      return new Response(JSON.stringify({ mode: "cron", checked: results.length, results }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
+      // An unauthorized caller (wrong/missing secret). This is an auth event,
+      // not necessarily the cron — surface it without touching the organizer
+      // JWT mode below, then reject exactly like an unauthorized caller normally.
+      await recordAlert(supabase, {
+        severity: "critical",
+        category: "auth",
+        title: "sync-payout-status received an unauthorized call",
+        details: { hint: "caller supplied an invalid x-sync-secret" },
       })
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
     // Mode 2: on-demand — organizer JWT, force-check a single payout.
@@ -145,6 +178,12 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(err)
     const msg = err instanceof Error ? err.message : "Something went wrong"
+    await recordAlert(supabase, {
+      severity: "critical",
+      category: "payout",
+      title: "sync-payout-status unhandled error",
+      details: { error: msg },
+    })
     return new Response(JSON.stringify({ error: msg }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

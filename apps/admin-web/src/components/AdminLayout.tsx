@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { useAuth } from "../Auth"
+import { supabase } from "../supabase"
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
   { id: "communities", label: "Communities", path: "/communities", icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" },
   { id: "users", label: "Users", path: "/users", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" },
   { id: "events", label: "Events", path: "/events", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
+  { id: "alerts", label: "Alerts", path: "/alerts", icon: "M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" },
 ]
 
 export default function AdminLayout() {
@@ -15,6 +17,24 @@ export default function AdminLayout() {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [openAlerts, setOpenAlerts] = useState(0)
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const { count } = await supabase
+        .from("admin_alerts")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["open", "acknowledged"])
+      if (active) setOpenAlerts(count ?? 0)
+    }
+    load()
+    const t = setInterval(load, 30000)
+    return () => {
+      active = false
+      clearInterval(t)
+    }
+  }, [])
 
   useEffect(() => {
     const onResize = () => setSidebarOpen(window.innerWidth >= 1024)
@@ -77,7 +97,7 @@ export default function AdminLayout() {
                 if (window.innerWidth < 1024) setSidebarOpen(false)
               }}
               className={({ isActive }) =>
-                `flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                `relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   isActive
                     ? "bg-[#C2185B]/10 text-[#C2185B]"
                     : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800"
@@ -87,7 +107,19 @@ export default function AdminLayout() {
               <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
               </svg>
-              {sidebarOpen && <span>{item.label}</span>}
+              {sidebarOpen && (
+                <>
+                  <span>{item.label}</span>
+                  {item.id === "alerts" && openAlerts > 0 && (
+                    <span className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-[#C2185B] px-1.5 py-0.5 text-xs font-semibold text-white">
+                      {openAlerts}
+                    </span>
+                  )}
+                </>
+              )}
+              {!sidebarOpen && item.id === "alerts" && openAlerts > 0 && (
+                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#C2185B]" />
+              )}
             </NavLink>
           ))}
         </nav>

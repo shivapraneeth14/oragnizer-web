@@ -99,6 +99,53 @@ the auth client directly, so the server can block reset emails for accounts that
 - GoTrue's own email rate limits still apply per environment (`rate_limit_email_sent`, default 2/hr — paced by
   the per-recipient window; bursts from one IP can exhaust faster).
 
+## Forgot-password email — Gmail SMTP (free)
+
+Password-reset emails are sent by **Supabase Auth (GoTrue)**, not by an edge function:
+the `forgot-password` function calls `auth.resetPasswordForEmail`, and GoTrue delivers
+the recovery email through the project's configured mailer. The recovery email is a
+clickable link (`{{ .ConfirmationURL }}`) — not an OTP.
+
+### Hosted projects (TEST + PROD) — manual, per project
+
+Auth config is **not** deployed by CI (`deploy-supabase.yml` only pushes migrations and
+edge functions). Configure SMTP by hand in **each** project:
+
+- **Authentication → Emails → SMTP Settings** → enable custom SMTP:
+  - Host `smtp.gmail.com`, Port `465`
+  - Username / Sender email: the dedicated Gmail address (e.g. `supp.cluvo@gmail.com`)
+  - Password: a 16-character Google **App Password** (2-Step Verification required)
+  - Sender name: `Cluvo`
+- **Authentication → Rate Limits** → raise "Emails per hour" (default `2` → e.g. `50`).
+- Optional recovery template text/branding can be edited in the Dashboard.
+
+Equivalent Management API fields: `smtp_host`, `smtp_port`, `smtp_user`, `smtp_pass`,
+`smtp_admin_email`, `smtp_sender_name`, `rate_limit_email_sent`.
+
+The App Password is a **secret**: it lives only in the Dashboard and the gitignored
+`supabase/.env`. Never commit it.
+
+### Local development
+
+`supabase start` reads SMTP values from the process environment via `env(...)` in
+`supabase/config.toml`. Put them in the gitignored `supabase/.env`:
+
+| Variable | Purpose |
+|---|---|
+| `SMTP_USER` | Gmail address used to authenticate |
+| `SMTP_PASS` | 16-character Google App Password |
+| `SMTP_SENDER_EMAIL` | From address (same Gmail address) |
+
+Placeholders are in `supabase/.env.example`. The branded recovery template lives at
+`supabase/templates/recovery.html` (wired via `[auth.email.template.recovery]`).
+
+### Caveats
+
+- App Passwords require 2-Step Verification; some Google Workspace admins disable them.
+- Free Gmail sends ~500 recipients/day and may throttle — move to a transactional
+  provider (e.g. Brevo free) if volume grows; that is a config-only change.
+- The From address is the Gmail account; a custom alias needs Gmail "Send mail as".
+
 ## Single source of truth
 
 **Local development (web):** `./scripts/switch-supabase.sh test|prod` writes `apps/organizer-web/.env` and `apps/admin-web/.env` with matching values (including an env-appropriate `VITE_APP_URL`). `.env` files are gitignored.
