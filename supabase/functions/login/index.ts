@@ -62,7 +62,10 @@ Deno.serve(async (req) => {
     // community-less user never leaves with a usable token.
     const isOrganizer = await isOrganizerAccount(supabase, user.id)
     if (!isOrganizer) {
-      await supabase.auth.admin.signOut(data.session.access_token)
+      // Scope "local" revokes only the session just created here. The default
+      // ("global") would also sign the user out of their other devices (e.g.
+      // the mobile app) for merely attempting an organizer login.
+      await supabase.auth.admin.signOut(data.session.access_token, "local")
       return jsonResponse({ error: NOT_ORGANIZER_MESSAGE }, 403)
     }
 

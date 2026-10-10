@@ -56,7 +56,7 @@ function deriveNames(meta: Record<string, unknown>): { first_name: string; last_
 }
 
 export default function LandingPage() {
-  const { signInWithGoogle, signOut, blockSession, user, error } = useAuth()
+  const { signInWithGoogle, signOut, user, error } = useAuth()
   const [flow, setFlow] = useState<Flow>("create")
   const [checkingSession, setCheckingSession] = useState(true)
   const [activeTab, setActiveTab] = useState<"explore" | "organizer">("explore")
@@ -84,17 +84,14 @@ export default function LandingPage() {
         return
       }
       if (username && !ownsCommunity) {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (session) {
-          const { checkOrganizerSession } = await import("../supabase-fetch")
-          const verdict = await checkOrganizerSession(session.access_token)
-          if (verdict.ok && !verdict.organizer) {
-            await blockSession(verdict.message)
-            setFlow("create")
-            setCheckingSession(false)
-            return
-          }
-        }
+        // A user with a profile but no community yet is completing organizer
+        // onboarding. Let them finish creating a community here; dashboard
+        // access is enforced server-side by check-organizer once they arrive.
+        setInitialStep("community")
+        setActiveTab("organizer")
+        setFlow("new")
+        setCheckingSession(false)
+        return
       }
       if (!username) {
         const names = deriveNames(user.user_metadata ?? {})

@@ -22,13 +22,6 @@ const jsonResponse = (body: Record<string, unknown>, status = 200) =>
     headers: { "Content-Type": "application/json", ...corsHeaders },
   })
 
-function isGoogleIdentity(user: { app_metadata?: Record<string, unknown>; identities?: Array<{ provider: string }> | null }): boolean {
-  return (
-    user.app_metadata?.provider === "google" ||
-    (Array.isArray(user.identities) && user.identities.some((i) => i.provider === "google"))
-  )
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
@@ -55,12 +48,9 @@ Deno.serve(async (req) => {
     }
 
     const user = data.user
-    // Google identities are exempt from the organizer check — Google sign-in
-    // is the public signup path for new organizers.
-    if (isGoogleIdentity(user)) {
-      return jsonResponse({ organizer: true, exempt: true })
-    }
-
+    // Organizer access is decided purely by ownership/admin — never by the
+    // sign-in provider. Google is used both for new-organizer onboarding and
+    // for ordinary customer accounts, so provider is not a valid signal.
     const organizer = await isOrganizerAccount(supabase, user.id)
     return organizer
       ? jsonResponse({ organizer: true })
