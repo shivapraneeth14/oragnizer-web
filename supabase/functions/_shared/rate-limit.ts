@@ -31,6 +31,7 @@ const DEFAULTS: Record<string, RateLimitConfig> = {
   "withdraw-wallet": { maxRequests: 5, windowSeconds: 300, action: "withdraw_wallet" },
   "cashfree-webhook": { maxRequests: 30, windowSeconds: 60, action: "cashfree_webhook" },
   "check-in": { maxRequests: 100, windowSeconds: 60, action: "check_in" },
+  "forgot-password": { maxRequests: 5, windowSeconds: 300, action: "forgot_password" },
 }
 
 export async function checkRateLimit(
