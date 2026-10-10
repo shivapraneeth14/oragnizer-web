@@ -360,11 +360,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
 
   if (req.headers.get("x-reconcile-secret") !== RECONCILE_SECRET) {
+    // An unauthorized caller (wrong/missing secret). An auth event — the
+    // legitimate cron always presents the matching secret.
     await recordAlert(supabase, {
       severity: "critical",
-      category: "payment",
-      title: "reconcile-payments cron rejected (x-reconcile-secret mismatch)",
-      details: { hint: "the payment reconciliation cron is not running" },
+      category: "auth",
+      title: "reconcile-payments received an unauthorized call",
+      details: { hint: "caller supplied an invalid x-reconcile-secret" },
     })
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,

@@ -122,14 +122,14 @@ Deno.serve(async (req) => {
         })
       }
 
-      // Cron presented a secret but it doesn't match — the scheduled job is
-      // silently dead. Surface it (best-effort) without touching the organizer
-      // JWT mode below, then reject exactly like an unauthorized caller.
+      // An unauthorized caller (wrong/missing secret). This is an auth event,
+      // not necessarily the cron — surface it without touching the organizer
+      // JWT mode below, then reject exactly like an unauthorized caller normally.
       await recordAlert(supabase, {
         severity: "critical",
-        category: "payout",
-        title: "payout-status-sync cron rejected (x-sync-secret mismatch)",
-        details: { hint: "the payout status sync cron is not running" },
+        category: "auth",
+        title: "sync-payout-status received an unauthorized call",
+        details: { hint: "caller supplied an invalid x-sync-secret" },
       })
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
