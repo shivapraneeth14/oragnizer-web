@@ -94,11 +94,11 @@ END $$;
 -- ----------------------------------------------------------------------------
 -- Operator seed (non-secret half only; the secret is set at deploy time):
 --
---   INSERT INTO vault.secrets (name, secret)
---   SELECT 'project_url', 'https://<project-ref>.supabase.co'
---   WHERE NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name = 'project_url');
+--   Note: direct INSERT into vault.secrets is blocked on hosted Supabase
+--   (ERROR 42501 permission denied for _crypto_aead_det_noncegen). Use the
+--   vault helper instead:
 --
---   INSERT INTO vault.secrets (name, secret)
---   SELECT 'reconcile_service_key', '<RECONCILE_SECRET>'
---   WHERE NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name = 'reconcile_service_key');
+--   SELECT vault.create_secret('https://<project-ref>.supabase.co', 'project_url');
+--
+--   SELECT vault.create_secret('<RECONCILE_SECRET>', 'reconcile_service_key');
 -- ----------------------------------------------------------------------------
