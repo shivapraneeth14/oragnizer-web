@@ -1,11 +1,10 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { attemptRefund, razorpayGet } from "../_shared/refunds.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -15,90 +14,16 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 }
 
-async function razorpayPost(path: string, body: any) {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-    body: JSON.stringify(body),
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error?.description || "Razorpay API error")
-  return data
-}
-
-async function razorpayGet(path: string): Promise<any> {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: { description: `HTTP ${res.status}` } }))
-    throw new Error(err.error?.description || `Razorpay error (${res.status})`)
-  }
-  return res.json()
-}
-
-function mapRefundStatus(status: string | undefined): string {
-  switch (status) {
-    case "processed":
-      return "processed"
-    case "pending":
-    case "queued":
-      return "pending"
-    case "failed":
-    case "reversed":
-      return "failed"
-    default:
-      return "pending"
-  }
-}
-
-// Organizer-initiated cancellation refunds EVERY confirmed registration in
+// Organizer-initiated cancellation refunds EVERY non-attended registration in
 // FULL (customer gets the complete amount back, platform fee included). The
-// organizer's wallet is debited by their share only; the platform's
-// commission record for the transaction is zeroed via commission_reversed.
-// The split READ from the payment row (persisted at order creation) — never
-// recomputed from commission_percent.
-async function rebalanceRefund(
-  community: { id: string },
-  payment: { id: string; amount: number; platform_fee: number | null; organizer_share: number | null },
-  via: "registration_cancellation" | "event_cancellation",
-  eventId: string,
-) {
-  const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
-  const organizerShare = Math.max(
-    payment.organizer_share != null ? Number(payment.organizer_share) : Number(payment.amount) - platformFee,
-    0,
-  )
-
-  const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
-    p_community_id: community.id,
-    p_amount: organizerShare,
-    p_reason: `${via}_refund`,
-    p_event_id: eventId,
-  })
-  if (debitError || debitResult?.error) {
-    throw new Error(debitResult?.error || debitError?.message || "Wallet debit failed")
-  }
-
-  if (platformFee > 0) {
-    await supabase.from("payment_audit_log").insert({
-      action: "commission_reversed",
-      payment_id: payment.id,
-      details: {
-        commission_amount: platformFee,
-        reason: via,
-        note: `Platform commission zeroed — customer refunded the full ₹${(Number(payment.amount) / 100).toFixed(0)} including our fee`,
-      },
-    })
-  }
-}
+// organizer's wallet is debited by their share only (inside the refund claim
+// RPC, exactly once); the platform's commission record for the transaction is
+// zeroed via commission_reversed. Refund issuance is claim-guarded by
+// _shared/refunds.attemptRefund, so concurrent callers cannot double-refund.
+//
+// Attendees who already attended are NEVER refunded, at any time — they
+// consumed the ticket. Their registration stays 'attended' as the attendance
+// record and their payment stays untouched (no clawback, no refund).
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
@@ -217,61 +142,72 @@ Deno.serve(async (req) => {
       }
     }
 
+    const attendedRegIds = new Set<string>(
+      (liveRegs || []).filter(r => r.status === "attended").map(r => r.id),
+    )
+
     let refunded = 0
     let failed = 0
+    let refundsSkipped = 0
     const errors: string[] = []
 
-    const refundable = payments.filter(p => p.status === "success")
+    // Attendees who already attended keep their ticket and their money — never
+    // refunded, even though the event is cancelled.
+    for (const payment of payments.filter(p => p.status === "success" && attendedRegIds.has(p.registration_id))) {
+      refundsSkipped++
+      await supabase.from("payment_audit_log").insert({
+        action: "refund_skipped_attended",
+        payment_id: payment.id,
+        details: {
+          event_id,
+          registration_id: payment.registration_id,
+          note: "Attendee already attended — no refund on event cancellation",
+        },
+      })
+    }
 
-    // No exceptions: every paid registration gets a full refund.
+    const refundable = payments.filter(p => p.status === "success" && !attendedRegIds.has(p.registration_id))
+
+    // Every refundable paid registration gets a full refund. Claims
+    // serialize concurrent refund attempts on each payment exactly once.
     for (const payment of refundable) {
       try {
-        if (!payment.razorpay_payment_id) throw new Error(`Payment ${payment.id} has no razorpay_payment_id`)
+        const outcome = await attemptRefund(supabase, payment, payment.amount, "event_cancellation")
 
-        const refund = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, { amount: payment.amount, receipt: `ref_${payment.id}` })
-
-        const mappedStatus = mapRefundStatus(refund.status)
-
-        // Record the truthful refund state FIRST (Razorpay accepted it), then
-        // rebalance the wallet so a clawback failure is surfaced in the audit
-        // log instead of round-tripping into a duplicate-receipt retry.
-        await supabase.from("payments").update({
-          status: "refunded",
-          refund_status: mappedStatus,
-          refund_attempt_count: 0,
-          razorpay_refund_id: refund.id,
-          refunded_amount: payment.amount,
-        }).eq("id", payment.id)
-
-        await supabase.from("payment_audit_log").insert({
-          action: "refund_issued",
-          payment_id: payment.id,
-          details: { refund_id: refund.id, amount: payment.amount, refund_status: mappedStatus, event_id, triggered_by: "event_cancellation" },
-        })
-
-        // Organizer-cancelled events refund EVERYONE in full (fee included),
-        // so the platform fee record for each transaction is zeroed.
-        try {
-          await rebalanceRefund(community, payment, "event_cancellation", event_id)
-        } catch (clawbackErr) {
+        if (outcome.status === "conflict") {
           await supabase.from("payment_audit_log").insert({
-            action: "refund_wallet_debit_failed",
+            action: "refund_conflict",
             payment_id: payment.id,
-            details: {
-              refund_id: refund.id,
-              amount: payment.amount,
-              reason: "event_cancellation",
-              error: (clawbackErr as Error).message,
-              note: "Customer refunded but organizer wallet clawback failed - manual follow-up required",
-            },
+            details: { event_id, note: "Refund skipped — another flow already holds the claim on this payment" },
           })
+        } else if (outcome.status === "already_refunded") {
+          await supabase.from("payment_audit_log").insert({
+            action: "refund_already_processed",
+            payment_id: payment.id,
+            details: { refund_id: outcome.refund_id, event_id, triggered_by: "event_cancellation" },
+          })
+          refunded++
+        } else {
+          // Organizer-cancelled events refund EVERYONE in full (fee included),
+          // so the platform fee record for each transaction is zeroed. The
+          // wallet clawback itself already ran inside complete_payment_refund.
+          const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
+          if (platformFee > 0) {
+            await supabase.from("payment_audit_log").insert({
+              action: "commission_reversed",
+              payment_id: payment.id,
+              details: {
+                commission_amount: platformFee,
+                reason: "event_cancellation",
+                note: `Platform commission zeroed — customer refunded the full ₹${(Number(payment.amount) / 100).toFixed(0)} including our fee`,
+              },
+            })
+          }
+          refunded++
         }
-
-        refunded++
       } catch (err) {
         console.error(`Refund failed for payment ${payment.id}:`, err)
         errors.push(`Payment ${payment.id}: ${(err as Error).message}`)
-        await supabase.from("payments").update({ refund_status: "failed", refund_attempt_count: 1 }).eq("id", payment.id)
         await supabase.from("payment_audit_log").insert({
           action: "refund_failed",
           payment_id: payment.id,
@@ -279,36 +215,33 @@ Deno.serve(async (req) => {
         })
         failed++
       }
-      // Always cancel the registration and decrement count
-      await supabase.from("registrations").update({
-        status: "cancelled",
-        qr_code: null,
-        deleted_at: new Date().toISOString(),
-      }).eq("id", payment.registration_id)
-
-      await supabase.rpc("decrement_event_booked", { p_event_id: event_id })
+      // Always cancel the registration and release capacity. The RPC only
+      // decrements when the registration was confirmed (pending regs were
+      // never counted), inside one transaction — atomic + exactly-once.
+      await supabase.rpc("cancel_registration_and_decrement", {
+        p_registration_id: payment.registration_id,
+        p_deleted_at: new Date().toISOString(),
+      })
     }
 
     const refundedRegIds = new Set(refundable.map(p => p.registration_id))
     for (const reg of liveRegs) {
       if (refundedRegIds.has(reg.id)) continue
-      await supabase.from("registrations").update({
-        status: "cancelled",
-        qr_code: null,
-        deleted_at: new Date().toISOString(),
-      }).eq("id", reg.id)
-      // Only regs that counted against capacity get decremented; pending
-      // unpaid ones were never booked.
-      if (reg.status === "confirmed") {
-        await supabase.rpc("decrement_event_booked", { p_event_id: event_id })
-      }
+      if (attendedRegIds.has(reg.id)) continue
+      // Cancel + release capacity in one transaction; decrements only when
+      // the registration was confirmed (so it was actually counted), exactly
+      // once even if two cancel flows race on the same registration.
+      await supabase.rpc("cancel_registration_and_decrement", {
+        p_registration_id: reg.id,
+        p_deleted_at: new Date().toISOString(),
+      })
     }
 
     await supabase.from("events").update({ status: "cancelled" }).eq("id", event_id)
 
     await supabase.from("payment_audit_log").insert({
       action: "event_cancelled",
-      details: { event_id, user_id: user.id, registrations_cancelled: liveRegs.length, payments_refunded: refunded, payments_failed: failed },
+      details: { event_id, user_id: user.id, registrations_cancelled: liveRegs.length, payments_refunded: refunded, payments_failed: failed, refunds_skipped_attended: refundsSkipped },
     })
 
     return new Response(JSON.stringify({
@@ -316,6 +249,7 @@ Deno.serve(async (req) => {
       registrations_cancelled: liveRegs.length,
       payments_refunded: refunded,
       payments_failed: failed,
+      refunds_skipped_attended: refundsSkipped,
       errors: errors.length > 0 ? errors : undefined,
     }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {

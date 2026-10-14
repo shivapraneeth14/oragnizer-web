@@ -1,5 +1,6 @@
 import { optionalEnv, requiredEnv } from "./env.ts"
 import { createHmac } from "node:crypto"
+import { safeEqual } from "./crypto.ts"
 
 const CASHFREE_CLIENT_ID = requiredEnv("CASHFREE_CLIENT_ID")
 const CASHFREE_CLIENT_SECRET = requiredEnv("CASHFREE_CLIENT_SECRET")
@@ -123,5 +124,5 @@ export function verifyCashfreeWebhook(rawBody: string, signature: string, secret
   const hmac = createHmac("sha256", secret)
   hmac.update(rawBody)
   const expected = hmac.digest("base64")
-  return expected === signature
+  return safeEqual(expected, signature)
 }

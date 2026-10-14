@@ -2,6 +2,12 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { feeBreakdown } from "../_shared/fees.ts"
+import {
+  clearRefundFieldsForRequote,
+  paymentNonRequotableReason,
+  restoreRegistrationIfCancelled,
+  revertRegistrationToCancelled,
+} from "../_shared/payments.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -135,29 +141,33 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .maybeSingle()
 
-    let registrationId: string
-    if (existing) {
-      if (existing.status === "confirmed") return new Response(JSON.stringify({ error: "Already registered" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
-      if (existing.status === "cancelled") {
-        await supabase
-          .from("registrations")
-          .update({ status: "pending", deleted_at: null, updated_at: new Date().toISOString() })
-          .eq("id", existing.id)
+    const { data: existingPayment } = existing
+      ? await supabase
+          .from("payments")
+          .select("id, razorpay_order_id, status, refund_status, refund_claim_state, created_at, attempt_count, amount")
+          .eq("registration_id", existing.id)
+          .maybeSingle()
+      : { data: null }
+
+    // --- State-machine gate: a paid (or refunding) payment row must never be
+    // demoted to pending, and a cancelled registration holding one must never
+    // be resurrected. Check BEFORE any write.
+    if (existingPayment) {
+      const blockReason = paymentNonRequotableReason(existingPayment)
+      if (blockReason) {
+        const message = blockReason === "already_paid"
+          ? "You have already paid for this event."
+          : "A refund for this payment is in progress. You cannot pay again."
+        return new Response(JSON.stringify({ error: message, code: blockReason }), {
+          status: blockReason === "already_paid" ? 409 : 409,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
       }
-      registrationId = existing.id
-    } else {
-      const { data: reg, error: regErr } = await supabase
-        .from("registrations")
-        .insert({ event_id, user_id: user.id, status: "pending" })
-        .select("id")
-        .single()
-      if (regErr) throw regErr
-      registrationId = reg!.id
     }
 
     const amount = event.price
     let ticket = amount
-    let couponId: string | null = null
+    let pendingCouponId: string | null = null
 
     if (coupon_code) {
       const { data: coupon } = await supabase
@@ -175,110 +185,153 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "Coupon has expired" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
       }
 
-      const { data: claimResult } = await supabase
-        .rpc("claim_coupon", { p_coupon_id: coupon.id })
-
-      if (claimResult?.claimed) {
-        let discount = 0
-        if (coupon.discount_type === "percentage") {
-          discount = Math.floor(amount * coupon.discount_value / 100)
-        } else {
-          discount = coupon.discount_value
-        }
-
-        ticket = Math.max(amount - discount, 0)
-        couponId = coupon.id
+      // Clamp server-side so a malformed coupon row can never over-discount.
+      let discount = 0
+      if (coupon.discount_type === "percentage") {
+        const pct = Math.min(Math.max(Number(coupon.discount_value) || 0, 0), 100)
+        discount = Math.floor(amount * pct / 100)
+      } else {
+        discount = Math.max(Math.min(Number(coupon.discount_value) || 0, amount), 0)
       }
+
+      ticket = Math.max(amount - discount, 0)
+      pendingCouponId = coupon.id
     }
 
-    // Fee-on-top: the organizer's ticket (post-coupon) plus a flat platform
-    // fee + 18% GST is what the customer is charged. The split is computed
-    // HERE, once, and persisted — confirm_payment only reads it back.
     if (ticket <= 0) {
       return new Response(JSON.stringify({ error: "Coupon covers the full ticket. Register for free instead." }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
     const finalAmount = ticket + fee.total
 
-    const { data: existingPayment } = await supabase
-      .from("payments")
-      .select("id, razorpay_order_id, status, created_at, attempt_count, amount")
-      .eq("registration_id", registrationId)
-      .maybeSingle()
-
-    if (existingPayment) {
-      if (existingPayment.status === "success") return new Response(JSON.stringify({ error: "Already paid" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
-
-      if (existingPayment.status === "pending" && existingPayment.razorpay_order_id) {
-        const orderAge = Date.now() - new Date(existingPayment.created_at).getTime()
-        // Only reuse the order if it was quoted at today's math (fee or price
-        // may have changed since) — otherwise fall through and re-quote.
-        const reusable = orderAge < 24 * 60 * 60 * 1000 && Number(existingPayment.amount) === finalAmount
-        if (reusable) {
-          // Path C: if the money already landed, confirm instead of reusing
-          // the order (the success callback may have been lost).
-          const confirmed = await confirmPaidOrder(existingPayment.id, existingPayment.razorpay_order_id)
-          if (confirmed?.confirmed) {
-            return new Response(JSON.stringify({ exists: true, payment_status: "confirmed", registration_id: registrationId }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
-          }
-          if (confirmed !== null) {
-            return new Response(JSON.stringify({ error: "Your payment was received but could not be confirmed. Payment will be refunded." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
-          }
-          return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: existingPayment.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    // --- Reuse a valid in-flight order (Path C: if the money already landed,
+    // confirm instead of reusing — the success callback may have been lost).
+    if (existingPayment && existingPayment.status === "pending" && existingPayment.razorpay_order_id) {
+      const orderAge = Date.now() - new Date(existingPayment.created_at).getTime()
+      // Only reuse the order if it was quoted at today's math (fee or price
+      // may have changed since) — otherwise fall through and re-quote.
+      const reusable = orderAge < 24 * 60 * 60 * 1000 && Number(existingPayment.amount) === finalAmount
+      if (reusable) {
+        const confirmed = await confirmPaidOrder(existingPayment.id, existingPayment.razorpay_order_id)
+        if (confirmed?.confirmed) {
+          return new Response(JSON.stringify({ exists: true, payment_status: "confirmed", registration_id: existing!.id }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
+        if (confirmed !== null) {
+          return new Response(JSON.stringify({ error: "Your payment was received but could not be confirmed. Payment will be refunded." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+        }
+        // Order usable, not paid yet. Restore a cancelled booking ONLY here —
+        // never before this point (the payment row may still be paid/refunding).
+        await restoreRegistrationIfCancelled(supabase, existing!.id, existing!.status)
+        return new Response(JSON.stringify({ registration_id: existing!.id, razorpay_order_id: existingPayment.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
       }
+    }
+
+    // Atomically reserve a use ONLY when a new order will be created.
+    let registrationId: string
+    if (existing) {
+      registrationId = existing.id
+    } else {
+      const { data: reg, error: regErr } = await supabase
+        .from("registrations")
+        .insert({ event_id, user_id: user.id, status: "pending" })
+        .select("id")
+        .single()
+      if (regErr) throw regErr
+      registrationId = reg!.id
+    }
+
+    let couponId: string | null = null
+    if (pendingCouponId) {
+      const { data: claimResult } = await supabase
+        .rpc("claim_coupon", { p_coupon_id: pendingCouponId })
+      if (!claimResult?.claimed) {
+        return new Response(JSON.stringify({ error: "Coupon code has reached its usage limit" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+      couponId = pendingCouponId
     }
 
     const attemptCount = (existingPayment?.attempt_count ?? 0) + 1
-    const order = await createRazorpayOrder(finalAmount, `${registrationId}_${attemptCount}`)
 
+    // From here any failure releases the claim — a rejected or crashed order
+    // must never permanently burn a coupon use. A cancelled registration is
+    // restored to pending only AFTER the order exists, and reverted if the
+    // payment row cannot be persisted.
     try {
-      if (existingPayment) {
-        await supabase
-          .from("payments")
-          .update({
-            razorpay_order_id: order.id,
-            status: "pending",
-            amount: finalAmount,
-            platform_fee: fee.total,
-            platform_fee_gst: fee.gst,
-            coupon_id: couponId,
-            attempt_count: attemptCount,
-            created_at: new Date().toISOString(),
-          })
-          .eq("id", existingPayment.id)
-      } else {
-        const { data: newPayment, error: insertError } = await supabase
-          .from("payments")
-          .insert({
-            registration_id: registrationId,
-            amount: finalAmount,
-            platform_fee: fee.total,
-            platform_fee_gst: fee.gst,
-            razorpay_order_id: order.id,
-            status: "pending",
-            coupon_id: couponId,
-            attempt_count: attemptCount,
-          })
-          .select("id")
-          .single()
-        if (insertError) throw insertError
-        if (!newPayment) throw new Error("Failed to create payment record")
+      const order = await createRazorpayOrder(finalAmount, `${registrationId}_${attemptCount}`)
+      await restoreRegistrationIfCancelled(supabase, registrationId, existing?.status ?? null)
+
+      try {
+        if (existingPayment) {
+          // An old refunded/failed sale on this row is being replaced by a new
+          // order — archive + clear the stale refund fields first.
+          await clearRefundFieldsForRequote(supabase, existingPayment)
+          await supabase
+            .from("payments")
+            .update({
+              razorpay_order_id: order.id,
+              status: "pending",
+              amount: finalAmount,
+              platform_fee: fee.total,
+              platform_fee_gst: fee.gst,
+              coupon_id: couponId,
+              attempt_count: attemptCount,
+              created_at: new Date().toISOString(),
+            })
+            .eq("id", existingPayment.id)
+        } else {
+          const { data: newPayment, error: insertError } = await supabase
+            .from("payments")
+            .insert({
+              registration_id: registrationId,
+              amount: finalAmount,
+              platform_fee: fee.total,
+              platform_fee_gst: fee.gst,
+              razorpay_order_id: order.id,
+              status: "pending",
+              coupon_id: couponId,
+              attempt_count: attemptCount,
+            })
+            .select("id")
+            .single()
+          if (insertError) throw insertError
+          if (!newPayment) throw new Error("Failed to create payment record")
+        }
+      } catch (err) {
+        // Payment row could not be persisted for the freshly-created order —
+        // the booking must not stay pending with no live payment behind it.
+        await revertRegistrationToCancelled(supabase, registrationId)
+        throw err
       }
-    } catch (insertErr: any) {
-      if (insertErr?.code === "23505") {
+
+      return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: order.id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    } catch (err: any) {
+      if (err?.code === "23505") {
+        // Concurrent double-tap: another request won the payment row. Release
+        // THIS call's claim — the winner's claim is the one tied to the row.
+        try {
+          if (couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId })
+        } catch { /* best-effort */ }
         const { data: recovered } = await supabase
           .from("payments")
-          .select("razorpay_order_id")
+          .select("id, razorpay_order_id, status, refund_status, refund_claim_state")
           .eq("registration_id", registrationId)
           .single()
         if (recovered) {
+          const winnerBlock = paymentNonRequotableReason(recovered)
+          if (winnerBlock === "already_paid") {
+            return new Response(JSON.stringify({ exists: true, payment_status: "confirmed", registration_id: registrationId }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          }
+          if (winnerBlock) {
+            return new Response(JSON.stringify({ error: "Your payment is being refunded. You cannot pay again.", code: winnerBlock }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          }
           return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: recovered.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
-      throw insertErr
+      // Any other failure (provider, insert) → release the claim, then rethrow.
+      try {
+        if (couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId })
+      } catch { /* best-effort */ }
+      throw err
     }
-
-    return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: order.id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
     console.error(err)
     return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })

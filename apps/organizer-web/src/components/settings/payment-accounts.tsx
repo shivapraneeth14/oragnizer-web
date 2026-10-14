@@ -120,14 +120,14 @@ export default function PaymentAccounts({ communityId }: Props) {
 
       <div className="mt-6 space-y-2">
         {beneficiaries.map((b) => (
-          <div key={b.id} className={`flex items-center justify-between rounded-lg border p-3 text-sm ${b.is_active ? "border-[#C2185B] bg-[#C2185B]/5" : "border-neutral-200"}`}>
+          <div key={b.id} className={`flex items-center justify-between rounded-lg border p-3 text-sm ${b.is_active ? "border-cluvo-primary bg-cluvo-primary/5" : "border-neutral-200"}`}>
             <div className="flex items-center gap-3 min-w-0">
               <input
                 type="radio"
                 name="active_beneficiary"
                 checked={b.is_active}
                 onChange={() => handleSwitchBeneficiary(b.id)}
-                className="shrink-0 accent-[#C2185B]"
+                className="shrink-0 accent-cluvo-primary"
               />
               <div className="min-w-0">
                 <p className="font-medium text-neutral-800 truncate">{b.label || b.account_holder}</p>
@@ -157,36 +157,36 @@ export default function PaymentAccounts({ communityId }: Props) {
           <div>
             <label className="block text-sm font-medium text-neutral-700 mb-1">Account Holder Name</label>
             <input value={accountHolder} onChange={(e) => setAccountHolder(e.target.value)}
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-[#C2185B] focus:outline-none"
+              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-cluvo-primary focus:outline-none"
               placeholder="John Doe" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-neutral-700 mb-1">IFSC Code</label>
               <input value={ifsc} onChange={(e) => setIfsc(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-[#C2185B] focus:outline-none"
+                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-cluvo-primary focus:outline-none"
                 placeholder="HDFC0001234" />
             </div>
             <div>
               <label className="block text-sm font-medium text-neutral-700 mb-1">Account Number</label>
               <input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-[#C2185B] focus:outline-none"
+                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-cluvo-primary focus:outline-none"
                 placeholder="1234567890" />
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-neutral-700 mb-1">Label (optional)</label>
             <input value={label} onChange={(e) => setLabel(e.target.value)}
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-[#C2185B] focus:outline-none"
+              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-cluvo-primary focus:outline-none"
               placeholder="e.g. Personal, Business" />
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
             <button onClick={handleSaveBeneficiary} disabled={savingBeneficiary}
-              className="rounded-lg bg-[#C2185B] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#A0154A] disabled:opacity-50">
+              className="w-full rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50 sm:w-auto">
               {savingBeneficiary ? "Saving..." : "Save"}
             </button>
             <button onClick={() => { setShowAddForm(false); setError("") }}
-              className="rounded-lg border border-neutral-300 px-6 py-2.5 text-sm font-medium text-neutral-600 hover:bg-neutral-100">
+              className="w-full rounded-lg border border-neutral-300 px-6 py-2.5 text-sm font-medium text-neutral-600 hover:bg-neutral-100 sm:w-auto">
               Cancel
             </button>
           </div>
@@ -195,7 +195,7 @@ export default function PaymentAccounts({ communityId }: Props) {
 
       {!showAddForm && (
         <button onClick={() => setShowAddForm(true)}
-          className="mt-4 text-sm font-medium text-[#C2185B] hover:underline">
+          className="mt-4 text-sm font-medium text-cluvo-primary hover:underline">
           + Add Account
         </button>
       )}

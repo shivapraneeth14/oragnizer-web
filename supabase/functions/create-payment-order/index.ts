@@ -2,6 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { feeBreakdown } from "../_shared/fees.ts"
+import { clearRefundFieldsForRequote, paymentNonRequotableReason } from "../_shared/payments.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -96,7 +97,7 @@ Deno.serve(async (req) => {
 
     const amount = event.price
     let ticket = amount
-    let couponId: string | null = null
+    let pendingCouponId: string | null = null
 
     if (coupon_code) {
       const { data: coupon } = await supabase
@@ -114,20 +115,19 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "Coupon has expired" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
       }
 
-      const { data: claimResult } = await supabase
-        .rpc("claim_coupon", { p_coupon_id: coupon.id })
-
-      if (claimResult?.claimed) {
-        let discount = 0
-        if (coupon.discount_type === "percentage") {
-          discount = Math.floor(amount * coupon.discount_value / 100)
-        } else {
-          discount = coupon.discount_value
-        }
-
-        ticket = Math.max(amount - discount, 0)
-        couponId = coupon.id
+      // Clamp server-side so a malformed coupon row can never over-discount.
+      // NOT claimed here: a use is reserved only when this call actually
+      // creates a new order (see below).
+      let discount = 0
+      if (coupon.discount_type === "percentage") {
+        const pct = Math.min(Math.max(Number(coupon.discount_value) || 0, 0), 100)
+        discount = Math.floor(amount * pct / 100)
+      } else {
+        discount = Math.max(Math.min(Number(coupon.discount_value) || 0, amount), 0)
       }
+
+      ticket = Math.max(amount - discount, 0)
+      pendingCouponId = coupon.id
     }
 
     // Fee-on-top: charge = ticket + flat fee + 18% GST. Split persisted once,
@@ -140,29 +140,51 @@ Deno.serve(async (req) => {
     // Check for existing payment — reuse valid order, avoid duplicate
     const { data: existingPayment } = await supabase
       .from("payments")
-      .select("id, razorpay_order_id, status, created_at, attempt_count, amount")
+      .select("id, razorpay_order_id, status, refund_status, refund_claim_state, created_at, attempt_count, amount")
       .eq("registration_id", registration_id)
       .maybeSingle()
 
     if (existingPayment) {
-      if (existingPayment.status === "success") return new Response(JSON.stringify({ error: "Already paid" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      const blockReason = paymentNonRequotableReason(existingPayment)
+      if (blockReason === "already_paid") return new Response(JSON.stringify({ error: "Already paid", code: "already_paid" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      if (blockReason) return new Response(JSON.stringify({ error: "A refund for this payment is in progress.", code: blockReason }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
       if (existingPayment.status === "pending" && existingPayment.razorpay_order_id) {
         const orderAge = Date.now() - new Date(existingPayment.created_at).getTime()
         // Reuse only if quoted at today's math; otherwise re-quote.
         if (orderAge < 24 * 60 * 60 * 1000 && Number(existingPayment.amount) === finalAmount) {
+          // NO coupon claim on the reuse path: the existing payment row already
+          // consumed its use (or has none); returning the order must not burn a
+          // second one — a later reconcile release cannot undo the phantom.
           return new Response(JSON.stringify({ razorpay_order_id: existingPayment.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
     }
 
-    const attemptCount = (existingPayment?.attempt_count ?? 0) + 1
-    const order = await createRazorpayOrder(finalAmount, `${registration_id}_${attemptCount}`)
+    // Atomically reserve a use ONLY when a new order will be created.
+    let couponId: string | null = null
+    if (pendingCouponId) {
+      const { data: claimResult } = await supabase
+        .rpc("claim_coupon", { p_coupon_id: pendingCouponId })
+      if (!claimResult?.claimed) {
+        return new Response(JSON.stringify({ error: "Coupon code has reached its usage limit" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+      couponId = pendingCouponId
+    }
 
-    // Insert or update payments row with 23505 recovery for concurrent double-tap
-    let paymentId: string
+    const attemptCount = (existingPayment?.attempt_count ?? 0) + 1
+
+    // From here any failure releases the claim — a rejected or crashed order
+    // must never permanently burn a coupon use.
     try {
+      const order = await createRazorpayOrder(finalAmount, `${registration_id}_${attemptCount}`)
+
+      // Insert or update payments row with 23505 recovery for concurrent double-tap
+      let paymentId: string
       if (existingPayment) {
+        // An old refunded/failed sale on this row is being replaced by a new
+        // order — archive + clear the stale refund fields first.
+        await clearRefundFieldsForRequote(supabase, existingPayment)
         await supabase
           .from("payments")
           .update({
@@ -196,8 +218,13 @@ Deno.serve(async (req) => {
         if (!newPayment) throw new Error("Failed to create payment record")
         paymentId = newPayment.id
       }
-    } catch (insertErr: any) {
-      if (insertErr?.code === "23505") {
+
+      return new Response(JSON.stringify({ razorpay_order_id: order.id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    } catch (err: any) {
+      if (err?.code === "23505") {
+        // Concurrent double-tap: another request won the payment row. Release
+        // THIS call's claim — the winner's claim is the one tied to the row.
+        if (couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId }).catch(() => {})
         const { data: recovered } = await supabase
           .from("payments")
           .select("razorpay_order_id")
@@ -207,10 +234,10 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({ razorpay_order_id: recovered.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
-      throw insertErr
+      // Any other failure (provider, insert) → release the claim, then rethrow.
+      if (couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId }).catch(() => {})
+      throw err
     }
-
-    return new Response(JSON.stringify({ razorpay_order_id: order.id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
     console.error(err)
     return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
