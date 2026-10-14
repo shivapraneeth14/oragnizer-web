@@ -162,20 +162,20 @@ export default function MediaSection({ communityId }: Props) {
 
       {/* Community Media */}
       <div className="mt-8">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="text-lg font-semibold text-neutral-800">Community Photos & Videos</h4>
           <div className="flex gap-2">
             <button
               onClick={() => triggerUpload("community", "image")}
               disabled={uploading}
-              className="flex items-center gap-1 rounded-lg bg-[#C2185B] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#A0154A] disabled:opacity-50"
+              className="flex items-center gap-1 rounded-lg bg-cluvo-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50"
             >
               + Photo
             </button>
             <button
               onClick={() => triggerUpload("community", "video")}
               disabled={uploading}
-              className="flex items-center gap-1 rounded-lg border border-[#C2185B] px-3 py-1.5 text-sm font-medium text-[#C2185B] hover:bg-[#C2185B]/5 disabled:opacity-50"
+              className="flex items-center gap-1 rounded-lg border border-cluvo-primary px-3 py-1.5 text-sm font-medium text-cluvo-primary hover:bg-cluvo-primary/5 disabled:opacity-50"
             >
               + Video
             </button>
@@ -183,7 +183,7 @@ export default function MediaSection({ communityId }: Props) {
         </div>
         {communityMediaLoading ? (
           <div className="mt-4 flex justify-center py-12">
-            <svg className="h-6 w-6 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+            <svg className="h-6 w-6 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
@@ -225,14 +225,14 @@ export default function MediaSection({ communityId }: Props) {
               <button
                 onClick={() => triggerUpload("event", "image")}
                 disabled={uploading}
-                className="flex items-center gap-1 rounded-lg bg-[#C2185B] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#A0154A] disabled:opacity-50"
+                className="flex items-center gap-1 rounded-lg bg-cluvo-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50"
               >
                 + Photo
               </button>
               <button
                 onClick={() => triggerUpload("event", "video")}
                 disabled={uploading}
-                className="flex items-center gap-1 rounded-lg border border-[#C2185B] px-3 py-1.5 text-sm font-medium text-[#C2185B] hover:bg-[#C2185B]/5 disabled:opacity-50"
+                className="flex items-center gap-1 rounded-lg border border-cluvo-primary px-3 py-1.5 text-sm font-medium text-cluvo-primary hover:bg-cluvo-primary/5 disabled:opacity-50"
               >
                 + Video
               </button>
@@ -241,7 +241,7 @@ export default function MediaSection({ communityId }: Props) {
             <MediaLoadProgress loaded={eventLoaded} total={eventMedia.length} />
             {eventMediaLoading ? (
               <div className="flex justify-center py-12">
-                <svg className="h-6 w-6 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+                <svg className="h-6 w-6 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
@@ -349,9 +349,9 @@ function UploadProgress({ percent, type }: { percent: number | null; type: "imag
     <div className="mt-3">
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
         {done ? (
-          <div className="h-full w-full animate-pulse rounded-full bg-[#C2185B]" />
+          <div className="h-full w-full animate-pulse rounded-full bg-cluvo-primary" />
         ) : (
-          <div className="h-full rounded-full bg-[#C2185B] transition-all" style={{ width: `${percent}%` }} />
+          <div className="h-full rounded-full bg-cluvo-primary transition-all" style={{ width: `${percent}%` }} />
         )}
       </div>
       <p className="mt-1 text-sm text-neutral-500">
@@ -367,7 +367,7 @@ function MediaLoadProgress({ loaded, total }: { loaded: number; total: number })
   return (
     <div className="mt-3">
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
-        <div className="h-full rounded-full bg-[#C2185B] transition-all" style={{ width: `${percent}%` }} />
+        <div className="h-full rounded-full bg-cluvo-primary transition-all" style={{ width: `${percent}%` }} />
       </div>
       <p className="mt-1 text-xs text-neutral-500">Loading media… {loaded}/{total}</p>
     </div>

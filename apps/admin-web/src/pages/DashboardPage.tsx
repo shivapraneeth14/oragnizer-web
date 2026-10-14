@@ -20,7 +20,7 @@ export default function DashboardPage() {
         members: m.count ?? 0,
       })
       setLoading(false)
-    })
+    }, () => setLoading(false))
   }, [])
 
   return (

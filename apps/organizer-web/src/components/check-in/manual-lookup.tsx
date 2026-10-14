@@ -1,5 +1,6 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { supabase } from "../../supabase"
+import { fetchOrganizerContacts, type OrgContact } from "../../lib/organizer-contacts"
 
 interface Registration {
   id: string
@@ -20,6 +21,13 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
   const [results, setResults] = useState<Registration[]>([])
   const [searching, setSearching] = useState(false)
   const [searched, setSearched] = useState(false)
+  const [contacts, setContacts] = useState<Map<string, OrgContact>>(new Map())
+
+  useEffect(() => {
+    let active = true
+    fetchOrganizerContacts().then((map) => { if (active) setContacts(map) })
+    return () => { active = false }
+  }, [])
 
   async function handleSearch() {
     if (!query.trim()) return
@@ -28,7 +36,7 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
 
     let queryBuilder = supabase
       .from("registrations")
-      .select("id, user_id, status, qr_code, profiles(email, first_name, last_name, username), events!inner(community_id)")
+      .select("id, user_id, status, qr_code, profiles(first_name, last_name, username), events!inner(community_id)")
       .is("deleted_at", null)
       .in("status", ["confirmed", "attended"])
 
@@ -42,7 +50,15 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
 
     if (!regs) { setResults([]); setSearching(false); return }
 
-    const filtered = regs.filter(r => {
+    const withEmail = (regs as unknown as Registration[]).map((r) => ({
+      ...r,
+      profiles: (r.profiles || []).map((p) => ({
+        ...p,
+        email: p.email || contacts.get(r.user_id)?.email || "",
+      })),
+    }))
+
+    const filtered = withEmail.filter(r => {
       const profile = r.profiles?.[0]
       const name = `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim().toLowerCase()
       const username = profile?.username?.toLowerCase() || ""
@@ -64,7 +80,7 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-4">
       <h3 className="text-sm font-semibold text-neutral-700 mb-3">Manual Lookup</h3>
-      <div className="flex gap-2 mb-3">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row">
         <input
           type="text"
           value={query}
@@ -76,7 +92,7 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
         <button
           onClick={handleSearch}
           disabled={searching || !query.trim()}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+          className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm text-white font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 sm:w-auto"
         >
           {searching ? "Searching..." : "Search"}
         </button>

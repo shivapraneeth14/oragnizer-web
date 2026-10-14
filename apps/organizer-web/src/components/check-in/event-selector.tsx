@@ -71,7 +71,7 @@ export default function EventSelector({ selectedEventId, onSelect, communityId, 
     <select
       value={selectedEventId || ""}
       onChange={(e) => onSelect(e.target.value || null)}
-      className="rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 sm:w-auto"
       disabled={loading}
     >
       <option value="">All Events ({checkedAll}/{totalAll})</option>

@@ -29,6 +29,9 @@
   --color-warning: #f59e0b;
   --color-error: #ef4444;
 
+  --color-cluvo-primary: #c2185b;
+  --color-cluvo-primary-dark: #a0154a;
+
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 

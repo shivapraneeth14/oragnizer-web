@@ -116,8 +116,8 @@ export default function SocialMedia() {
                 onChange={(e) => handleChange(key, e.target.value)}
                 onBlur={() => handleBlur(key)}
                 placeholder={placeholder}
-                className={`w-full rounded-lg border px-3.5 py-2 text-sm outline-none transition focus:ring-1 focus:ring-[#C2185B]/20 ${
-                  f?.error ? "border-red-400 focus:border-red-500" : "border-neutral-300 focus:border-[#C2185B]"
+                className={`w-full rounded-lg border px-3.5 py-2 text-sm outline-none transition focus:ring-1 focus:ring-cluvo-primary/20 ${
+                  f?.error ? "border-red-400 focus:border-red-500" : "border-neutral-300 focus:border-cluvo-primary"
                 }`}
               />
               {f?.error && <p className="mt-0.5 text-xs text-red-500">{f.error}</p>}
@@ -130,7 +130,7 @@ export default function SocialMedia() {
         <button
           onClick={handleSave}
           disabled={saving || !allValid}
-          className="rounded-lg bg-[#C2185B] px-6 py-2.5 text-sm font-medium text-white transition hover:bg-[#A0154A] disabled:opacity-50"
+          className="w-full rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white transition hover:bg-cluvo-primary-dark disabled:opacity-50 sm:w-auto"
         >
           {saving ? "Saving..." : "Save Changes"}
         </button>

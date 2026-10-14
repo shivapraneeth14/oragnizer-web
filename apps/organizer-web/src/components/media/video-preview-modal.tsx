@@ -86,7 +86,7 @@ export default function VideoPreviewModal({ item, onClose }: Props) {
       >
         <div className="flex items-center justify-between gap-4 px-5 py-3.5">
           <div className="flex min-w-0 items-center gap-3">
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#C2185B]/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[#E91E63]">
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-cluvo-primary/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[#E91E63]">
               <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7z" />
               </svg>
@@ -100,7 +100,7 @@ export default function VideoPreviewModal({ item, onClose }: Props) {
             ref={closeRef}
             onClick={handleClose}
             aria-label="Close video player"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C2185B]"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cluvo-primary"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
               <path d="M18 6L6 18M6 6l12 12" />
@@ -148,7 +148,7 @@ export default function VideoPreviewModal({ item, onClose }: Props) {
                   aria-label="Play video"
                   className="absolute inset-0 flex items-center justify-center bg-black/40 transition group"
                 >
-                  <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#C2185B] text-white shadow-lg transition group-hover:scale-110 group-hover:bg-[#E91E63] sm:h-20 sm:w-20">
+                  <span className="flex h-16 w-16 items-center justify-center rounded-full bg-cluvo-primary text-white shadow-lg transition group-hover:scale-110 group-hover:bg-[#E91E63] sm:h-20 sm:w-20">
                     <svg className="ml-1 h-7 w-7 sm:h-8 sm:w-8" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M8 5v14l11-7z" />
                     </svg>
@@ -157,7 +157,7 @@ export default function VideoPreviewModal({ item, onClose }: Props) {
               )}
               {buffering && playing && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <svg className="h-10 w-10 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+                  <svg className="h-10 w-10 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                     <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>

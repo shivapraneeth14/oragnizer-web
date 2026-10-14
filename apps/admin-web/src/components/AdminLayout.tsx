@@ -2,6 +2,8 @@ import { useState, useEffect } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { useAuth } from "../Auth"
 import { supabase } from "../supabase"
+import { optionalEnv } from "../config"
+import { useIsDesktop } from "../lib/use-is-desktop"
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
@@ -9,13 +11,21 @@ const navItems = [
   { id: "users", label: "Users", path: "/users", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" },
   { id: "events", label: "Events", path: "/events", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
   { id: "alerts", label: "Alerts", path: "/alerts", icon: "M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" },
+  { id: "reports", label: "Reports", path: "/reports", icon: "M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" },
 ]
 
 export default function AdminLayout() {
   const { user, session, loading, isAdmin, signOut } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024)
+  const isDesktop = useIsDesktop()
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [railCollapsed, setRailCollapsed] = useState(false)
+  const sidebarOpen = isDesktop ? !railCollapsed : mobileOpen
+  const toggleSidebar = () => {
+    if (isDesktop) setRailCollapsed((c) => !c)
+    else setMobileOpen((o) => !o)
+  }
   const [profileOpen, setProfileOpen] = useState(false)
   const [openAlerts, setOpenAlerts] = useState(0)
 
@@ -37,12 +47,6 @@ export default function AdminLayout() {
   }, [])
 
   useEffect(() => {
-    const onResize = () => setSidebarOpen(window.innerWidth >= 1024)
-    window.addEventListener("resize", onResize)
-    return () => window.removeEventListener("resize", onResize)
-  }, [])
-
-  useEffect(() => {
     if (!loading && (!session || !isAdmin)) {
       navigate("/", { replace: true })
     }
@@ -51,7 +55,7 @@ export default function AdminLayout() {
   if (loading || !session || !isAdmin) {
     return (
       <div className="flex h-screen items-center justify-center bg-neutral-50">
-        <svg className="h-8 w-8 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+        <svg className="h-8 w-8 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
@@ -63,22 +67,26 @@ export default function AdminLayout() {
 
   return (
     <div className="flex h-screen bg-neutral-50">
-      {sidebarOpen && (
+      {!isDesktop && mobileOpen && (
         <div
           className="fixed inset-0 z-20 bg-black/30 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+          onClick={() => setMobileOpen(false)}
         />
       )}
 
       <aside
         className={`fixed left-0 top-0 z-30 flex h-full flex-col bg-white shadow-lg transition-all duration-300 ease-in-out ${
-          sidebarOpen ? "w-64" : "w-0 -translate-x-full lg:w-16 lg:translate-x-0"
+          isDesktop
+            ? `translate-x-0 ${railCollapsed ? "lg:w-16" : "lg:w-64"}`
+            : mobileOpen
+              ? "w-64"
+              : "w-0 -translate-x-full"
         }`}
       >
         <div className="flex h-16 items-center justify-between border-b border-neutral-200 px-4">
-          {sidebarOpen && <span className="text-lg font-bold tracking-wider text-[#C2185B]">CLUVO ADMIN</span>}
+          {sidebarOpen && <span className="text-lg font-bold tracking-wider text-cluvo-primary">CLUVO ADMIN</span>}
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={toggleSidebar}
             className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700"
           >
             <svg className={`h-5 w-5 transition-transform ${sidebarOpen ? "" : "rotate-180"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -94,12 +102,12 @@ export default function AdminLayout() {
               to={item.path}
               onClick={() => {
                 setProfileOpen(false)
-                if (window.innerWidth < 1024) setSidebarOpen(false)
+                if (!isDesktop) setMobileOpen(false)
               }}
               className={({ isActive }) =>
                 `relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   isActive
-                    ? "bg-[#C2185B]/10 text-[#C2185B]"
+                    ? "bg-cluvo-primary/10 text-cluvo-primary"
                     : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800"
                 }`
               }
@@ -111,14 +119,14 @@ export default function AdminLayout() {
                 <>
                   <span>{item.label}</span>
                   {item.id === "alerts" && openAlerts > 0 && (
-                    <span className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-[#C2185B] px-1.5 py-0.5 text-xs font-semibold text-white">
+                    <span className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-cluvo-primary px-1.5 py-0.5 text-xs font-semibold text-white">
                       {openAlerts}
                     </span>
                   )}
                 </>
               )}
               {!sidebarOpen && item.id === "alerts" && openAlerts > 0 && (
-                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#C2185B]" />
+                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-cluvo-primary" />
               )}
             </NavLink>
           ))}
@@ -131,7 +139,7 @@ export default function AdminLayout() {
                 onClick={() => setProfileOpen(!profileOpen)}
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#C2185B]/20 text-xs font-bold text-[#C2185B]">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cluvo-primary/20 text-xs font-bold text-cluvo-primary">
                   {user?.email?.charAt(0).toUpperCase() || "A"}
                 </div>
                 <div className="flex-1 truncate text-left">
@@ -157,7 +165,7 @@ export default function AdminLayout() {
           )}
           {!sidebarOpen && (
             <button
-              onClick={() => setSidebarOpen(true)}
+              onClick={toggleSidebar}
               className="flex w-full items-center justify-center rounded-lg px-3 py-2 text-neutral-500 hover:bg-neutral-100"
               title="Expand sidebar"
             >
@@ -169,11 +177,11 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "lg:pl-64" : "lg:pl-16"} pl-0`}>
-        <header className="flex h-16 items-center justify-between border-b border-neutral-200 bg-white px-6">
+      <main className={`flex-1 transition-all duration-300 ${isDesktop ? (railCollapsed ? "lg:pl-16" : "lg:pl-64") : "pl-0"}`}>
+        <header className="flex h-16 items-center justify-between border-b border-neutral-200 bg-white px-4 sm:px-6">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={toggleSidebar}
               className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 lg:hidden"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -182,13 +190,23 @@ export default function AdminLayout() {
             </button>
             <h2 className="text-lg font-semibold text-neutral-900 capitalize">{sectionName}</h2>
           </div>
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#C2185B]/20 text-xs font-bold text-[#C2185B]">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cluvo-primary/20 text-xs font-bold text-cluvo-primary">
             {user?.email?.charAt(0).toUpperCase() || "A"}
           </div>
         </header>
 
-        <div className="overflow-y-auto p-6">
+        <div className="overflow-y-auto p-4 sm:p-6">
           <Outlet />
+          {optionalEnv.publicSiteUrl && (
+            <footer className="mt-8 flex items-center justify-center gap-4 border-t border-neutral-200 pt-4 text-xs text-neutral-400">
+              <a href={`${optionalEnv.publicSiteUrl}/privacy`} target="_blank" rel="noreferrer" className="transition hover:text-neutral-600">
+                Privacy Policy
+              </a>
+              <a href={`${optionalEnv.publicSiteUrl}/terms`} target="_blank" rel="noreferrer" className="transition hover:text-neutral-600">
+                Terms of Service
+              </a>
+            </footer>
+          )}
         </div>
       </main>
     </div>
