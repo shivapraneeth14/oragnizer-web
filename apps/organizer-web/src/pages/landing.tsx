@@ -1,14 +1,11 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Link } from "react-router-dom"
 import { supabase } from "../supabase"
 import { useAuth } from "../auth-context"
-import AccountChoice from "../components/account-choice"
-import ExistingUserFlow from "../components/existing-user-flow"
+import EmailFirst from "../components/email-first"
 import NewUserFlow from "../components/new-user-flow"
-import DashboardLogin from "../components/dashboard-login"
-import { env } from "../config"
 
-type Flow = "choice" | "existing" | "new" | "dashboard-login" | "create"
+type Flow = "auth" | "new"
 
 const features = [
   {
@@ -43,72 +40,68 @@ const features = [
   },
 ]
 
-function deriveNames(meta: Record<string, unknown>): { first_name: string; last_name: string } {
-  const given = typeof meta.given_name === "string" ? meta.given_name : null
-  const family = typeof meta.family_name === "string" ? meta.family_name : null
-  if (given) return { first_name: given, last_name: family ?? "" }
-  const full =
-    (typeof meta.name === "string" ? meta.name : typeof meta.full_name === "string" ? meta.full_name : "").trim()
-  const parts = full.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2) return { first_name: parts[0], last_name: parts.slice(1).join(" ") }
-  if (parts.length === 1) return { first_name: parts[0], last_name: "" }
-  return { first_name: "", last_name: "" }
-}
-
 export default function LandingPage() {
-  const { signInWithGoogle, signOut, user, error } = useAuth()
-  const [flow, setFlow] = useState<Flow>("create")
+  const { signOut, user, loading } = useAuth()
+  const [flow, setFlow] = useState<Flow>("auth")
   const [checkingSession, setCheckingSession] = useState(true)
-  const [activeTab, setActiveTab] = useState<"explore" | "organizer">("explore")
-  const [prefill, setPrefill] = useState<{ email: string; first_name: string; last_name: string } | null>(null)
-  const [initialStep, setInitialStep] = useState<"register" | "community">("register")
-  const [googleLoading, setGoogleLoading] = useState(false)
+  const decidedForUserRef = useRef<string | null>(null)
+  const runIdRef = useRef(0)
+
+  const userId = user?.id
 
   useEffect(() => {
+    // Wait for the auth provider to settle: an OAuth return populates the
+    // session asynchronously (onAuthStateChange), so a one-shot getUser() can
+    // still see a stale/previous user and mis-route.
+    if (loading) return
+
     const isOAuthReturn = new URLSearchParams(window.location.search).get("oauth") === "1"
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) {
-        if (isOAuthReturn) history.replaceState({}, "", window.location.pathname)
-        setCheckingSession(false)
-        return
-      }
+
+    if (!userId) {
+      decidedForUserRef.current = null
+      if (isOAuthReturn) history.replaceState({}, "", window.location.pathname)
+      setCheckingSession(false)
+      return
+    }
+
+    // Decide once per user id. Keying on the id (not the user object) is what
+    // makes an OAuth return work: onAuthStateChange emits SIGNED_IN and then the
+    // mount getUser() resolves with a *new* user object for the same id, so
+    // depending on the object would re-run this effect and cancel the in-flight
+    // role query — leaving the spinner stuck forever. runId discards a stale
+    // query result if the user changes mid-flight (no cleanup cancellation, so
+    // React StrictMode's synthetic remount cannot strand the spinner either).
+    if (decidedForUserRef.current === userId) return
+    decidedForUserRef.current = userId
+    const runId = ++runIdRef.current
+
+    ;(async () => {
       history.replaceState({}, "", window.location.pathname)
-      const [profileRes, communityRes] = await Promise.all([
-        supabase.from("profiles").select("username").eq("id", user.id).maybeSingle(),
-        supabase.from("communities").select("id").eq("owner_id", user.id).maybeSingle(),
-      ])
-      const username = profileRes.data && (profileRes.data as { username: string | null }).username
-      const ownsCommunity = !!communityRes.data
-      if (username && ownsCommunity) {
+      // Owning a community is the organizer signal. Check the array (limit 1)
+      // rather than maybeSingle(), which errors if an owner ever had 2+ rows.
+      const { data: communityRes } = await supabase
+        .from("communities")
+        .select("id")
+        .eq("owner_id", userId)
+        .limit(1)
+      if (runId !== runIdRef.current) return
+      const ownsCommunity = Array.isArray(communityRes) && communityRes.length > 0
+      if (ownsCommunity) {
         window.location.href = "/dashboard"
         return
       }
-      if (username && !ownsCommunity) {
-        // A user with a profile but no community yet is completing organizer
-        // onboarding. Let them finish creating a community here; dashboard
-        // access is enforced server-side by check-organizer once they arrive.
-        setInitialStep("community")
-        setActiveTab("organizer")
-        setFlow("new")
-        setCheckingSession(false)
-        return
-      }
-      if (!username) {
-        const names = deriveNames(user.user_metadata ?? {})
-        setPrefill({ email: user.email ?? "", ...names })
-      }
-      setInitialStep(username ? "community" : "register")
-      setActiveTab("organizer")
+      // Not an organizer yet — send them straight to the community form. There
+      // is no customer-account check and no separate registration step.
       setFlow("new")
       setCheckingSession(false)
-    }).catch(() => {
-      setCheckingSession(false)
+    })().catch(() => {
+      if (runId === runIdRef.current) setCheckingSession(false)
     })
-  }, [])
+  }, [userId, loading])
 
   if (checkingSession) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#C2185B]">
+      <div className="flex h-screen items-center justify-center bg-cluvo-primary">
         <svg className="h-8 w-8 animate-spin text-white" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -118,7 +111,7 @@ export default function LandingPage() {
   }
 
   return (
-    <div className="bg-[#C2185B]">
+    <div className="bg-cluvo-primary">
       <div className="flex min-h-screen flex-col md:flex-row">
         <div className="hidden md:flex md:w-[58%] items-center justify-center">
           <div className="flex flex-col items-start">
@@ -138,7 +131,7 @@ export default function LandingPage() {
                 <span className="text-xs text-neutral-400">Signed in as {user.email}</span>
                 <button
                   type="button"
-                  onClick={() => { signOut(); setFlow("create") }}
+                  onClick={() => { signOut(); setFlow("auth") }}
                   className="text-xs text-neutral-400 transition hover:text-neutral-600"
                 >
                   Sign out
@@ -148,107 +141,12 @@ export default function LandingPage() {
             <div className="flex-1 flex items-center justify-center px-6 py-12 md:px-14">
               <div className="w-full max-w-sm mx-auto">
                 <div className="mb-8 text-center md:hidden">
-                  <h1 className="text-4xl font-bold tracking-[0.15em] text-[#C2185B]">CLUVO</h1>
+                  <h1 className="text-4xl font-bold tracking-[0.15em] text-cluvo-primary">CLUVO</h1>
                   <p className="mt-2 text-sm font-light tracking-wider text-neutral-500">Connecting communities</p>
                 </div>
 
-                <div className="mb-8 flex items-center justify-center gap-3 text-sm">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("explore")}
-                    className={`transition-colors ${activeTab === "explore" ? "font-medium text-[#C2185B]" : "text-neutral-500 hover:text-neutral-700"}`}
-                  >
-                    Explore Community
-                  </button>
-                  <span className="text-neutral-300">|</span>
-                  <button
-                    type="button"
-                    onClick={() => { setActiveTab("organizer"); if (!user) setFlow("create") }}
-                    className={`transition-colors ${activeTab === "organizer" ? "font-medium text-[#C2185B]" : "text-neutral-500 hover:text-neutral-700"}`}
-                  >
-                    Become an Organizer
-                  </button>
-                </div>
-
-                {activeTab === "explore" ? (
-                  <ExploreCommunityContent />
-                ) : (
-                  <>
-                    {flow === "create" && (
-                      <div className="flex flex-col items-center py-8">
-                        {error && (
-                          <div className="mb-4 w-full rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">{error}</div>
-                        )}
-                        <h2 className="text-xl font-semibold text-neutral-900">Welcome to Cluvo</h2>
-                        <p className="mt-2 text-center text-sm text-neutral-500">
-                          Create a community or sign in to your dashboard.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setFlow("choice")}
-                          className="mt-8 w-full rounded-xl bg-[#C2185B] px-6 py-3.5 text-sm font-semibold text-white shadow-md transition hover:bg-[#A0154A]"
-                        >
-                          Create Community
-                        </button>
-                        <div className="relative my-6 flex w-full items-center gap-3">
-                          <div className="h-px flex-1 bg-neutral-200" />
-                          <span className="text-xs text-neutral-400">or</span>
-                          <div className="h-px flex-1 bg-neutral-200" />
-                        </div>
-                        <button
-                          type="button"
-                          disabled={googleLoading}
-                          onClick={async () => {
-                            setGoogleLoading(true)
-                            try {
-                              await signInWithGoogle()
-                            } finally {
-                              setGoogleLoading(false)
-                            }
-                          }}
-                          className="flex w-full items-center justify-center gap-3 rounded-xl border border-neutral-300 px-6 py-3.5 text-sm font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50 disabled:opacity-50"
-                        >
-                          <svg className="h-5 w-5" viewBox="0 0 24 24">
-                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                          </svg>
-                          {googleLoading ? "Connecting..." : "Continue with Google"}
-                        </button>
-                        <p className="mt-6 text-sm text-neutral-400">
-                          Already have a community?{" "}
-                          <button
-                            type="button"
-                            onClick={() => setFlow("dashboard-login")}
-                            className="text-[#C2185B] hover:underline"
-                          >
-                            Sign in to dashboard
-                          </button>
-                        </p>
-                      </div>
-                    )}
-                    {flow === "choice" && (
-                      <div>
-                        <button type="button" onClick={() => setFlow("create")} className="mb-4 text-sm text-[#C2185B] hover:underline">
-                          &larr; Back
-                        </button>
-                        <AccountChoice
-                          onChoice={(hasAccount) => setFlow(hasAccount ? "existing" : "new")}
-                        />
-                      </div>
-                    )}
-                    {flow === "existing" && (
-                      <ExistingUserFlow onBack={() => setFlow("choice")} />
-                    )}
-                    {flow === "new" && (
-                      <NewUserFlow onBack={() => setFlow("choice")} prefill={prefill} initialStep={initialStep} />
-                    )}
-                    {flow === "dashboard-login" && (
-                      <DashboardLogin onBack={() => setFlow("create")} />
-                    )}
-                  </>
-                )}
+                {flow === "auth" && <EmailFirst />}
+                {flow === "new" && <NewUserFlow onBack={() => setFlow("auth")} />}
               </div>
             </div>
           </div>
@@ -263,7 +161,7 @@ export default function LandingPage() {
 
 function LegalFooter() {
   return (
-    <div className="border-t border-white/15 bg-[#A0154A] px-6 py-6">
+    <div className="border-t border-white/15 bg-cluvo-primary-dark px-6 py-6">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-sm text-white/70 sm:flex-row">
         <span>&copy; {new Date().getFullYear()} Cluvo</span>
         <div className="flex items-center gap-6">
@@ -282,58 +180,6 @@ function LegalFooter() {
   )
 }
 
-function ExploreCommunityContent() {
-  const appUrl = env.appUrl
-
-  const handleOpenApp = () => {
-    window.location.href = appUrl
-  }
-
-  return (
-    <div className="flex flex-col items-center py-8">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#C2185B]/10">
-        <svg className="h-8 w-8 text-[#C2185B]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-        </svg>
-      </div>
-      <h2 className="mt-6 text-xl font-semibold text-neutral-900">Join a Community</h2>
-      <p className="mt-2 text-center text-sm text-neutral-500">
-        Browse communities, discover events, and connect with people near you.
-      </p>
-      <button
-        type="button"
-        onClick={handleOpenApp}
-        className="mt-8 w-full rounded-xl bg-[#C2185B] px-6 py-3.5 text-sm font-semibold text-white shadow-md transition hover:bg-[#A0154A]"
-      >
-        Open Cluvo App
-      </button>
-      <p className="mt-4 text-center text-xs text-neutral-400">
-        Download the Cluvo mobile app from the App Store or Google Play.
-      </p>
-      <div className="mt-4 flex gap-3">
-        <a
-          href="#"
-          className="flex items-center gap-2 rounded-lg border border-neutral-300 px-4 py-2.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-50"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
-          </svg>
-          App Store
-        </a>
-        <a
-          href="#"
-          className="flex items-center gap-2 rounded-lg border border-neutral-300 px-4 py-2.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-50"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M3.609 1.814L13.792 12 3.61 22.186a.996.996 0 01-.61-.92V2.734a1 1 0 01.609-.92zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.199l2.807 1.626a1 1 0 010 1.732l-2.807 1.626L15.206 12l2.492-2.492zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>
-          </svg>
-          Google Play
-        </a>
-      </div>
-    </div>
-  )
-}
-
 function FeaturesSection() {
   return (
     <div className="bg-white py-24 px-6">
@@ -347,8 +193,8 @@ function FeaturesSection() {
         <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((f) => (
             <div key={f.title} className="rounded-xl border border-neutral-200 bg-white p-6 shadow-soft transition hover:shadow-medium">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#C2185B]/10">
-                <svg className="h-6 w-6 text-[#C2185B]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-cluvo-primary/10">
+                <svg className="h-6 w-6 text-cluvo-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d={f.svg} />
                 </svg>
               </div>

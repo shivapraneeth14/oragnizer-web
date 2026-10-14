@@ -103,7 +103,7 @@ export const termsSections: LegalSection[] = [
     body: (
       <p>
         Questions about these Terms:{" "}
-        <a className="text-[#C2185B] underline" href={`mailto:${CONTACT_EMAIL}`}>
+        <a className="text-cluvo-primary underline" href={`mailto:${CONTACT_EMAIL}`}>
           {CONTACT_EMAIL}
         </a>
       </p>

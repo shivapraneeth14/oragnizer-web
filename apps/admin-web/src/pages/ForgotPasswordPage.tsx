@@ -13,13 +13,13 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#C2185B] px-4">
+    <div className="flex min-h-screen items-center justify-center bg-cluvo-primary px-4">
       <div className="w-full max-w-md animate-slide-in-right">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold tracking-wider text-white">CLUVO</h1>
           <p className="mt-2 text-sm text-white/80">Admin Portal</p>
         </div>
-        <form onSubmit={handleSubmit} className="rounded-2xl bg-white p-8 shadow-strong">
+        <form onSubmit={handleSubmit} className="rounded-2xl bg-white p-6 shadow-strong sm:p-8">
           <h2 className="text-xl font-semibold text-neutral-900">Reset Password</h2>
           <p className="mt-1 text-sm text-neutral-500">Enter your email to receive a reset link.</p>
 
@@ -35,7 +35,7 @@ export default function ForgotPasswordPage() {
                 </svg>
               </div>
               <p className="text-sm text-neutral-600">{success}</p>
-              <Link to="/" className="block text-sm font-medium text-[#C2185B] hover:text-[#A0174A]">
+              <Link to="/" className="block text-sm font-medium text-cluvo-primary hover:text-cluvo-primary-dark">
                 Back to Sign In
               </Link>
             </div>
@@ -48,14 +48,14 @@ export default function ForgotPasswordPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="mt-1.5 block w-full rounded-lg border border-neutral-300 px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 focus:border-[#C2185B] focus:outline-none focus:ring-1 focus:ring-[#C2185B]"
+                  className="mt-1.5 block w-full rounded-lg border border-neutral-300 px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 focus:border-cluvo-primary focus:outline-none focus:ring-1 focus:ring-cluvo-primary"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#C2185B] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#A0174A] disabled:opacity-50"
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-cluvo-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50"
               >
                 {loading && (
                   <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -67,7 +67,7 @@ export default function ForgotPasswordPage() {
               </button>
 
               <p className="mt-4 text-center text-sm text-neutral-500">
-                <Link to="/" className="font-medium text-[#C2185B] hover:text-[#A0174A]">Back to Sign In</Link>
+                <Link to="/" className="font-medium text-cluvo-primary hover:text-cluvo-primary-dark">Back to Sign In</Link>
               </p>
             </>
           )}

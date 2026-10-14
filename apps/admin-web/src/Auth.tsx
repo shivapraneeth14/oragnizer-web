@@ -103,14 +103,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  async function checkAdmin(userId: string) {
+  async function checkAdmin(_userId: string) {
     try {
-      const { data } = await supabase
-        .from("profiles")
-        .select("is_admin")
-        .eq("id", userId)
-        .single()
-      dispatch({ type: "SET_ADMIN", isAdmin: data?.is_admin ?? false })
+      const { data } = await supabase.rpc("is_admin_user")
+      dispatch({ type: "SET_ADMIN", isAdmin: data === true })
     } catch (_) {
       dispatch({ type: "SET_ADMIN", isAdmin: false })
     }
@@ -130,12 +126,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     if (data.session) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("is_admin")
-        .eq("id", data.session.user.id)
-        .single()
-      if (!profile?.is_admin) {
+      const { data: isAdmin } = await supabase.rpc("is_admin_user")
+      if (isAdmin !== true) {
         await supabase.auth.signOut()
         dispatch({ type: "SET_ADMIN", isAdmin: false })
         dispatch({ type: "SET_ERROR", error: "Access denied. This portal is for administrators only." })
@@ -151,6 +143,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
+      // OAuth does not sign out an existing session, so a stale session could
+      // survive the round-trip and briefly mis-route. Clear only this browser's
+      // session (scope "local" leaves other devices signed in). Best-effort.
+      try {
+        await supabase.auth.signOut({ scope: "local" })
+      } catch {
+        // No session to clear — safe to continue.
+      }
       await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo: `${window.location.origin}/dashboard` },
@@ -200,6 +200,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) {
         dispatch({ type: "SET_ERROR", error: error.message })
         return
+      }
+      // End the temporary recovery session so the admin cannot reach /dashboard
+      // without signing in with the new password (matches organizer-web/mobile).
+      try {
+        await supabase.auth.signOut()
+      } catch {
+        // best effort — supabase-js clears the local session regardless
       }
       dispatch({ type: "SET_RECOVERY", isRecovery: false })
       dispatch({ type: "SET_SUCCESS", success: "Password updated. Sign in with your new password." })

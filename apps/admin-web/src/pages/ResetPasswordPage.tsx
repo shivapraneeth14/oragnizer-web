@@ -15,7 +15,7 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) navigate("/", { replace: true })
-    })
+    }, () => navigate("/", { replace: true }))
   }, [navigate])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -37,13 +37,13 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#C2185B] px-4">
+    <div className="flex min-h-screen items-center justify-center bg-cluvo-primary px-4">
       <div className="w-full max-w-md animate-slide-in-right">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold tracking-wider text-white">CLUVO</h1>
           <p className="mt-2 text-sm text-white/80">Admin Portal</p>
         </div>
-        <form onSubmit={handleSubmit} className="rounded-2xl bg-white p-8 shadow-strong">
+        <form onSubmit={handleSubmit} className="rounded-2xl bg-white p-6 shadow-strong sm:p-8">
           <h2 className="text-xl font-semibold text-neutral-900">Set New Password</h2>
           <p className="mt-1 text-sm text-neutral-500">Choose a new password for your account.</p>
 
@@ -59,7 +59,7 @@ export default function ResetPasswordPage() {
                 </svg>
               </div>
               <p className="text-sm text-neutral-600">{success}</p>
-              <Link to="/" className="block text-sm font-medium text-[#C2185B] hover:text-[#A0174A]">
+              <Link to="/" className="block text-sm font-medium text-cluvo-primary hover:text-cluvo-primary-dark">
                 Sign in with new password
               </Link>
             </div>
@@ -74,7 +74,7 @@ export default function ResetPasswordPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Min. 8 characters, 1 capital"
-                      className="block w-full rounded-lg border border-neutral-300 px-3 py-2.5 pr-10 text-sm text-neutral-900 placeholder-neutral-400 focus:border-[#C2185B] focus:outline-none focus:ring-1 focus:ring-[#C2185B]"
+                      className="block w-full rounded-lg border border-neutral-300 px-3 py-2.5 pr-10 text-sm text-neutral-900 placeholder-neutral-400 focus:border-cluvo-primary focus:outline-none focus:ring-1 focus:ring-cluvo-primary"
                     />
                     <button
                       type="button"
@@ -97,7 +97,7 @@ export default function ResetPasswordPage() {
                       value={confirm}
                       onChange={(e) => setConfirm(e.target.value)}
                       placeholder="Re-enter your password"
-                      className="block w-full rounded-lg border border-neutral-300 px-3 py-2.5 pr-10 text-sm text-neutral-900 placeholder-neutral-400 focus:border-[#C2185B] focus:outline-none focus:ring-1 focus:ring-[#C2185B]"
+                      className="block w-full rounded-lg border border-neutral-300 px-3 py-2.5 pr-10 text-sm text-neutral-900 placeholder-neutral-400 focus:border-cluvo-primary focus:outline-none focus:ring-1 focus:ring-cluvo-primary"
                     />
                     <button
                       type="button"
@@ -117,7 +117,7 @@ export default function ResetPasswordPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#C2185B] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#A0174A] disabled:opacity-50"
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-cluvo-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50"
               >
                 {loading && (
                   <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">

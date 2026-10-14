@@ -4,7 +4,7 @@ import { useProfile } from "../../hooks/use-profile"
 import { uploadToCloudinary } from "../../lib/cloudinary"
 
 export default function EditProfile() {
-  const { user } = useAuth()
+  const { user, session } = useAuth()
   const { profile, community, saving, error, success, updateProfile, updateBanner, updateCommunityAvatar, updateCommunity, clearMessages } = useProfile()
 
   const [firstName, setFirstName] = useState("")
@@ -61,14 +61,14 @@ export default function EditProfile() {
     if (u === profile?.username) { setUsernameAvailable(null); setCheckingUsername(false); return }
     setCheckingUsername(true)
     usernameTimer.current = setTimeout(async () => {
-      const { supabaseFetchNoAuth } = await import("../../supabase-fetch")
-      const res = await supabaseFetchNoAuth("/functions/v1/check-username", { username: u, current_user_id: profile?.id })
+      const { supabaseFetch } = await import("../../supabase-fetch")
+      const res = await supabaseFetch("/functions/v1/check-username", session?.access_token, { username: u })
       const d = await res.json()
       setUsernameAvailable(d.available === true)
       setCheckingUsername(false)
     }, 500)
     return () => { if (usernameTimer.current) clearTimeout(usernameTimer.current) }
-  }, [username, profile?.id, profile?.username])
+  }, [username, profile?.id, profile?.username, session?.access_token])
 
   useEffect(() => {
     if (commNameTimer.current) clearTimeout(commNameTimer.current)
@@ -177,7 +177,7 @@ export default function EditProfile() {
         <button
           onClick={() => bannerRef.current?.click()}
           disabled={uploadingBanner}
-          className="group relative h-36 w-full overflow-hidden rounded-xl bg-gradient-to-r from-[#C2185B]/20 to-[#C2185B]/5 transition hover:opacity-90 disabled:opacity-50"
+          className="group relative h-36 w-full overflow-hidden rounded-xl bg-gradient-to-r from-cluvo-primary/20 to-cluvo-primary/5 transition hover:opacity-90 disabled:opacity-50"
         >
           {community?.banner_url ? (
             <img src={community.banner_url} alt="" className="h-full w-full object-cover" />
@@ -200,7 +200,7 @@ export default function EditProfile() {
           <button
             onClick={() => avatarRef.current?.click()}
             disabled={uploading}
-            className="group relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-[#C2185B]/20 text-2xl font-bold text-[#C2185B] shadow-md transition hover:opacity-90 disabled:opacity-50"
+            className="group relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-white bg-cluvo-primary/20 text-2xl font-bold text-cluvo-primary shadow-md transition hover:opacity-90 disabled:opacity-50"
           >
             {community?.community_avatar_url ? (
               <img src={community.community_avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
@@ -224,25 +224,25 @@ export default function EditProfile() {
       </div>
 
       {/* Personal */}
-      <div className="mt-8 rounded-xl border border-neutral-200 bg-white p-6 shadow-soft">
+      <div className="mt-8 rounded-xl border border-neutral-200 bg-white p-4 shadow-soft sm:p-6">
         <h4 className="text-sm font-semibold text-neutral-700">Personal</h4>
-        <div className="mt-4 grid grid-cols-2 gap-4">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium text-neutral-500">First name</label>
             <input value={firstName} onChange={(e) => setFirstName(e.target.value)}
-              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-neutral-500">Last name</label>
             <input value={lastName} onChange={(e) => setLastName(e.target.value)}
-              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
           </div>
         </div>
         <div className="mt-4">
           <label className="mb-1 block text-xs font-medium text-neutral-500">Username</label>
           <div className="relative">
             <input value={username} onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
             <span className="absolute right-3 top-1/2 -translate-y-1/2">
               {checkingUsername ? (
                 <svg className="h-4 w-4 animate-spin text-neutral-400" viewBox="0 0 24 24" fill="none">
@@ -272,13 +272,13 @@ export default function EditProfile() {
 
       {/* Community */}
       {community && (
-        <div className="mt-6 rounded-xl border border-neutral-200 bg-white p-6 shadow-soft">
+        <div className="mt-6 rounded-xl border border-neutral-200 bg-white p-4 shadow-soft sm:p-6">
           <h4 className="text-sm font-semibold text-neutral-700">Community</h4>
           <div className="mt-4">
             <label className="mb-1 block text-xs font-medium text-neutral-500">Name *</label>
             <div className="relative">
               <input value={commName} onChange={(e) => setCommName(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
               <span className="absolute right-3 top-1/2 -translate-y-1/2">
                 {checkingCommName ? (
                   <svg className="h-4 w-4 animate-spin text-neutral-400" viewBox="0 0 24 24" fill="none">
@@ -303,36 +303,36 @@ export default function EditProfile() {
           <div className="mt-4">
             <label className="mb-1 block text-xs font-medium text-neutral-500">Description</label>
             <textarea value={commDesc} onChange={(e) => setCommDesc(e.target.value)} rows={3}
-              className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+              className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
           </div>
           <div className="mt-4">
             <label className="mb-1 block text-xs font-medium text-neutral-500">Category</label>
             <input value={commCategory} onChange={(e) => setCommCategory(e.target.value)}
-              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-3">
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-neutral-500">City</label>
               <input value={commCity} onChange={(e) => setCommCity(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-neutral-500">State</label>
               <input value={commState} onChange={(e) => setCommState(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-neutral-500">Country</label>
               <input value={commCountry} onChange={(e) => setCommCountry(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-4">
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-medium text-neutral-500">Contact email</label>
               <div className="relative">
                 <input type="email" value={commEmail} onChange={(e) => setCommEmail(e.target.value)}
-                  className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+                  className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2">
                   {checkingCommEmail ? (
                     <svg className="h-4 w-4 animate-spin text-neutral-400" viewBox="0 0 24 24" fill="none">
@@ -357,7 +357,7 @@ export default function EditProfile() {
             <div>
               <label className="mb-1 block text-xs font-medium text-neutral-500">Contact phone</label>
               <input type="tel" value={commPhone} onChange={(e) => setCommPhone(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20" />
+                className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
             </div>
           </div>
         </div>
@@ -367,7 +367,7 @@ export default function EditProfile() {
         <button
           onClick={handleSave}
           disabled={saving || checkingUsername || checkingCommName || checkingCommEmail || usernameAvailable === false || commNameAvailable === false || commEmailAvailable === false}
-          className="rounded-lg bg-[#C2185B] px-6 py-2.5 text-sm font-medium text-white transition hover:bg-[#A0154A] disabled:opacity-50"
+          className="w-full rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white transition hover:bg-cluvo-primary-dark disabled:opacity-50 sm:w-auto"
         >
           {saving ? "Saving..." : "Save Changes"}
         </button>

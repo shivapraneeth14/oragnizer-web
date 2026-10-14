@@ -15,13 +15,23 @@ export function useProfile() {
   useEffect(() => {
     if (!user) return
     Promise.all([
-      supabase.from("profiles").select("*").eq("id", user.id).single(),
+      supabase
+        .from("profiles")
+        .select("id, first_name, last_name, username, avatar_url, created_at, updated_at, deleted_at")
+        .eq("id", user.id)
+        .single(),
       supabase.from("communities").select("*").eq("owner_id", user.id).maybeSingle(),
     ]).then(([profResult, commResult]) => {
       if (profResult.error) {
         setError(profResult.error.message)
-      } else {
-        setProfile(profResult.data as Profile)
+      } else if (profResult.data) {
+        // email/is_admin are not SELECT-granted to authenticated clients
+        // (202610120005); the signed-in user's own email comes from the session.
+        setProfile({
+          ...(profResult.data as Omit<Profile, "email" | "is_admin">),
+          email: user.email ?? "",
+          is_admin: false,
+        })
       }
       if (commResult.data) {
         setCommunity(commResult.data as Community)
