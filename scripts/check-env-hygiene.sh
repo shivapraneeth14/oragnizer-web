@@ -36,19 +36,24 @@ check() {
   fi
 }
 
-check "hardcoded supabase URL"        "[a-z0-9]{20}\\.supabase\\.co"            apps/*/src supabase/functions
-check "publishable supabase key"      "sb_publishable_"                         apps/*/src
-check "supabase anon JWT"             "eyJ[A-Za-z0-9_-]{10,}\\.eyJ"             apps/*/src
-check "hardcoded razorpay key"        "rzp_(test|live)_[A-Za-z0-9]+"            apps/*/src
-check "hardcoded cashfree key"        "CF[A-Z0-9]{8,}_[A-Za-z0-9]+|cashfree.*(client_(id|secret)|public)" apps/*/src
-check "google/firebase api key"       "AIza[0-9A-Za-z_-]{20,}"                  apps/*/src supabase/functions
-check "stripe api key"                "(pk|sk)_(test|live)_[A-Za-z0-9]{10,}"     apps/*/src supabase/functions
-check "aws access key"                "AKIA[0-9A-Z]{16}"                        apps/*/src supabase/functions
-check "sendgrid api key"              "SG\\.[A-Za-z0-9_-]{10,}"                  apps/*/src supabase/functions
+# App source plus app-level entry/static files that get served as-is.
+# NOTE: scripts/ and docs/ are intentionally NOT scanned — they are the
+# approved injection point for real values (see docs/ENV.md). .github/ is not
+# scanned because workflow files legitimately carry public/test build defines.
+APP_SRC=(apps/*/src apps/*/index.html apps/*/public)
+check "hardcoded supabase URL"        "[a-z0-9]{20}\\.supabase\\.co"            "${APP_SRC[@]}" supabase/functions
+check "publishable supabase key"      "sb_publishable_"                         "${APP_SRC[@]}"
+check "supabase anon JWT"             "eyJ[A-Za-z0-9_-]{10,}\\.eyJ"             "${APP_SRC[@]}"
+check "hardcoded razorpay key"        "rzp_(test|live)_[A-Za-z0-9]+"            "${APP_SRC[@]}"
+check "hardcoded cashfree key"        "CF[A-Z0-9]{8,}_[A-Za-z0-9]+|cashfree.*(client_(id|secret)|public)" "${APP_SRC[@]}"
+check "google/firebase api key"       "AIza[0-9A-Za-z_-]{20,}"                  "${APP_SRC[@]}" supabase/functions
+check "stripe api key"                "(pk|sk)_(test|live)_[A-Za-z0-9]{10,}"     "${APP_SRC[@]}" supabase/functions
+check "aws access key"                "AKIA[0-9A-Z]{16}"                        "${APP_SRC[@]}" supabase/functions
+check "sendgrid api key"              "SG\\.[A-Za-z0-9_-]{10,}"                  "${APP_SRC[@]}" supabase/functions
 
-check "env fallback (|| default)"     "import\\.meta\\.env\\.[A-Z0-9_]+\\s*\\|\\|\\s*[\"']"  apps/*/src
-check "env fallback (?? default)"     "import\\.meta\\.env\\.[A-Z0-9_]+\\s*\\?\\?\\s*[\"']"  apps/*/src
-check "env mutation (||= / ??=)"      "import\\.meta\\.env\\.[A-Z0-9_]+\\s*(\\|\\||\\?\\?)=\\s*[\"']"  apps/*/src
+check "env fallback (|| default)"     "import\\.meta\\.env\\.[A-Z0-9_]+\\s*\\|\\|\\s*[\"']"  "${APP_SRC[@]}"
+check "env fallback (?? default)"     "import\\.meta\\.env\\.[A-Z0-9_]+\\s*\\?\\?\\s*[\"']"  "${APP_SRC[@]}"
+check "env mutation (||= / ??=)"      "import\\.meta\\.env\\.[A-Z0-9_]+\\s*(\\|\\||\\?\\?)=\\s*[\"']"  "${APP_SRC[@]}"
 
 if [[ "$FAILURES" -gt 0 ]]; then
   echo
