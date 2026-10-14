@@ -2,8 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { AuthProvider } from "./auth-context"
 import LandingPage from "./pages/landing"
 import DashboardPage from "./pages/dashboard"
-import ForgotPasswordPage from "./pages/forgot-password"
-import ResetPasswordPage from "./pages/reset-password"
 import PrivacyPolicyPage from "./pages/privacy-policy"
 import TermsPage from "./pages/terms"
 import ProtectedRoute from "./components/protected-route"
@@ -18,8 +16,6 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/terms" element={<TermsPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route
             path="/dashboard"
             element={

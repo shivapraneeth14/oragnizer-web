@@ -81,6 +81,14 @@ Deno.serve(async (req) => {
       // paid with a captured payment, CONFIRM instead of cancelling.
       if (payment.razorpay_order_id) {
         const orderState = await checkOrderStatus(payment.razorpay_order_id)
+
+        // Razorpay unreachable: never guess. Leave the booking pending so the
+        // reconcile job (which also asks Razorpay) can resolve it. Failing here
+        // would strand a possibly-captured payment.
+        if (orderState === "unknown") {
+          return new Response(JSON.stringify({ success: true, cleaned: false, reason: "provider_unreachable" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+        }
+
         if (orderState === "paid") {
           const payRes = await fetch(
             `https://api.razorpay.com/v1/orders/${payment.razorpay_order_id}/payments`,
@@ -119,7 +127,14 @@ Deno.serve(async (req) => {
               return new Response(JSON.stringify({ success: true, cleaned: false, reconciled: "refund_required" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
             }
           }
+
+          // The order is PAID at Razorpay but we could not finalise it right
+          // now (no captured payment visible, or the RPC did not confirm).
+          // Never cancel a paid booking — leave it for the reconcile job.
+          return new Response(JSON.stringify({ success: true, cleaned: false, reason: "paid_not_confirmed" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
+
+        // orderState === "open" | "failed": genuinely unpaid — safe to clean up.
       }
 
       const { error: payErr } = await supabase
