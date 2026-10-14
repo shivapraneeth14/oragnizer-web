@@ -1,5 +1,6 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
+import { paymentNonRequotableReason } from "../_shared/payments.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -50,6 +51,23 @@ Deno.serve(async (req) => {
 
     if (existing) {
       if (existing.status === "confirmed") return new Response(JSON.stringify({ error: "Already registered" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      // Never resurrect a cancelled registration that holds a paid or
+      // refunding payment — the money already moved; re-booking would hand
+      // the user a Pay screen (or an "already paid" no-op) for that payment.
+      if (existing.status === "cancelled") {
+        const { data: existingPayment } = await supabase
+          .from("payments")
+          .select("status, refund_status, refund_claim_state")
+          .eq("registration_id", existing.id)
+          .maybeSingle()
+        const blockReason = existingPayment ? paymentNonRequotableReason(existingPayment) : null
+        if (blockReason === "already_paid") {
+          return new Response(JSON.stringify({ error: "You have already paid for this event.", code: "already_paid" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+        }
+        if (blockReason) {
+          return new Response(JSON.stringify({ error: "A refund for this payment is in progress.", code: blockReason }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+        }
+      }
       // pending or cancelled: reuse existing registration
       if (existing.status === "cancelled") {
         await supabase
@@ -66,7 +84,20 @@ Deno.serve(async (req) => {
       .select("id")
       .single()
 
-    if (regErr) throw regErr
+    if (regErr) {
+      // Concurrent duplicate: another request created the registration between
+      // our SELECT and INSERT. Return the winner instead of a 500.
+      if (regErr.code === "23505") {
+        const { data: raced } = await supabase
+          .from("registrations")
+          .select("id")
+          .eq("event_id", event_id)
+          .eq("user_id", user.id)
+          .maybeSingle()
+        if (raced) return new Response(JSON.stringify({ registration_id: raced.id, is_paid: event.price > 0 }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+      throw regErr
+    }
 
     return new Response(JSON.stringify({ registration_id: reg!.id, is_paid: event.price > 0 }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {

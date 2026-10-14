@@ -1,11 +1,10 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { attemptRefund } from "../_shared/refunds.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -13,35 +12,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-client-info",
   "Access-Control-Max-Age": "86400",
-}
-
-async function razorpayPost(path: string, body: any) {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-    body: JSON.stringify(body),
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error?.description || "Razorpay API error")
-  return data
-}
-
-function mapRefundStatus(status: string | undefined): string {
-  switch (status) {
-    case "processed":
-      return "processed"
-    case "pending":
-    case "queued":
-      return "pending"
-    case "failed":
-    case "reversed":
-      return "failed"
-    default:
-      return "pending"
-  }
 }
 
 // Authorize: community owner, MODERATOR/ORGANIZER member, or platform admin.
@@ -74,8 +44,9 @@ async function isAuthorized(userId: string, communityId: string): Promise<boolea
 // outside the 24h window). FULL amount goes back to the customer — fee
 // included, exactly like an organizer-cancelled event — because the
 // organizer is the one choosing to cancel this booking.
-// Receipt is attempt-suffixed: a failed Razorpay attempt keeps its receipt
-// reserved, so retries must use a fresh one.
+// Refund issuance is claim-guarded by _shared/refunds.attemptRefund so two
+// concurrent requests cannot refund the same payment twice; the loser gets a
+// clean 409.
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: { "Content-Type": "application/json", ...corsHeaders } })
@@ -96,7 +67,7 @@ Deno.serve(async (req) => {
 
     const { data: payment, error: paymentErr } = await supabase
       .from("payments")
-      .select("id, status, refund_status, refund_attempt_count, razorpay_payment_id, amount, registration_id, platform_fee, organizer_share")
+      .select("id, status, refund_status, razorpay_payment_id, amount, registration_id, platform_fee, organizer_share")
       .eq("id", payment_id)
       .maybeSingle()
     if (paymentErr || !payment) return new Response(JSON.stringify({ error: "Payment not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
@@ -110,10 +81,14 @@ Deno.serve(async (req) => {
 
     const { data: registration } = await supabase
       .from("registrations")
-      .select("id, event_id, user_id")
+      .select("id, event_id, user_id, status")
       .eq("id", payment.registration_id)
       .maybeSingle()
     if (!registration) return new Response(JSON.stringify({ error: "Registration not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
+
+    if (registration.status === "attended") {
+      return new Response(JSON.stringify({ error: "Cannot refund — this attendee has already attended the event." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
 
     const { data: event } = await supabase
       .from("events")
@@ -126,71 +101,37 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Not authorized to refund this payment" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
-    const attempt = (payment.refund_attempt_count ?? 0) + 1
-    const refund = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, {
-      amount: payment.amount,
-      receipt: `ref_${payment.id}_${attempt}`,
-    })
-    const mappedStatus = mapRefundStatus(refund.status)
+    let outcome
+    try {
+      outcome = await attemptRefund(supabase, payment, payment.amount, "organizer_issue_refund")
+    } catch (err) {
+      console.error("issue-refund error:", err)
+      await supabase.from("payment_audit_log").insert({
+        action: "refund_failed",
+        payment_id: payment.id,
+        details: { error: String(err), triggered_by: user.id, event_id: event.id },
+      })
+      return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
 
-    await supabase.from("payments").update({
-      status: "refunded",
-      refund_status: mappedStatus,
-      refund_attempt_count: attempt,
-      razorpay_refund_id: refund.id,
-      refunded_amount: payment.amount,
-    }).eq("id", payment.id)
-
-    await supabase.from("payment_audit_log").insert({
-      action: "refund_issued",
-      payment_id: payment.id,
-      details: {
-        refund_id: refund.id,
-        amount: payment.amount,
-        refund_status: mappedStatus,
-        reason: "organizer_issue_refund",
-        triggered_by: user.id,
-        event_id: event.id,
-      },
-    })
+    if (outcome.status === "conflict") {
+      return new Response(JSON.stringify({ error: "Refund is already being processed for this payment." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+    if (outcome.status === "already_refunded") {
+      return new Response(JSON.stringify({ error: `Refund already ${outcome.refund_status || "issued"} for this payment` }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
 
     const baseAmount = Number(payment.amount)
     // Split persisted at order creation — read it, never recompute a %.
     const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
-    const organizerShare = Math.max(
-      payment.organizer_share != null ? Number(payment.organizer_share) : baseAmount - platformFee,
-      0,
-    )
-
-    try {
-      const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
-        p_community_id: event.community_id,
-        p_amount: organizerShare,
-        p_reason: "organizer_issue_refund",
-        p_event_id: event.id,
-      })
-      if (debitError || debitResult?.error) throw new Error(debitResult?.error || debitError?.message || "Wallet debit failed")
-      if (platformFee > 0) {
-        await supabase.from("payment_audit_log").insert({
-          action: "commission_reversed",
-          payment_id: payment.id,
-          details: {
-            commission_amount: platformFee,
-            reason: "organizer_issue_refund",
-            note: `Platform commission zeroed — organizer-initiated refund of ₹${(baseAmount / 100).toFixed(0)} includes our fee`,
-          },
-        })
-      }
-    } catch (clawbackErr) {
+    if (platformFee > 0) {
       await supabase.from("payment_audit_log").insert({
-        action: "refund_wallet_debit_failed",
+        action: "commission_reversed",
         payment_id: payment.id,
         details: {
-          refund_id: refund.id,
-          amount: payment.amount,
+          commission_amount: platformFee,
           reason: "organizer_issue_refund",
-          error: (clawbackErr as Error).message,
-          note: "Customer refunded but organizer wallet clawback failed - manual follow-up required",
+          note: `Platform commission zeroed — organizer-initiated refund of ₹${(baseAmount / 100).toFixed(0)} includes our fee`,
         },
       })
     }
@@ -203,9 +144,9 @@ Deno.serve(async (req) => {
       payload: { event_id: event.id, payment_id: payment.id, registration_id: registration.id, amount: baseAmount },
     })
 
-    return new Response(JSON.stringify({ success: true, refund_id: refund.id, amount: payment.amount, status: mappedStatus }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    return new Response(JSON.stringify({ success: true, refund_id: outcome.refund_id, amount: payment.amount, status: outcome.refund_status }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
-    console.error(err)
-    return new Response(JSON.stringify({ error: (err as Error).message || "Something went wrong" }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    console.error("issue-refund error:", err)
+    return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
   if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
-    const { username, current_user_id } = await req.json()
+    const { username } = await req.json()
 
     if (!username || typeof username !== "string") {
       return new Response(JSON.stringify({ error: "Please enter a username." }), {
@@ -39,14 +39,24 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Never trust a client-supplied id: derive the caller from their session so
+    // "is this my own username?" cannot be forged. Anonymous callers (signup
+    // flow) get no exclusion, which is correct there.
+    let currentUserId: string | null = null
+    const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
+    if (token) {
+      const { data: { user } } = await supabase.auth.getUser(token)
+      if (user) currentUserId = user.id
+    }
+
     let query = supabase
       .from("profiles")
       .select("id")
       .eq("username", username.trim())
       .is("deleted_at", null)
 
-    if (current_user_id) {
-      query = query.neq("id", current_user_id)
+    if (currentUserId) {
+      query = query.neq("id", currentUserId)
     }
 
     const { data, error } = await query.maybeSingle()

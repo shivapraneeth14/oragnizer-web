@@ -49,10 +49,9 @@ Deno.serve(async (req) => {
 
     if (queryErr) throw queryErr
 
-    return new Response(JSON.stringify({ transactions: rows || [] }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    return new Response(JSON.stringify({ transactions: rows || [] }), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...corsHeaders } })
   } catch (err) {
-    console.error(err)
-    const msg = err instanceof Error ? err.message : "Something went wrong"
-    return new Response(JSON.stringify({ error: msg }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    console.error("get-wallet-statement error:", err)
+    return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

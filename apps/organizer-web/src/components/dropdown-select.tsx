@@ -23,7 +23,7 @@ interface PopupPosition {
 }
 
 const inputClasses =
-  "w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+  "w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20"
 
 export default function DropdownSelect({
   value,
@@ -182,7 +182,7 @@ export default function DropdownSelect({
                   onMouseEnter={() => setActive(i)}
                   className={`block w-full px-3.5 py-2 text-left text-sm hover:bg-neutral-50 ${
                     i === active ? "bg-neutral-50" : ""
-                  } ${o.value === value ? "bg-[#C2185B]/5 font-medium text-[#C2185B]" : "text-neutral-900"}`}
+                  } ${o.value === value ? "bg-cluvo-primary/5 font-medium text-cluvo-primary" : "text-neutral-900"}`}
                 >
                   {o.label}
                 </button>

@@ -107,6 +107,10 @@ Deno.serve(async (req) => {
       email: email.trim().toLowerCase(),
       password,
       email_confirm: true,
+      // Server-only stamp: lets the B2 trigger (migration 202610120006)
+      // distinguish this provisioned signup from a raw /auth/v1/signup attempt.
+      // Clients cannot set app_metadata.
+      app_metadata: { cluvo_provisioned: true },
       user_metadata: {
         first_name: first_name.trim(),
         last_name: last_name.trim(),
@@ -120,6 +124,23 @@ Deno.serve(async (req) => {
           status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
         })
       }
+
+      // Race backstop: the username pre-check above can lose to a concurrent
+      // signup that claims the same username first (profiles.username is
+      // unique, 202607230004). The createUser call then fails with a generic
+      // DB error rather than a friendly one — re-check and surface a clean 409.
+      const { data: racedUsername } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("username", username.trim())
+        .maybeSingle()
+
+      if (racedUsername) {
+        return new Response(JSON.stringify({ error: "This username is already taken. Try another." }), {
+          status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
+
       throw authError
     }
 

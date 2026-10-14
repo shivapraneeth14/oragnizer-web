@@ -1,7 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { cashfreePost } from "../_shared/cashfree.ts"
+import { cashfreePost, cashfreeGet } from "../_shared/cashfree.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -83,15 +83,52 @@ Deno.serve(async (req) => {
       })
     } catch (cfErr) {
       const cfMessage = cfErr instanceof Error ? cfErr.message : String(cfErr)
+
+      // The POST may have failed after Cashfree already accepted the transfer
+      // (timeout / dropped response). Verify before refunding so we never both
+      // pay out and refund the same withdrawal.
+      let transferKnown = false
+      try {
+        const check = await cashfreeGet(`/getTransferStatus?transferId=${encodeURIComponent(transferId)}`)
+        const inner = check?.data?.transfer ?? check?.data ?? check ?? {}
+        if (inner?.status) transferKnown = true
+      } catch {
+        // Not found at Cashfree → the transfer was never created → safe to refund.
+      }
+
       await supabase.from("payment_audit_log").insert({
-        action: "withdrawal_failed",
+        action: transferKnown ? "withdrawal_submit_ambiguous" : "withdrawal_failed",
         details: {
           payout_id: payoutId,
           community_id,
           amount,
           error: cfMessage,
+          transfer_known_at_cashfree: transferKnown,
         },
       })
+
+      if (transferKnown) {
+        // Cashfree has it — keep the payout processing and let the sync /
+        // reconcile pipeline settle it, rather than refunding now.
+        await supabase
+          .from("payout_items")
+          .update({
+            status: "processing",
+            beneficiary_id: activeBeneficiary.id,
+            cashfree_payout_id: transferId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", payoutId)
+
+        return new Response(JSON.stringify({
+          payout_id: payoutId,
+          amount,
+          status: "processing",
+          cashfree_reference: transferId,
+          note: "Transfer accepted by Cashfree; status will be confirmed shortly",
+        }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+
       const { error: refundErr } = await supabase.rpc("refund_wallet", { p_payout_id: payoutId })
       if (refundErr) console.error("refund_wallet failed after Cashfree error:", refundErr)
       throw cfErr
@@ -124,8 +161,7 @@ Deno.serve(async (req) => {
       cashfree_reference: cashfreeResponse?.cf_transfer_id,
     }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
-    console.error(err)
-    const msg = err instanceof Error ? err.message : "Something went wrong"
-    return new Response(JSON.stringify({ error: msg }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    console.error("withdraw-wallet error:", err)
+    return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

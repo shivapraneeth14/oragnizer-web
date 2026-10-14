@@ -128,8 +128,7 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({ beneficiary_id: beneficiaryId }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
-    console.error(err)
-    const msg = err instanceof Error ? err.message : "Something went wrong"
-    return new Response(JSON.stringify({ error: msg }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    console.error("create-beneficiary error:", err)
+    return new Response(JSON.stringify({ error: "Something went wrong. Please check the details and try again." }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

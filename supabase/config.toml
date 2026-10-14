@@ -236,9 +236,10 @@ otp_expiry = 3600
 # Use a production-ready SMTP server
 #
 # Local `supabase start` reads these values from the process environment (see
-# supabase/.env, gitignored). For HOSTED projects (TEST + PROD) SMTP is NOT
-# deployed by CI — configure it in the Dashboard: Authentication -> Emails ->
-# SMTP Settings. See docs/ENV.md ("Forgot-password email — Gmail SMTP").
+# supabase/.env, gitignored) so GoTrue's recovery-link mailer (admin-web) works
+# locally. HOSTED projects (TEST + PROD) use the same credentials as EDGE
+# FUNCTION secrets for the password-reset OTP + confirmation emails — see
+# docs/ENV.md ("Password reset OTP email").
 [auth.email.smtp]
 enabled = true
 host = "smtp.gmail.com"

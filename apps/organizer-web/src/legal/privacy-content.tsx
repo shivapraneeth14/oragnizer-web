@@ -87,7 +87,7 @@ export const privacySections: LegalSection[] = [
         </p>
         <p>
           To request deletion, correction, or a copy of your data, email{" "}
-          <a className="text-[#C2185B] underline" href={`mailto:${CONTACT_EMAIL}`}>
+          <a className="text-cluvo-primary underline" href={`mailto:${CONTACT_EMAIL}`}>
             {CONTACT_EMAIL}
           </a>
           .
@@ -123,7 +123,7 @@ export const privacySections: LegalSection[] = [
         Depending on where you live, you may have rights to access, correct, delete, restrict,
         or object to our use of your personal information, and to data portability. You can
         exercise most of these from within the app; otherwise email{" "}
-        <a className="text-[#C2185B] underline" href={`mailto:${CONTACT_EMAIL}`}>
+        <a className="text-cluvo-primary underline" href={`mailto:${CONTACT_EMAIL}`}>
           {CONTACT_EMAIL}
         </a>
         . You also have the right to lodge a complaint with your local data protection
@@ -156,7 +156,7 @@ export const privacySections: LegalSection[] = [
     body: (
       <p>
         Questions or requests regarding this policy or your data:{" "}
-        <a className="text-[#C2185B] underline" href={`mailto:${CONTACT_EMAIL}`}>
+        <a className="text-cluvo-primary underline" href={`mailto:${CONTACT_EMAIL}`}>
           {CONTACT_EMAIL}
         </a>
       </p>

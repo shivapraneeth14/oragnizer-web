@@ -41,10 +41,10 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
     }
   }, [session?.access_token, blockSession, retryKey])
 
-  if (loading || checking) {
+  if (loading || checking || (session && allowed === null)) {
     return (
       <div className="flex h-screen items-center justify-center bg-neutral-50">
-        <svg className="h-8 w-8 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+        <svg className="h-8 w-8 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
@@ -65,7 +65,7 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
                 setAllowed(null)
                 setRetryKey((k) => k + 1)
               }}
-              className="w-full rounded-lg bg-[#C2185B] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#A0154A]"
+              className="w-full rounded-lg bg-cluvo-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-cluvo-primary-dark"
             >
               Try again
             </button>

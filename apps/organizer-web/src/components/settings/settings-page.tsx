@@ -21,16 +21,16 @@ export default function SettingsPage({ communityId }: Props) {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("edit-profile")
 
   return (
-    <div className="flex gap-6">
-      <aside className="w-56 shrink-0">
-        <nav className="space-y-1">
+    <div className="flex flex-col gap-4 md:flex-row md:gap-6">
+      <aside className="w-full md:w-56 md:shrink-0">
+        <nav className="flex gap-2 overflow-x-auto pb-1 md:flex-col md:gap-0 md:space-y-1 md:overflow-visible md:pb-0">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setSettingsTab(tab.id)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors md:w-full md:gap-3 ${
                 settingsTab === tab.id
-                  ? "bg-[#C2185B]/10 text-[#C2185B]"
+                  ? "bg-cluvo-primary/10 text-cluvo-primary"
                   : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800"
               }`}
             >

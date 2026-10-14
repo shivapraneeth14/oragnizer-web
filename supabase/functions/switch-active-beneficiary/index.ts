@@ -73,8 +73,7 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
-    console.error(err)
-    const msg = err instanceof Error ? err.message : "Something went wrong"
-    return new Response(JSON.stringify({ error: msg }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    console.error("switch-active-beneficiary error:", err)
+    return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

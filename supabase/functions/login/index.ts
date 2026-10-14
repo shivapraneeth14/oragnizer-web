@@ -22,6 +22,21 @@ const jsonResponse = (body: Record<string, unknown>, status = 200) =>
     headers: { "Content-Type": "application/json", ...corsHeaders },
   })
 
+// GoTrue messages are internal; surface only curated, non-enumerating text.
+// The raw message stays in the console log for support.
+const safeLoginMessage = (raw: string | undefined): string => {
+  switch (raw) {
+    case "Invalid login credentials":
+      return "Incorrect email or password."
+    case "Email not confirmed":
+      return "Please verify your email before signing in."
+    case "Email rate limit exceeded":
+      return "Too many attempts. Please wait a moment and try again."
+    default:
+      return "Unable to sign in. Check your details and try again."
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
@@ -49,7 +64,8 @@ Deno.serve(async (req) => {
       password,
     })
     if (error) {
-      return jsonResponse({ error: error.message }, 400)
+      console.error("login failed:", error.message)
+      return jsonResponse({ error: safeLoginMessage(error.message) }, 400)
     }
 
     const user = data.user

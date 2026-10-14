@@ -91,8 +91,8 @@ export default function CancelEventConfirmDialog({ event, onClose, onCancelled }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-xl bg-white p-5 shadow-xl sm:p-6">
         <h3 className="text-lg font-semibold text-neutral-900">Cancel Event</h3>
         <p className="mt-1 text-sm text-neutral-500">"{event.title}"</p>
         <p className="mt-3 text-sm text-neutral-600">
@@ -113,10 +113,10 @@ export default function CancelEventConfirmDialog({ event, onClose, onCancelled }
         {error && (
           <p className="mt-2 text-sm text-red-500">{error}</p>
         )}
-        <div className="mt-4 flex gap-3">
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">
           <button
             onClick={onClose}
-            className="flex-1 rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+            className="w-full rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 sm:flex-1"
             disabled={confirming}
           >
             Cancel
@@ -124,7 +124,7 @@ export default function CancelEventConfirmDialog({ event, onClose, onCancelled }
           <button
             onClick={handleConfirm}
             disabled={summaryLoading || confirming}
-            className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            className="w-full rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 sm:flex-1"
           >
             {confirming ? "Cancelling..." : "Confirm Cancellation"}
           </button>

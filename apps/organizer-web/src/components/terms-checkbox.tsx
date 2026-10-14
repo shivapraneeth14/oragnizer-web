@@ -18,13 +18,13 @@ export default function TermsCheckbox({ value, onChange }: TermsCheckboxProps) {
           type="checkbox"
           checked={value}
           onChange={(e) => onChange(e.target.checked)}
-          className="mt-0.5 h-4 w-4 accent-[#C2185B]"
+          className="mt-0.5 h-4 w-4 accent-cluvo-primary"
         />
         <span>
           I agree to the{" "}
           <button
             type="button"
-            className="font-medium text-[#C2185B] underline hover:text-[#A0154A]"
+            className="font-medium text-cluvo-primary underline hover:text-cluvo-primary-dark"
             onClick={() => setOpenDialog("privacy")}
           >
             Privacy Policy
@@ -32,7 +32,7 @@ export default function TermsCheckbox({ value, onChange }: TermsCheckboxProps) {
           and{" "}
           <button
             type="button"
-            className="font-medium text-[#C2185B] underline hover:text-[#A0154A]"
+            className="font-medium text-cluvo-primary underline hover:text-cluvo-primary-dark"
             onClick={() => setOpenDialog("terms")}
           >
             Terms of Service

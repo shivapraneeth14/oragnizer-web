@@ -134,7 +134,7 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
             value={data.community_name}
             onChange={(e) => update("community_name", e.target.value)}
             placeholder="My Awesome Community"
-            className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+            className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20"
           />
           <span className="absolute right-3 top-1/2 -translate-y-1/2">
             {checkingName ? (
@@ -177,11 +177,11 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
           onChange={(e) => update("description", e.target.value)}
           placeholder="Tell people what your community is about..."
           rows={2}
-          className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+          className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20"
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-neutral-600">Country</label>
           <DropdownSelect
@@ -213,7 +213,7 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <label className="mb-1 block text-xs font-medium text-neutral-600">Contact email</label>
           <div className="relative">
@@ -222,7 +222,7 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
               value={data.contact_email}
               onChange={(e) => update("contact_email", e.target.value)}
               placeholder="community@example.com"
-              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+              className="w-full rounded-lg border border-neutral-300 px-3.5 py-2 pr-8 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20"
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2">
               {checkingEmail ? (
@@ -262,10 +262,10 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
           {data.tags.map((tag) => (
             <span
               key={tag}
-              className="flex items-center gap-1 rounded-full bg-[#C2185B]/10 px-2.5 py-0.5 text-xs font-medium text-[#C2185B]"
+              className="flex items-center gap-1 rounded-full bg-cluvo-primary/10 px-2.5 py-0.5 text-xs font-medium text-cluvo-primary"
             >
               {tag}
-              <button type="button" onClick={() => removeTag(tag)} className="hover:text-[#A0154A]">&times;</button>
+              <button type="button" onClick={() => removeTag(tag)} className="hover:text-cluvo-primary-dark">&times;</button>
             </span>
           ))}
           <input
@@ -292,7 +292,7 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
           onChange={(e) => update("rules", e.target.value)}
           placeholder="Any rules members should follow..."
           rows={2}
-          className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]/20"
+          className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20"
         />
       </div>
 
@@ -302,7 +302,7 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
             type="checkbox"
             checked={data.agree18}
             onChange={(e) => update("agree18", e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-[#C2185B] accent-[#C2185B]"
+            className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-cluvo-primary accent-cluvo-primary"
           />
           <span className="text-sm text-neutral-700">
             I confirm that I am <strong>18 years or older</strong>
@@ -313,7 +313,7 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
             type="checkbox"
             checked={data.agreeContent}
             onChange={(e) => update("agreeContent", e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-[#C2185B] accent-[#C2185B]"
+            className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-cluvo-primary accent-cluvo-primary"
           />
           <span className="text-sm text-neutral-700">
             I agree not to post <strong>prohibited content</strong> including hate speech, harassment, or explicit material

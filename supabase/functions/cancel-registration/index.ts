@@ -1,11 +1,10 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { attemptRefund } from "../_shared/refunds.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 // Cancellations (with refund) close 24 hours before the event starts.
@@ -18,59 +17,13 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 }
 
-async function razorpayPost(path: string, body: any) {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-    body: JSON.stringify(body),
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error?.description || "Razorpay API error")
-  return data
-}
-
-// Maps a Razorpay refund entity status into our payments.refund_status domain.
-function mapRefundStatus(status: string | undefined): string {
-  switch (status) {
-    case "processed":
-      return "processed"
-    case "pending":
-    case "queued":
-      return "pending"
-    case "failed":
-    case "reversed":
-      return "failed"
-    default:
-      return "pending"
-  }
-}
-
 // Claw back the organizer's share from the community wallet. POLICY: on a
 // customer self-cancellation the platform fee is NEVER refunded — only the
 // organizer's share goes back to the customer, so there is no
 // commission_reversed record here (unlike organizer-initiated cancellation,
 // where the full amount is refunded and the fee record is zeroed).
 // `refundAmount` IS the organizer share (amount − persisted platform fee).
-async function rebalanceRefund(
-  communityId: string,
-  payment: { id: string; amount: number },
-  refundAmount: number,
-  via: "registration_cancellation" | "event_cancellation",
-  eventId: string,
-) {
-  const { data: debitResult, error: debitError } = await supabase.rpc("debit_wallet", {
-    p_community_id: communityId,
-    p_amount: refundAmount,
-    p_reason: `${via}_refund`,
-    p_event_id: eventId,
-  })
-  if (debitError || debitResult?.error) {
-    throw new Error(debitResult?.error || debitError?.message || "Wallet debit failed")
-  }
-}
+// The clawback itself runs inside the refund-claim RPC (exactly once).
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
@@ -92,10 +45,10 @@ Deno.serve(async (req) => {
 
     const { data: registration, error: findError } = await supabase
       .from("registrations")
-      .select("id, event_id")
+      .select("id, event_id, status")
       .eq("event_id", event_id)
       .eq("user_id", user.id)
-      .eq("status", "confirmed")
+      .in("status", ["confirmed", "pending"])
       .is("deleted_at", null)
       .maybeSingle()
 
@@ -129,6 +82,16 @@ Deno.serve(async (req) => {
       .maybeSingle()
       .then((r) => r.data)
 
+    if (registration.status === "pending") {
+      // A pending booking is only cancellable when the money was actually
+      // captured (webhook lost / confirm never ran) — otherwise the user is
+      // mid-checkout and the cancel is meaningless.
+      const canCancelPending = payment?.status === "success" && !!payment.razorpay_payment_id
+      if (!canCancelPending) {
+        return new Response(JSON.stringify({ error: "No active registration found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+    }
+
     let refund: Record<string, unknown> = { initiated: false, reason: "no_payment" }
 
     if (payment && payment.status === "success" && payment.razorpay_payment_id) {
@@ -139,73 +102,48 @@ Deno.serve(async (req) => {
         const fee = Math.max(Number(payment.platform_fee ?? 0), 0)
         const refundAmount = Math.max(Number(payment.amount) - fee, 0)
 
-        const refundRes = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, { amount: refundAmount, receipt: `ref_${payment.id}` })
+        const outcome = await attemptRefund(supabase, payment, refundAmount, "registration_cancellation")
 
-        const mappedStatus = mapRefundStatus(refundRes.status)
-
-        // Record the truthful refund state FIRST (Razorpay accepted it), then
-        // rebalance the wallet. A clawback failure is surfaced in the audit
-        // log for manual follow-up instead of leaving a silently drifted row.
-        await supabase.from("payments").update({
-          status: "refunded",
-          refund_status: mappedStatus,
-          refund_attempt_count: 0,
-          razorpay_refund_id: refundRes.id,
-          refunded_amount: refundAmount,
-        }).eq("id", payment.id)
-
-        await supabase.from("payment_audit_log").insert({
-          action: "refund_issued",
-          payment_id: payment.id,
-          details: { refund_id: refundRes.id, amount: refundAmount, refund_status: mappedStatus, registration_id: registration.id, event_id: eventInfo.id },
-        })
-
-        if (fee > 0) {
+        if (outcome.status === "conflict") {
           await supabase.from("payment_audit_log").insert({
-            action: "platform_fee_kept",
+            action: "refund_conflict",
             payment_id: payment.id,
-            details: {
-              fee_amount: fee,
-              reason: "customer_cancellation",
-              note: `Customer self-cancelled — ₹${(fee / 100).toFixed(0)} platform fee kept, ₹${(refundAmount / 100).toFixed(0)} refunded`,
-            },
+            details: { note: "Refund skipped — another flow already holds the claim on this payment" },
           })
-        }
+          refund = { initiated: false, reason: "in_flight" }
+        } else if (outcome.status === "already_refunded") {
+          refund = { initiated: true, amount: refundAmount, fee_kept: fee, refund_id: outcome.refund_id, status: outcome.refund_status }
+        } else {
+          if (fee > 0) {
+            await supabase.from("payment_audit_log").insert({
+              action: "platform_fee_kept",
+              payment_id: payment.id,
+              details: {
+                fee_amount: fee,
+                reason: "customer_cancellation",
+                note: `Customer self-cancelled — ₹${(fee / 100).toFixed(0)} platform fee kept, ₹${(refundAmount / 100).toFixed(0)} refunded`,
+              },
+            })
+          }
 
-        try {
-          await rebalanceRefund(eventInfo.community_id, payment, refundAmount, "registration_cancellation", eventInfo.id)
-        } catch (clawbackErr) {
-          await supabase.from("payment_audit_log").insert({
-            action: "refund_wallet_debit_failed",
-            payment_id: payment.id,
-            details: {
-              refund_id: refundRes.id,
+          await supabase.from("notifications").insert({
+            user_id: user.id,
+            type: "refund_initiated",
+            title: "Refund Initiated",
+            body: `Refund of ₹${(refundAmount / 100).toFixed(0)} for "${eventInfo.title}" has been initiated. ₹${(fee / 100).toFixed(0)} booking fee is not refundable.`,
+            payload: {
+              event_id: eventInfo.id,
+              payment_id: payment.id,
+              registration_id: registration.id,
               amount: refundAmount,
-              reason: "registration_cancellation",
-              error: (clawbackErr as Error).message,
-              note: "Customer refunded but organizer wallet clawback failed - manual follow-up required",
+              fee_kept: fee,
             },
           })
+
+          refund = { initiated: true, amount: refundAmount, fee_kept: fee, refund_id: outcome.refund_id, status: outcome.refund_status }
         }
-
-        await supabase.from("notifications").insert({
-          user_id: user.id,
-          type: "refund_initiated",
-          title: "Refund Initiated",
-          body: `Refund of ₹${(refundAmount / 100).toFixed(0)} for "${eventInfo.title}" has been initiated. ₹${(fee / 100).toFixed(0)} booking fee is not refundable.`,
-          payload: {
-            event_id: eventInfo.id,
-            payment_id: payment.id,
-            registration_id: registration.id,
-            amount: refundAmount,
-            fee_kept: fee,
-          },
-        })
-
-        refund = { initiated: true, amount: refundAmount, fee_kept: fee, refund_id: refundRes.id, status: mappedStatus }
       } catch (refundErr) {
         console.error("Refund failed:", refundErr)
-        await supabase.from("payments").update({ refund_status: "failed", refund_attempt_count: 1 }).eq("id", payment.id)
         await supabase.from("payment_audit_log").insert({
           action: "refund_failed",
           payment_id: payment.id,
@@ -215,14 +153,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Cancel registration regardless of refund outcome
-    await supabase.from("registrations").update({
-      status: "cancelled",
-      qr_code: null,
-      deleted_at: new Date().toISOString(),
-    }).eq("id", registration.id)
-
-    await supabase.rpc("decrement_event_booked", { p_event_id: event_id })
+    // Cancel + release capacity in ONE transaction: the RPC only decrements
+    // events.booked_count when this registration actually transitioned
+    // confirmed -> cancelled, so concurrent cancels can never double-release.
+    await supabase.rpc("cancel_registration_and_decrement", {
+      p_registration_id: registration.id,
+      p_deleted_at: new Date().toISOString(),
+    })
 
     return new Response(JSON.stringify({ success: true, refund }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {

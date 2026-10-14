@@ -2,6 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { verifyCashfreeWebhook } from "../_shared/cashfree.ts"
+import { recordAlert } from "../_shared/alerts.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -10,6 +11,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } })
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { "Access-Control-Allow-Origin": "*" } })
 
   try {
     const rawBody = await req.text()
@@ -67,6 +69,30 @@ Deno.serve(async (req) => {
 
     if (newStatus === "SUCCESS") {
       if (payout.status === "success") return new Response("Already processed", { status: 200 })
+
+      // A late SUCCESS after the payout was already marked failed means the
+      // wallet was refunded but the money did leave Cashfree. Claw the refund
+      // back before settling so we never pay out AND refund the same amount.
+      if (payout.status === "failed") {
+        const { data: debitResult, error: debitErr } = await supabase.rpc("debit_wallet", {
+          p_community_id: payout.community_id,
+          p_amount: payout.amount,
+          p_reason: "cashfree_late_success_clawback",
+        })
+        const debitFailure = debitErr?.message ?? (debitResult as { error?: string } | null)?.error ?? null
+        if (debitFailure) {
+          await recordAlert(supabase, {
+            severity: "critical",
+            category: "payout",
+            title: "Late-success clawback failed — wallet may be over-credited",
+            details: { payout_id: payout.id, community_id: payout.community_id, amount: payout.amount, error: debitFailure },
+          })
+        }
+        await supabase.from("payment_audit_log").insert({
+          action: "payout_late_success_clawback",
+          details: { payout_id: payout.id, community_id: payout.community_id, amount: payout.amount, utr, debited: !debitFailure },
+        })
+      }
 
       await supabase
         .from("payout_items")

@@ -74,15 +74,15 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => { setFilter("all"); clearDateRange() }}
-            className={`${chipBase} ${!activeRange && filter === "all" ? "bg-[#C2185B] text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"}`}>
+            className={`${chipBase} ${!activeRange && filter === "all" ? "bg-cluvo-primary text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"}`}>
             All
           </button>
           <button onClick={() => { setFilter("today"); clearDateRange() }}
-            className={`${chipBase} ${!activeRange && filter === "today" ? "bg-[#C2185B] text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"}`}>
+            className={`${chipBase} ${!activeRange && filter === "today" ? "bg-cluvo-primary text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"}`}>
             Today
           </button>
           <button onClick={() => { setFilter("upcoming"); clearDateRange() }}
-            className={`${chipBase} ${!activeRange && filter === "upcoming" ? "bg-[#C2185B] text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"}`}>
+            className={`${chipBase} ${!activeRange && filter === "upcoming" ? "bg-cluvo-primary text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"}`}>
             Upcoming
           </button>
 
@@ -91,10 +91,10 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
           <div className="flex items-center gap-2">
             <label className="text-xs text-neutral-500">From</label>
             <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
-              className="rounded-lg border border-neutral-300 px-2 py-1.5 text-xs focus:border-[#C2185B] focus:outline-none" />
+              className="rounded-lg border border-neutral-300 px-2 py-1.5 text-xs focus:border-cluvo-primary focus:outline-none" />
             <label className="text-xs text-neutral-500">To</label>
             <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
-              className="rounded-lg border border-neutral-300 px-2 py-1.5 text-xs focus:border-[#C2185B] focus:outline-none" />
+              className="rounded-lg border border-neutral-300 px-2 py-1.5 text-xs focus:border-cluvo-primary focus:outline-none" />
             {activeRange && (
               <button onClick={clearDateRange}
                 className="rounded p-0.5 text-neutral-400 hover:text-red-500" title="Clear date range">
@@ -111,12 +111,12 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
             </svg>
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search events..."
-              className="w-full rounded-lg border border-neutral-300 py-2 pl-9 pr-3 text-sm focus:border-[#C2185B] focus:outline-none" />
+              className="w-full rounded-lg border border-neutral-300 py-2 pl-9 pr-3 text-sm focus:border-cluvo-primary focus:outline-none" />
           </div>
         </div>
 
         <button onClick={onCreate}
-          className="flex items-center gap-1.5 rounded-lg bg-[#C2185B] px-4 py-2 text-sm font-medium text-white hover:bg-[#A0154A]">
+          className="flex items-center gap-1.5 rounded-lg bg-cluvo-primary px-4 py-2 text-sm font-medium text-white hover:bg-cluvo-primary-dark">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
@@ -140,7 +140,7 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
         </div>
       ) : loading ? (
         <div className="flex justify-center py-16">
-          <svg className="h-6 w-6 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+          <svg className="h-6 w-6 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
@@ -207,7 +207,7 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
                   setTimeout(() => setCopiedId(null), 2000)
                 }}
                   className={`rounded-lg p-1.5 hover:bg-neutral-100 ${
-                    copiedId === event.id ? "text-green-600" : "text-neutral-400 hover:text-[#C2185B]"
+                    copiedId === event.id ? "text-green-600" : "text-neutral-400 hover:text-cluvo-primary"
                   }`}
                   title={copiedId === event.id ? "Copied!" : "Copy share link"}
                 >
@@ -222,7 +222,7 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
                   )}
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); onEdit(event) }}
-                  className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-[#C2185B]"
+                  className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-cluvo-primary"
                   title="Edit"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -247,7 +247,7 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
               <button
                 onClick={onLoadMore}
                 disabled={loadingMore}
-                className="rounded-lg border border-neutral-300 px-6 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:border-[#C2185B] hover:text-[#C2185B] disabled:opacity-50 transition-colors"
+                className="rounded-lg border border-neutral-300 px-6 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:border-cluvo-primary hover:text-cluvo-primary disabled:opacity-50 transition-colors"
               >
                 {loadingMore ? 'Loading...' : 'Load More'}
               </button>

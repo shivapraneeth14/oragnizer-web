@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import { useAuth } from "../auth-context"
 import { supabase } from "../supabase"
 import { shareBase, isMobileDevice } from "../lib/share"
+import { fetchOrganizerContacts } from "../lib/organizer-contacts"
 import ProfileSection from "../components/profile/profile-section"
 import EventList from "../components/events/event-list"
 import EventForm from "../components/events/event-form"
@@ -14,6 +15,7 @@ import SettingsPage from "../components/settings/settings-page"
 import MemberRow from "../components/members/member-row"
 import { useEvents, eventToForm } from "../hooks/use-events"
 import CommunityDetailsForm, { initialCommunityData, missingCommunityFields, type CommunityData } from "../components/community-details-form"
+import { useIsDesktop } from "../hooks/use-is-desktop"
 import type { Event } from "shared"
 import type { EventFormData } from "../hooks/use-events"
 
@@ -40,7 +42,14 @@ const navItems = [
 
 export default function DashboardPage() {
   const { user, signOut, loading, clearMessages } = useAuth()
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024)
+  const isDesktop = useIsDesktop()
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [railCollapsed, setRailCollapsed] = useState(false)
+  const sidebarOpen = isDesktop ? !railCollapsed : mobileOpen
+  const toggleSidebar = () => {
+    if (isDesktop) setRailCollapsed((c) => !c)
+    else setMobileOpen((o) => !o)
+  }
   const [activeSection, setActiveSection] = useState(() => {
     const h = window.location.hash.replace(/^#\/?/, "")
     return navItems.some((i) => i.id === h) ? h : "dashboard"
@@ -70,10 +79,8 @@ export default function DashboardPage() {
   const [membersError, setMembersError] = useState<string | null>(null)
 
   useEffect(() => {
-    const onResize = () => setSidebarOpen(window.innerWidth >= 1024)
-    window.addEventListener("resize", onResize)
-    return () => window.removeEventListener("resize", onResize)
-  }, [])
+    if (isDesktop) setMobileOpen(false)
+  }, [isDesktop])
 
   useEffect(() => {
     window.location.hash = activeSection === "dashboard" ? "" : activeSection
@@ -128,30 +135,32 @@ export default function DashboardPage() {
     if (!communityId || activeSection !== "members") return
     setMembersLoading(true)
     setMembersError(null)
-    supabase
-      .from("community_members")
-      .select("user_id, role, joined_at, profiles(email, username, first_name, last_name)")
-      .eq("community_id", communityId)
-      .order("joined_at", { ascending: false })
-      .range(0, 49)
-      .then(({ data, error }) => {
-        if (error) {
-          setMembersError(error.message)
-        } else if (data) {
-          setMembers(
-            data.map((m: any) => ({
-              user_id: m.user_id,
-              role: m.role,
-              joined_at: m.joined_at,
-              email: m.profiles?.email || null,
-              username: m.profiles?.username || null,
-              first_name: m.profiles?.first_name || null,
-              last_name: m.profiles?.last_name || null,
-            }))
-          )
-        }
-        setMembersLoading(false)
-      })
+    Promise.all([
+      supabase
+        .from("community_members")
+        .select("user_id, role, joined_at, profiles(username, first_name, last_name)")
+        .eq("community_id", communityId)
+        .order("joined_at", { ascending: false })
+        .range(0, 49),
+      fetchOrganizerContacts(),
+    ]).then(([{ data, error }, contacts]) => {
+      if (error) {
+        setMembersError(error.message)
+      } else if (data) {
+        setMembers(
+          data.map((m: any) => ({
+            user_id: m.user_id,
+            role: m.role,
+            joined_at: m.joined_at,
+            email: contacts.get(m.user_id)?.email || null,
+            username: m.profiles?.username || null,
+            first_name: m.profiles?.first_name || null,
+            last_name: m.profiles?.last_name || null,
+          }))
+        )
+      }
+      setMembersLoading(false)
+    })
   }, [communityId, activeSection, memberRefreshKey])
 
   const handleFormSave = async (data: EventFormData) => {
@@ -217,9 +226,9 @@ export default function DashboardPage() {
 
   if (needsCommunity) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-8">
+      <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-4 sm:p-8">
         <div className="w-full max-w-lg">
-          <div className="rounded-xl border border-neutral-200 bg-white p-8 shadow-soft">
+          <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-soft sm:p-8">
             <div className="mb-1 flex items-center justify-between gap-4">
               <h2 className="text-xl font-semibold text-neutral-900">Create Your Community</h2>
               <button
@@ -261,12 +270,12 @@ export default function DashboardPage() {
                   const missing = missingCommunityFields(communityData).step1
                   if (missing.length > 0) { alert(`Complete required fields: ${missing.join(", ")}`); return }
                   setCommunityStep(2)
-                }} className="rounded-lg bg-[#C2185B] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#A0154A]">
+                }} className="rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark">
                   Next
                 </button>
               ) : (
                 <button onClick={handleCreateCommunity} disabled={communityCreating || missingCommunityFields(communityData).step2.length > 0}
-                  className="rounded-lg bg-[#C2185B] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#A0154A] disabled:opacity-50">
+                  className="rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50">
                   {communityCreating ? "Creating..." : "Create Community"}
                 </button>
               )}
@@ -280,26 +289,30 @@ export default function DashboardPage() {
   return (
     <div className="flex h-screen bg-neutral-50">
       {/* Sidebar overlay on mobile */}
-      {sidebarOpen && (
+      {!isDesktop && mobileOpen && (
         <div
           className="fixed inset-0 z-20 bg-black/30 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+          onClick={() => setMobileOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
         className={`fixed left-0 top-0 z-30 flex h-full flex-col bg-white shadow-lg transition-all duration-300 ease-in-out ${
-          sidebarOpen ? "w-64" : "w-0 -translate-x-full lg:w-16 lg:translate-x-0"
+          isDesktop
+            ? `translate-x-0 ${railCollapsed ? "lg:w-16" : "lg:w-64"}`
+            : mobileOpen
+              ? "w-64"
+              : "w-0 -translate-x-full"
         }`}
       >
         {/* Logo */}
         <div className="flex h-16 items-center justify-between border-b border-neutral-200 px-4">
           {sidebarOpen && (
-            <span className="text-lg font-bold tracking-wider text-[#C2185B]">CLUVO</span>
+            <span className="text-lg font-bold tracking-wider text-cluvo-primary">CLUVO</span>
           )}
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={toggleSidebar}
             className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700"
           >
             <svg className={`h-5 w-5 transition-transform ${sidebarOpen ? "" : "rotate-180"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -315,11 +328,11 @@ export default function DashboardPage() {
               key={item.id}
               onClick={() => {
                 setActiveSection(item.id)
-                if (window.innerWidth < 1024) setSidebarOpen(false)
+                if (!isDesktop) setMobileOpen(false)
               }}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                 activeSection === item.id
-                  ? "bg-[#C2185B]/10 text-[#C2185B]"
+                  ? "bg-cluvo-primary/10 text-cluvo-primary"
                   : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800"
               }`}
             >
@@ -339,7 +352,7 @@ export default function DashboardPage() {
                 onClick={() => setProfileOpen(!profileOpen)}
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#C2185B]/20 text-xs font-bold text-[#C2185B]">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cluvo-primary/20 text-xs font-bold text-cluvo-primary">
                   {user?.email?.charAt(0).toUpperCase() || "U"}
                 </div>
                 <div className="flex-1 truncate text-left">
@@ -365,7 +378,7 @@ export default function DashboardPage() {
           )}
           {!sidebarOpen && (
             <button
-              onClick={() => setSidebarOpen(true)}
+              onClick={toggleSidebar}
               className="flex w-full items-center justify-center rounded-lg px-3 py-2 text-neutral-500 hover:bg-neutral-100"
               title="Expand sidebar"
             >
@@ -378,12 +391,14 @@ export default function DashboardPage() {
       </aside>
 
       {/* Main content */}
-      <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? "lg:pl-64" : "lg:pl-16"} pl-0`}>
+      <main className={`flex-1 transition-all duration-300 ${
+        isDesktop ? (railCollapsed ? "lg:pl-16" : "lg:pl-64") : "pl-0"
+      }`}>
         {/* Top bar */}
-        <header className="flex h-16 items-center justify-between border-b border-neutral-200 bg-white px-6">
+        <header className="flex h-16 items-center justify-between border-b border-neutral-200 bg-white px-4 sm:px-6">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={toggleSidebar}
               className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 lg:hidden"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -396,14 +411,14 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-3">
 
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#C2185B]/20 text-xs font-bold text-[#C2185B]">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cluvo-primary/20 text-xs font-bold text-cluvo-primary">
               {user?.email?.charAt(0).toUpperCase() || "U"}
             </div>
           </div>
         </header>
 
         {/* Content area */}
-        <div className="overflow-y-auto p-6">
+        <div className="overflow-y-auto p-4 sm:p-6">
           {activeSection === "dashboard" && (
             <div>
               <h3 className="text-xl font-semibold text-neutral-900">Welcome to Cluvo</h3>
@@ -463,7 +478,7 @@ export default function DashboardPage() {
           )}
           {activeSection === "members" && (
             <div>
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h3 className="text-xl font-semibold text-neutral-900">Members ({members.length})</h3>
                   <p className="mt-2 text-sm text-neutral-500">Users who follow your community.</p>
@@ -484,7 +499,7 @@ export default function DashboardPage() {
                       }
                     }}
                     className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors ${
-                      inviteCopied ? 'bg-green-600' : 'bg-[#C2185B] hover:bg-[#A0154A]'
+                      inviteCopied ? 'bg-green-600' : 'bg-cluvo-primary hover:bg-cluvo-primary-dark'
                     }`}
                   >
                     {inviteCopied ? (
@@ -557,7 +572,7 @@ export default function DashboardPage() {
               </div>
               {membersLoading ? (
                 <div className="flex items-center justify-center py-20">
-                  <svg className="h-8 w-8 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+                  <svg className="h-8 w-8 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
@@ -574,29 +589,43 @@ export default function DashboardPage() {
                   <p className="text-sm text-neutral-500">No members yet.</p>
                 </div>
               ) : (
-                <div className="mt-6 overflow-x-auto rounded-xl border border-neutral-200 bg-white">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-neutral-200 bg-neutral-50">
-                        <th className="px-4 py-3 font-medium text-neutral-600">Username</th>
-                        <th className="px-4 py-3 font-medium text-neutral-600">Role</th>
-                        <th className="px-4 py-3 font-medium text-neutral-600">Joined</th>
-                        <th className="px-4 py-3" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {members.map((m) => (
-                        <MemberRow
-                          key={m.user_id}
-                          member={m}
-                          currentUserId={user!.id}
-                          communityId={communityId!}
-                          onRemoved={() => setMemberRefreshKey((k) => k + 1)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  <div className="mt-6 hidden overflow-x-auto rounded-xl border border-neutral-200 bg-white md:block">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-neutral-200 bg-neutral-50">
+                          <th className="px-4 py-3 font-medium text-neutral-600">Username</th>
+                          <th className="px-4 py-3 font-medium text-neutral-600">Role</th>
+                          <th className="px-4 py-3 font-medium text-neutral-600">Joined</th>
+                          <th className="px-4 py-3" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {members.map((m) => (
+                          <MemberRow
+                            key={m.user_id}
+                            member={m}
+                            currentUserId={user!.id}
+                            communityId={communityId!}
+                            onRemoved={() => setMemberRefreshKey((k) => k + 1)}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-6 space-y-2 md:hidden">
+                    {members.map((m) => (
+                      <MemberRow
+                        key={m.user_id}
+                        card
+                        member={m}
+                        currentUserId={user!.id}
+                        communityId={communityId!}
+                        onRemoved={() => setMemberRefreshKey((k) => k + 1)}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )}

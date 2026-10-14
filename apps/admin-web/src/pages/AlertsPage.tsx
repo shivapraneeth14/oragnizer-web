@@ -80,7 +80,7 @@ export default function AlertsPage() {
             onClick={() => setSeverityFilter(s)}
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
               severityFilter === s
-                ? "bg-[#C2185B] text-white"
+                ? "bg-cluvo-primary text-white"
                 : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
             }`}
           >
@@ -91,7 +91,7 @@ export default function AlertsPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-          className="rounded-lg border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-600 focus:border-[#C2185B] focus:outline-none"
+          className="rounded-lg border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-600 focus:border-cluvo-primary focus:outline-none"
         >
           <option value="all">All statuses</option>
           <option value="open">Open</option>
@@ -102,7 +102,7 @@ export default function AlertsPage() {
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <svg className="h-8 w-8 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+          <svg className="h-8 w-8 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
@@ -118,91 +118,158 @@ export default function AlertsPage() {
           </p>
         </div>
       ) : (
-        <div className="mt-6 overflow-x-auto rounded-xl border border-neutral-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-neutral-200 bg-neutral-50">
-                <th className="px-4 py-3 font-medium text-neutral-600">Severity</th>
-                <th className="px-4 py-3 font-medium text-neutral-600">Alert</th>
-                <th className="px-4 py-3 font-medium text-neutral-600">Status</th>
-                <th className="px-4 py-3 font-medium text-neutral-600">Created</th>
-                <th className="px-4 py-3 font-medium text-neutral-600">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((a) => {
-                const sev = SEVERITY_PILLS[a.severity]
-                return (
-                  <tr key={a.id} className="border-b border-neutral-100 transition-colors hover:bg-neutral-50">
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${sev.pill}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${sev.dot}`} />
-                        {sev.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-neutral-900">{a.title}</p>
-                      <span className="mt-0.5 inline-block rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
-                        {a.category}
-                      </span>
-                      {a.details && Object.keys(a.details).length > 0 && (
-                        <details className="mt-1.5">
-                          <summary className="cursor-pointer text-xs text-[#C2185B] hover:text-[#A0174A]">
-                            Details
-                          </summary>
-                          <pre className="mt-1.5 overflow-x-auto rounded-lg bg-neutral-50 p-2 text-xs text-neutral-600">
-                            {JSON.stringify(a.details, null, 2)}
-                          </pre>
-                        </details>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          a.status === "resolved"
-                            ? "bg-emerald-50 text-emerald-600"
-                            : a.status === "acknowledged"
-                              ? "bg-sky-50 text-sky-600"
-                              : "bg-orange-50 text-orange-600"
-                        }`}
+        <>
+          <div className="mt-6 space-y-3 md:hidden">
+            {filtered.map((a) => {
+              const sev = SEVERITY_PILLS[a.severity]
+              return (
+                <div key={a.id} className="rounded-xl border border-neutral-200 bg-white p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${sev.pill}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${sev.dot}`} />
+                      {sev.label}
+                    </span>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        a.status === "resolved"
+                          ? "bg-emerald-50 text-emerald-600"
+                          : a.status === "acknowledged"
+                            ? "bg-sky-50 text-sky-600"
+                            : "bg-orange-50 text-orange-600"
+                      }`}
+                    >
+                      {a.status}
+                    </span>
+                  </div>
+                  <p className="mt-2 font-medium text-neutral-900">{a.title}</p>
+                  <span className="mt-1 inline-block rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+                    {a.category}
+                  </span>
+                  {a.details && Object.keys(a.details).length > 0 && (
+                    <details className="mt-1.5">
+                      <summary className="cursor-pointer text-xs text-cluvo-primary hover:text-cluvo-primary-dark">
+                        Details
+                      </summary>
+                      <pre className="mt-1.5 overflow-x-auto rounded-lg bg-neutral-50 p-2 text-xs text-neutral-600">
+                        {JSON.stringify(a.details, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                  <p className="mt-2 text-xs text-neutral-400">
+                    {new Date(a.created_at).toLocaleString()}
+                    {a.resolved_at && ` · resolved ${new Date(a.resolved_at).toLocaleString()}`}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {a.status === "open" && (
+                      <button
+                        onClick={() => updateStatus(a, "acknowledged")}
+                        disabled={pendingId === a.id}
+                        className="flex-1 rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-neutral-600 hover:bg-neutral-100 disabled:opacity-50"
                       >
-                        {a.status}
-                      </span>
-                      {a.resolved_at && (
-                        <p className="mt-1 text-xs text-neutral-400">
-                          {new Date(a.resolved_at).toLocaleString()}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-neutral-600">{new Date(a.created_at).toLocaleString()}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        {a.status === "open" && (
-                          <button
-                            onClick={() => updateStatus(a, "acknowledged")}
-                            disabled={pendingId === a.id}
-                            className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 disabled:opacity-50"
-                          >
-                            {pendingId === a.id ? "..." : "Acknowledge"}
-                          </button>
+                        {pendingId === a.id ? "..." : "Acknowledge"}
+                      </button>
+                    )}
+                    {a.status !== "resolved" && (
+                      <button
+                        onClick={() => updateStatus(a, "resolved")}
+                        disabled={pendingId === a.id}
+                        className="flex-1 rounded-lg bg-cluvo-primary px-2.5 py-1.5 text-xs font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50"
+                      >
+                        {pendingId === a.id ? "..." : "Resolve"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="mt-6 hidden overflow-x-auto rounded-xl border border-neutral-200 bg-white md:block">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200 bg-neutral-50">
+                  <th className="px-4 py-3 font-medium text-neutral-600">Severity</th>
+                  <th className="px-4 py-3 font-medium text-neutral-600">Alert</th>
+                  <th className="px-4 py-3 font-medium text-neutral-600">Status</th>
+                  <th className="px-4 py-3 font-medium text-neutral-600">Created</th>
+                  <th className="px-4 py-3 font-medium text-neutral-600">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((a) => {
+                  const sev = SEVERITY_PILLS[a.severity]
+                  return (
+                    <tr key={a.id} className="border-b border-neutral-100 transition-colors hover:bg-neutral-50">
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${sev.pill}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${sev.dot}`} />
+                          {sev.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-neutral-900">{a.title}</p>
+                        <span className="mt-0.5 inline-block rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+                          {a.category}
+                        </span>
+                        {a.details && Object.keys(a.details).length > 0 && (
+                          <details className="mt-1.5">
+                            <summary className="cursor-pointer text-xs text-cluvo-primary hover:text-cluvo-primary-dark">
+                              Details
+                            </summary>
+                            <pre className="mt-1.5 overflow-x-auto rounded-lg bg-neutral-50 p-2 text-xs text-neutral-600">
+                              {JSON.stringify(a.details, null, 2)}
+                            </pre>
+                          </details>
                         )}
-                        {a.status !== "resolved" && (
-                          <button
-                            onClick={() => updateStatus(a, "resolved")}
-                            disabled={pendingId === a.id}
-                            className="rounded-lg bg-[#C2185B] px-2.5 py-1 text-xs font-medium text-white hover:bg-[#A0174A] disabled:opacity-50"
-                          >
-                            {pendingId === a.id ? "..." : "Resolve"}
-                          </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            a.status === "resolved"
+                              ? "bg-emerald-50 text-emerald-600"
+                              : a.status === "acknowledged"
+                                ? "bg-sky-50 text-sky-600"
+                                : "bg-orange-50 text-orange-600"
+                          }`}
+                        >
+                          {a.status}
+                        </span>
+                        {a.resolved_at && (
+                          <p className="mt-1 text-xs text-neutral-400">
+                            {new Date(a.resolved_at).toLocaleString()}
+                          </p>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-600">{new Date(a.created_at).toLocaleString()}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          {a.status === "open" && (
+                            <button
+                              onClick={() => updateStatus(a, "acknowledged")}
+                              disabled={pendingId === a.id}
+                              className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100 disabled:opacity-50"
+                            >
+                              {pendingId === a.id ? "..." : "Acknowledge"}
+                            </button>
+                          )}
+                          {a.status !== "resolved" && (
+                            <button
+                              onClick={() => updateStatus(a, "resolved")}
+                              disabled={pendingId === a.id}
+                              className="rounded-lg bg-cluvo-primary px-2.5 py-1 text-xs font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50"
+                            >
+                              {pendingId === a.id ? "..." : "Resolve"}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   )

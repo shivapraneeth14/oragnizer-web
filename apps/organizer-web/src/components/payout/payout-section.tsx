@@ -229,6 +229,19 @@ export default function PayoutSection({ communityId }: Props) {
 
   const badge = statusBadge(selectedPayout?.status)
 
+  const filteredTransactions = transactions.filter((t) => typeFilter === "all" || t.type === typeFilter)
+
+  const renderDetailLink = (t: Transaction) =>
+    t.type === "debit" && t.payout_id ? (
+      <button
+        type="button"
+        onClick={() => setSelectedPayout(t)}
+        className="mt-0.5 block text-xs text-cluvo-primary underline"
+      >
+        View details
+      </button>
+    ) : null
+
   return (
     <div>
       <h3 className="text-xl font-semibold text-neutral-900">Payout Settings</h3>
@@ -236,31 +249,31 @@ export default function PayoutSection({ communityId }: Props) {
         Revenue from paid events is credited to your wallet — 100% of the ticket price you set.
       </p>
 
-      <div className="mt-6 rounded-xl border border-neutral-200 bg-white p-6">
+      <div className="mt-6 rounded-xl border border-neutral-200 bg-white p-4 sm:p-6">
         <div className="flex items-center justify-between mb-4">
           <h4 className="font-semibold text-neutral-800">Wallet Balance</h4>
-          <span className="text-2xl font-bold text-[#C2185B]">₹{(walletBalance / 100).toFixed(0)}</span>
+          <span className="text-2xl font-bold text-cluvo-primary">₹{(walletBalance / 100).toFixed(0)}</span>
         </div>
 
         {activeBeneficiary && (
-          <div className="mb-6 rounded-lg border border-[#C2185B] bg-[#C2185B]/5 p-4">
-            <p className="text-xs font-medium text-[#C2185B] uppercase tracking-wide mb-1">Active Account</p>
+          <div className="mb-6 rounded-lg border border-cluvo-primary bg-cluvo-primary/5 p-4">
+            <p className="text-xs font-medium text-cluvo-primary uppercase tracking-wide mb-1">Active Account</p>
             <p className="font-medium text-neutral-800">{activeBeneficiary.label || activeBeneficiary.account_holder}</p>
             <p className="text-xs text-neutral-500">{activeBeneficiary.account_holder} · {activeBeneficiary.bank_ifsc} · {activeBeneficiary.bank_account_number}</p>
           </div>
         )}
 
         <div className="space-y-4">
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
             <input
               type="number"
               value={withdrawAmount}
               onChange={(e) => setWithdrawAmount(e.target.value)}
               placeholder="Amount in rupees (e.g. 500 = ₹500)"
-              className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-[#C2185B] focus:outline-none"
+              className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-cluvo-primary focus:outline-none"
             />
             <button onClick={handleWithdraw} disabled={submitting || !activeBeneficiary}
-              className="rounded-lg bg-[#C2185B] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#A0154A] disabled:opacity-50">
+              className="w-full rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50 sm:w-auto">
               {submitting ? "Processing..." : "Withdraw"}
             </button>
           </div>
@@ -275,14 +288,14 @@ export default function PayoutSection({ communityId }: Props) {
 
       <div className="mt-8">
         <h4 className="font-semibold text-neutral-800 mb-3">Transaction History</h4>
-        <div className="mb-3 flex gap-2 items-center">
-          <div className="flex gap-2">
+        <div className="mb-3 flex flex-wrap gap-2 items-center">
+          <div className="flex flex-wrap gap-2">
             {(["all", "credit", "debit", "refund"] as TypeFilter[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setTypeFilter(f)}
                 className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${
-                  typeFilter === f ? "bg-[#C2185B] text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                  typeFilter === f ? "bg-cluvo-primary text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
                 }`}
               >
                 {f === "all" ? "All" : f === "credit" ? "Money In" : f === "debit" ? "Withdrawals" : "Refunds"}
@@ -296,7 +309,7 @@ export default function PayoutSection({ communityId }: Props) {
               setEventFilter(value)
               loadTransactions(value === "all" ? undefined : value)
             }}
-            className="ml-auto rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 bg-white focus:border-[#C2185B] focus:outline-none"
+            className="ml-auto rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 bg-white focus:border-cluvo-primary focus:outline-none"
           >
             <option value="all">All events</option>
             {events.map((ev) => (
@@ -306,57 +319,79 @@ export default function PayoutSection({ communityId }: Props) {
         </div>
         {transactionsLoading ? (
           <p className="text-sm text-neutral-400">Loading...</p>
-        ) : transactions.filter((t) => typeFilter === "all" || t.type === typeFilter).length === 0 ? (
+        ) : filteredTransactions.length === 0 ? (
           <p className="text-sm text-neutral-400">No transactions yet.</p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-neutral-200 bg-neutral-50">
-                  <th className="px-4 py-3 font-medium text-neutral-600">Date</th>
-                  <th className="px-4 py-3 font-medium text-neutral-600">Description</th>
-                  <th className="px-4 py-3 font-medium text-neutral-600 text-right">Money In</th>
-                  <th className="px-4 py-3 font-medium text-neutral-600 text-right">Money Out</th>
-                  <th className="px-4 py-3 font-medium text-neutral-600 text-right">Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions.filter((t) => typeFilter === "all" || t.type === typeFilter).map((t, i) => (
-                  <tr key={i} className={`border-b border-neutral-100 ${t.type === "refund" ? "bg-red-50/40" : ""}`}>
-                    <td className="px-4 py-3 text-neutral-500 whitespace-nowrap">
-                      {new Date(t.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                    </td>
-                    <td className="px-4 py-3 text-neutral-700">
-                      {t.description}
-                      {t.event_id && events.some((ev) => ev.id === t.event_id) && (
-                        <div className="text-xs text-neutral-400 mt-0.5">
-                          {events.find((ev) => ev.id === t.event_id)?.title}
-                        </div>
-                      )}
-                      {t.type === "debit" && t.payout_id && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPayout(t)}
-                          className="mt-0.5 block text-xs text-[#C2185B] underline"
-                        >
-                          View details
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right text-green-700 font-medium">
-                      {t.credit_amount ? `₹${(t.credit_amount / 100).toFixed(0)}` : ""}
-                    </td>
-                    <td className="px-4 py-3 text-right text-red-600 font-medium">
-                      {t.debit_amount ? `₹${(t.debit_amount / 100).toFixed(0)}` : ""}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-neutral-800">
-                      ₹{(t.running_balance / 100).toFixed(0)}
-                    </td>
+          <>
+            {/* Mobile: stacked cards */}
+            <div className="space-y-2 md:hidden">
+              {filteredTransactions.map((t, i) => (
+                <div key={i} className={`rounded-xl border border-neutral-200 bg-white p-3 text-sm ${t.type === "refund" ? "bg-red-50/40" : ""}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-neutral-800">{t.description}</p>
+                      <p className="mt-0.5 text-xs text-neutral-400">
+                        {new Date(t.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      {t.credit_amount ? <p className="font-medium text-green-700">+₹{(t.credit_amount / 100).toFixed(0)}</p> : null}
+                      {t.debit_amount ? <p className="font-medium text-red-600">−₹{(t.debit_amount / 100).toFixed(0)}</p> : null}
+                    </div>
+                  </div>
+                  {t.event_id && events.some((ev) => ev.id === t.event_id) && (
+                    <p className="mt-1 text-xs text-neutral-400">{events.find((ev) => ev.id === t.event_id)?.title}</p>
+                  )}
+                  <div className="mt-2 flex items-center justify-between border-t border-neutral-100 pt-2">
+                    <div>{renderDetailLink(t)}</div>
+                    <p className="text-xs text-neutral-500">Balance ₹{(t.running_balance / 100).toFixed(0)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: table */}
+            <div className="hidden overflow-x-auto rounded-xl border border-neutral-200 bg-white md:block">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-200 bg-neutral-50">
+                    <th className="px-4 py-3 font-medium text-neutral-600">Date</th>
+                    <th className="px-4 py-3 font-medium text-neutral-600">Description</th>
+                    <th className="px-4 py-3 font-medium text-neutral-600 text-right">Money In</th>
+                    <th className="px-4 py-3 font-medium text-neutral-600 text-right">Money Out</th>
+                    <th className="px-4 py-3 font-medium text-neutral-600 text-right">Balance</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filteredTransactions.map((t, i) => (
+                    <tr key={i} className={`border-b border-neutral-100 ${t.type === "refund" ? "bg-red-50/40" : ""}`}>
+                      <td className="px-4 py-3 text-neutral-500 whitespace-nowrap">
+                        {new Date(t.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3 text-neutral-700">
+                        {t.description}
+                        {t.event_id && events.some((ev) => ev.id === t.event_id) && (
+                          <div className="text-xs text-neutral-400 mt-0.5">
+                            {events.find((ev) => ev.id === t.event_id)?.title}
+                          </div>
+                        )}
+                        {renderDetailLink(t)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-green-700 font-medium">
+                        {t.credit_amount ? `₹${(t.credit_amount / 100).toFixed(0)}` : ""}
+                      </td>
+                      <td className="px-4 py-3 text-right text-red-600 font-medium">
+                        {t.debit_amount ? `₹${(t.debit_amount / 100).toFixed(0)}` : ""}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-neutral-800">
+                        ₹{(t.running_balance / 100).toFixed(0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
@@ -366,7 +401,7 @@ export default function PayoutSection({ communityId }: Props) {
           onClick={() => setSelectedPayout(null)}
         >
           <div
-            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-4 shadow-xl sm:p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
@@ -442,7 +477,7 @@ export default function PayoutSection({ communityId }: Props) {
             <button
               type="button"
               onClick={() => setSelectedPayout(null)}
-              className="mt-4 w-full rounded-lg bg-[#C2185B] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#A0154A]"
+              className="mt-4 w-full rounded-lg bg-cluvo-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark"
             >
               Close
             </button>

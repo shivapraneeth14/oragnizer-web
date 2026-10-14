@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { cashfreeGet } from "../_shared/cashfree.ts"
 import { recordAlert } from "../_shared/alerts.ts"
+import { safeEqual } from "../_shared/crypto.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -43,7 +44,7 @@ async function checkTransfer(id: string, cfRef?: string | null): Promise<Record<
         title: "Cashfree status check failed for payout",
         details: { payout_id: id, error: msg },
       })
-      return { payout_id: id, checked: false, error: msg }
+      return { payout_id: id, checked: false, error: "Status check failed" }
     }
     try {
       check = await cashfreeGet(`/getTransferStatus?referenceId=${encodeURIComponent(cfRef)}`)
@@ -56,7 +57,7 @@ async function checkTransfer(id: string, cfRef?: string | null): Promise<Record<
         title: "Cashfree status check failed for payout",
         details: { payout_id: id, error: msg },
       })
-      return { payout_id: id, checked: false, error: msg }
+      return { payout_id: id, checked: false, error: "Status check failed" }
     }
   }
 
@@ -67,7 +68,7 @@ async function checkTransfer(id: string, cfRef?: string | null): Promise<Record<
   const reason = inner?.failure_reason ?? inner?.statusDescription ?? check?.message ?? null
 
   if (!cashfreeStatus) {
-    return { payout_id: id, checked: false, error: "No status in Cashfree response" }
+    return { payout_id: id, checked: false, error: "Could not determine payout status" }
   }
 
   const { data: applied, error: rpcErr } = await supabase.rpc("sync_payout_status_update", {
@@ -85,7 +86,7 @@ async function checkTransfer(id: string, cfRef?: string | null): Promise<Record<
       title: "sync_payout_status_update RPC failed for payout",
       details: { payout_id: id, error: rpcErr.message },
     })
-    return { payout_id: id, checked: false, error: rpcErr.message }
+    return { payout_id: id, checked: false, error: "Status check failed" }
   }
 
   return { payout_id: id, checked: true, cashfree_status: cashfreeStatus, result: applied ?? null }
@@ -93,6 +94,7 @@ async function checkTransfer(id: string, cfRef?: string | null): Promise<Record<
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
+  if (req.method !== "POST") return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
   try {
     const url = new URL(req.url)
@@ -101,7 +103,7 @@ Deno.serve(async (req) => {
     // Mode 1: cron (pg_cron) — internal secret header, full scan of stuck rows.
     const syncSecret = req.headers.get("x-sync-secret")
     if (syncSecret) {
-      if (syncSecret === PAYOUT_SYNC_SECRET) {
+      if (PAYOUT_SYNC_SECRET && safeEqual(syncSecret, PAYOUT_SYNC_SECRET)) {
         const stuckBefore = new Date(Date.now() - STUCK_AFTER_MS).toISOString()
         const { data: rows, error } = await supabase
           .from("payout_items")
@@ -184,6 +186,6 @@ Deno.serve(async (req) => {
       title: "sync-payout-status unhandled error",
       details: { error: msg },
     })
-    return new Response(JSON.stringify({ error: msg }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

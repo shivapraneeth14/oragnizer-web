@@ -13,6 +13,7 @@ import UserDetailPage from "./pages/UserDetailPage"
 import EventsPage from "./pages/EventsPage"
 import EventDetailPage from "./pages/EventDetailPage"
 import AlertsPage from "./pages/AlertsPage"
+import ReportsPage from "./pages/ReportsPage"
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="/events" element={<EventsPage />} />
             <Route path="/events/:id" element={<EventDetailPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
