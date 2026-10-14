@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../../supabase"
 import { copyText } from "../../lib/clipboard"
 import { shareBase, isMobileDevice } from "../../lib/share"
+import { fetchOrganizerContacts, type OrgContact } from "../../lib/organizer-contacts"
 import type { Event, Profile, Payment } from "shared"
 
 interface RegistrationWithDetails {
@@ -97,6 +98,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
   const [restrictedUsers, setRestrictedUsers] = useState<RestrictedUserWithProfile[]>([])
   const [restrictUserId, setRestrictUserId] = useState("")
   const [restrictSearch, setRestrictSearch] = useState("")
+  const [contacts, setContacts] = useState<Map<string, OrgContact>>(new Map())
   const [searchResults, setSearchResults] = useState<Pick<Profile, "id" | "first_name" | "last_name" | "email">[]>([])
   const [searching, setSearching] = useState(false)
   const [newMessage, setNewMessage] = useState("")
@@ -115,21 +117,53 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
     })
   }, [])
 
+  // Contacts (email) are fetched once through the authorized organizer
+  // endpoint and used to decorate rows below. profiles.email is no longer
+  // readable directly by clients (202610120005).
+  useEffect(() => {
+    let active = true
+    fetchOrganizerContacts().then((map) => {
+      if (active) setContacts(map)
+    })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (contacts.size === 0) return
+    setRegistrations((prev) =>
+      prev.map((r) => ({
+        ...r,
+        profiles: { ...r.profiles, email: r.profiles?.email || contacts.get(r.user_id)?.email || "" },
+      }))
+    )
+    setRestrictedUsers((prev) =>
+      prev.map((ru) =>
+        ru.profiles
+          ? { ...ru, profiles: { ...ru.profiles, email: ru.profiles.email || contacts.get(ru.user_id)?.email || "" } }
+          : ru
+      )
+    )
+  }, [contacts])
+
   const loadRegistrations = useCallback(async () => {
     const { data, error } = await supabase
       .from("registrations")
-      .select("id, user_id, status, registered_at, profiles(email, first_name, last_name), payments(amount, status)")
+      .select("id, user_id, status, registered_at, profiles(first_name, last_name), payments(amount, status)")
       .eq("event_id", event.id)
       .is("deleted_at", null)
       .order("registered_at", { ascending: false })
     if (error) {
       setError(error.message)
     } else {
-      setRegistrations(data as unknown as RegistrationWithDetails[])
-      regIdsRef.current = new Set(((data || []) as { id: string }[]).map((r) => r.id))
+      const rows = ((data || []) as unknown as RegistrationWithDetails[]).map((r) => ({
+        ...r,
+        profiles: { ...r.profiles, email: r.profiles?.email || contacts.get(r.user_id)?.email || "" },
+      }))
+      setRegistrations(rows)
+      regIdsRef.current = new Set((data || []).map((r: { id: string }) => r.id))
     }
     setLoading(false)
-  }, [event.id])
+  }, [event.id, contacts])
 
   useEffect(() => {
     setLoading(true)
@@ -162,7 +196,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
     if (activeTab !== "discussion") return
     loadDiscussion()
     loadRestrictedUsers()
-  }, [activeTab, event.id])
+  }, [activeTab, event.id, contacts])
 
   async function loadDiscussion() {
     setMessagesLoading(true)
@@ -188,9 +222,15 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
     try {
       const { data } = await supabase
         .from("event_restricted_users")
-        .select("id, user_id, created_at, profiles:user_id(first_name, last_name, email)")
+        .select("id, user_id, created_at, profiles:user_id(first_name, last_name)")
         .eq("event_id", event.id)
-      setRestrictedUsers(data as unknown as RestrictedUserWithProfile[])
+      setRestrictedUsers(
+        ((data || []) as unknown as RestrictedUserWithProfile[]).map((ru) =>
+          ru.profiles
+            ? { ...ru, profiles: { ...ru.profiles, email: contacts.get(ru.user_id)?.email || "" } }
+            : ru
+        )
+      )
     } catch (_) {}
   }
 
@@ -279,20 +319,34 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
     setSearching(true)
     const { data } = await supabase
       .from("community_members")
-      .select("profiles:user_id(id, first_name, last_name, email)")
+      .select("profiles:user_id(id, first_name, last_name, username)")
       .eq("community_id", event.community_id)
-      .or(`profiles.first_name.ilike.%${query}%,profiles.last_name.ilike.%${query}%,profiles.email.ilike.%${query}%`)
-      .limit(10)
+      .limit(50)
+    const q = query.toLowerCase()
     const members = (data || []) as unknown as {
-      profiles: Pick<Profile, "id" | "first_name" | "last_name" | "email"> | null
+      profiles: Pick<Profile, "id" | "first_name" | "last_name"> & { username?: string | null } | null
     }[]
     const restrictedIds = new Set(restrictedUsers.map((r) => r.user_id))
     setSearchResults(
       members
         .map((m) => m.profiles)
-        .filter((p): p is Pick<Profile, "id" | "first_name" | "last_name" | "email"> =>
-          !!p && !restrictedIds.has(p.id)
-        )
+        .filter((p): p is NonNullable<typeof p> => !!p && !restrictedIds.has(p.id))
+        .map((p) => ({
+          id: p.id,
+          first_name: p.first_name,
+          last_name: p.last_name,
+          email: contacts.get(p.id)?.email || "",
+          username: p.username,
+        }))
+        .filter((p) => {
+          const name = `${p.first_name || ""} ${p.last_name || ""}`.toLowerCase()
+          return (
+            name.includes(q) ||
+            (p.username || "").toLowerCase().includes(q) ||
+            (p.email || "").toLowerCase().includes(q)
+          )
+        })
+        .slice(0, 10)
     )
     setSearching(false)
   }
@@ -303,7 +357,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
     <div>
       <button
         onClick={onClose}
-        className="mb-4 flex items-center gap-1.5 text-sm font-medium text-[#C2185B] hover:text-[#A0154A]"
+        className="mb-4 flex items-center gap-1.5 text-sm font-medium text-cluvo-primary hover:text-cluvo-primary-dark"
       >
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5m7-7l-7 7 7 7" />
@@ -319,8 +373,8 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
         )}
 
         <div className="mt-6 space-y-6">
-          <div className="flex items-start justify-between gap-4">
-            <div>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <h2 className="text-2xl font-bold text-neutral-900">{event.title}</h2>
               {event.description && (() => {
                 const sections = event.description!.split(/\n(?=## )/)
@@ -342,7 +396,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                 const section = parsed[descTabIndex] ?? parsed[0]
                 return (
                   <div className="mt-2">
-                    <div className="flex gap-4 border-b border-neutral-200 mb-3">
+                    <div className="flex flex-wrap gap-4 border-b border-neutral-200 mb-3">
                       {parsed.map((s, i) => (
                         <button
                           key={s.title}
@@ -362,7 +416,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                 )
               })()}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {event.status !== "cancelled" && event.status !== "completed" && (
                 <>
                   <button
@@ -481,7 +535,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-x-8 gap-y-4 rounded-xl border border-neutral-200 bg-white p-6">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 rounded-xl border border-neutral-200 bg-white p-4 sm:gap-x-8 sm:p-6">
             <DetailItem label="Start" value={formatDateTime(event.start_date)} />
             {event.end_date ? <DetailItem label="End" value={formatDateTime(event.end_date)} /> : null}
             {event.location ? <DetailItem label="Location" value={event.location} /> : null}
@@ -521,7 +575,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
               {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
               {loading ? (
                 <div className="flex justify-center py-10">
-                  <svg className="h-5 w-5 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+                  <svg className="h-5 w-5 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
@@ -534,55 +588,96 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                   <p className="mt-2 text-sm text-neutral-400">No registrations yet.</p>
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-xl border border-neutral-200">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-neutral-200 bg-neutral-50 text-left text-xs font-medium text-neutral-500">
-                        <th className="px-4 py-3">Name</th>
-                        <th className="px-4 py-3">Email</th>
-                        <th className="px-4 py-3">Status</th>
-                        <th className="px-4 py-3">Payment</th>
-                        <th className="px-4 py-3">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-neutral-100">
-                      {registrations.map((reg) => (
-                        <tr key={reg.id} className="hover:bg-neutral-50">
-                          <td className="px-4 py-3 text-neutral-900">
-                            {[reg.profiles?.first_name, reg.profiles?.last_name].filter(Boolean).join(" ") || "—"}
-                          </td>
-                          <td className="px-4 py-3 text-neutral-500">{reg.profiles?.email || "—"}</td>
-                          <td className="px-4 py-3">
-                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${regStatusColors[reg.status]}`}>
-                              {reg.status.charAt(0).toUpperCase() + reg.status.slice(1)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
+                <>
+                  {/* Mobile: stacked cards */}
+                  <div className="space-y-2 md:hidden">
+                    {registrations.map((reg) => (
+                      <div key={reg.id} className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-medium text-neutral-900 truncate">
+                              {[reg.profiles?.first_name, reg.profiles?.last_name].filter(Boolean).join(" ") || "—"}
+                            </p>
+                            <p className="mt-0.5 text-xs text-neutral-500 truncate">{reg.profiles?.email || "—"}</p>
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${regStatusColors[reg.status]}`}>
+                            {reg.status.charAt(0).toUpperCase() + reg.status.slice(1)}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between border-t border-neutral-100 pt-2 text-xs">
+                          <div className="flex items-center gap-2">
                             {reg.payments && reg.payments.length > 0 ? (
                               <>
-                                <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${payStatusColors[reg.payments[0].status]}`}>
+                                <span className={`inline-block rounded-full px-2 py-0.5 font-medium ${payStatusColors[reg.payments[0].status]}`}>
                                   {reg.payments[0].status.charAt(0).toUpperCase() + reg.payments[0].status.slice(1)}
                                 </span>
                                 {reg.payments[0].amount > 0 && (
-                                  <span className="ml-2 text-xs font-medium text-neutral-600">
-                                    ₹{(reg.payments[0].amount / 100).toFixed(0)}
-                                  </span>
+                                  <span className="font-medium text-neutral-600">₹{(reg.payments[0].amount / 100).toFixed(0)}</span>
                                 )}
                               </>
                             ) : (
-                              <span className="text-xs text-neutral-400">—</span>
+                              <span className="text-neutral-400">—</span>
                             )}
-                          </td>
-                          <td className="px-4 py-3 text-xs text-neutral-500">
-                            {new Date(reg.registered_at).toLocaleDateString("en-US", {
-                              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                            })}
-                          </td>
+                          </div>
+                          <span className="text-neutral-500">
+                            {new Date(reg.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop: table */}
+                  <div className="hidden overflow-x-auto rounded-xl border border-neutral-200 md:block">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-neutral-200 bg-neutral-50 text-left text-xs font-medium text-neutral-500">
+                          <th className="px-4 py-3">Name</th>
+                          <th className="px-4 py-3">Email</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Payment</th>
+                          <th className="px-4 py-3">Date</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100">
+                        {registrations.map((reg) => (
+                          <tr key={reg.id} className="hover:bg-neutral-50">
+                            <td className="px-4 py-3 text-neutral-900">
+                              {[reg.profiles?.first_name, reg.profiles?.last_name].filter(Boolean).join(" ") || "—"}
+                            </td>
+                            <td className="px-4 py-3 text-neutral-500">{reg.profiles?.email || "—"}</td>
+                            <td className="px-4 py-3">
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${regStatusColors[reg.status]}`}>
+                                {reg.status.charAt(0).toUpperCase() + reg.status.slice(1)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {reg.payments && reg.payments.length > 0 ? (
+                                <>
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${payStatusColors[reg.payments[0].status]}`}>
+                                    {reg.payments[0].status.charAt(0).toUpperCase() + reg.payments[0].status.slice(1)}
+                                  </span>
+                                  {reg.payments[0].amount > 0 && (
+                                    <span className="ml-2 text-xs font-medium text-neutral-600">
+                                      ₹{(reg.payments[0].amount / 100).toFixed(0)}
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-xs text-neutral-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-neutral-500">
+                              {new Date(reg.registered_at).toLocaleDateString("en-US", {
+                                month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                              })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -603,7 +698,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
 
                   {messagesLoading ? (
                     <div className="flex justify-center py-10">
-                      <svg className="h-5 w-5 animate-spin text-[#C2185B]" viewBox="0 0 24 24" fill="none">
+                      <svg className="h-5 w-5 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
@@ -620,7 +715,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                       {messages.map((msg) => (
                         <div key={msg.id} className="px-4 py-3 hover:bg-neutral-50 group">
                           {editingId === msg.id ? (
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap gap-2">
                               <input
                                 type="text"
                                 value={editText}
@@ -643,7 +738,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                             </div>
                           ) : (
                             <div className="flex items-start gap-3">
-                              <div className="h-8 w-8 shrink-0 rounded-full bg-[#C2185B]/10 flex items-center justify-center text-xs font-bold text-[#C2185B]">
+                              <div className="h-8 w-8 shrink-0 rounded-full bg-cluvo-primary/10 flex items-center justify-center text-xs font-bold text-cluvo-primary">
                                 {(msg.profiles?.first_name?.[0] || msg.profiles?.last_name?.[0] || "U").toUpperCase()}
                               </div>
                               <div className="flex-1 min-w-0">
@@ -732,19 +827,19 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
 
               {/* Send message */}
               {event.discussion_enabled && (
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     type="text"
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
                     placeholder="Type a message..."
-                    className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-[#C2185B] focus:ring-1 focus:ring-[#C2185B]"
+                    className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary"
                   />
                   <button
                     onClick={sendMessage}
                     disabled={sending || !newMessage.trim()}
-                    className="rounded-lg bg-[#C2185B] px-4 py-2 text-sm font-medium text-white hover:bg-[#A0154A] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full rounded-lg bg-cluvo-primary px-4 py-2 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50 disabled:cursor-not-allowed sm:w-auto"
                   >
                     {sending ? "Sending..." : "Send"}
                   </button>
@@ -759,13 +854,13 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                   {restrictedUsers.length > 0 && (
                     <div className="space-y-2 mb-3">
                       {restrictedUsers.map((ru) => (
-                        <div key={ru.id} className="flex items-center justify-between py-1.5 px-3 bg-neutral-50 rounded-lg">
-                          <span className="text-sm text-neutral-700">
+                        <div key={ru.id} className="flex items-center justify-between gap-2 py-1.5 px-3 bg-neutral-50 rounded-lg">
+                          <span className="min-w-0 truncate text-sm text-neutral-700">
                             {[ru.profiles?.first_name, ru.profiles?.last_name].filter(Boolean).join(" ") || ru.profiles?.email || ru.user_id}
                           </span>
                           <button
                             onClick={() => unrestrictUser(ru.id)}
-                            className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                            className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-800"
                           >
                             Unrestrict
                           </button>
