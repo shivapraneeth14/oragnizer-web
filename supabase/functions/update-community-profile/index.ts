@@ -84,6 +84,19 @@ Deno.serve(async (req) => {
       }
     }
 
+    const tooLong = (v: unknown, max: number) => typeof v === "string" && v.length > max
+    const lengthChecks: Array<[unknown, number, string]> = [
+      [name, 100, "Community name is too long (max 100 characters)."],
+      [description, 2000, "Description is too long (max 2000 characters)."],
+    ]
+    for (const [value, max, message] of lengthChecks) {
+      if (tooLong(value, max)) {
+        return new Response(JSON.stringify({ error: message }), {
+          status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
+    }
+
     if (contact_email !== undefined) {
       if (contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact_email)) {
         return new Response(JSON.stringify({ error: "Please enter a valid contact email." }), {

@@ -63,6 +63,12 @@ Deno.serve(async (req) => {
       .eq("id", community_id)
       .single()
 
+    if (!community) {
+      return new Response(JSON.stringify({ error: "Community not found." }), {
+        status: 404, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
     const now = new Date().toISOString()
     await supabase.from("communities").update({ deleted_at: now }).eq("id", community_id)
     await supabase.from("events").update({ deleted_at: now }).eq("community_id", community_id)

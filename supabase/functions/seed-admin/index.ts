@@ -30,6 +30,52 @@ Deno.serve(async (req) => {
   if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
+    // Authorization: this endpoint can create the first admin (bootstrap) and
+    // reset the admin password, so once any admin exists it must be an admin
+    // making the call.
+    const { data: existingAdmin, error: adminLookupErr } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("is_admin", true)
+      .limit(1)
+      .maybeSingle()
+
+    if (adminLookupErr) {
+      return new Response(JSON.stringify({ error: "Something went wrong." }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    if (existingAdmin) {
+      const authHeader = req.headers.get("Authorization")
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
+      const token = authHeader.slice(7)
+      const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "Invalid session" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
+      const { data: callerProfile } = await supabase
+        .from("profiles")
+        .select("is_admin")
+        .eq("id", user.id)
+        .maybeSingle()
+      if (!callerProfile?.is_admin) {
+        return new Response(JSON.stringify({ error: "Only an admin can run this" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
+    }
+
     const adminEmail = optionalEnv("ADMIN_EMAIL")
     const adminPassword = optionalEnv("ADMIN_PASSWORD")
 
@@ -51,6 +97,7 @@ Deno.serve(async (req) => {
         email: adminEmail,
         password: adminPassword,
         email_confirm: true,
+        app_metadata: { cluvo_provisioned: true },
         user_metadata: { first_name: "Admin", last_name: "User", username: "admin" },
       })
 
