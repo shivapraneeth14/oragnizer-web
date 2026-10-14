@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react"
 import { supabase } from "../../supabase"
-import { supabaseFetch } from "../../supabase-fetch"
 import { env } from "../../config"
 
 interface Props {
@@ -59,9 +58,6 @@ export default function PayoutSection({ communityId }: Props) {
   const [selectedPayout, setSelectedPayout] = useState<Transaction | null>(null)
   const [checkingPayout, setCheckingPayout] = useState(false)
 
-  const [withdrawAmount, setWithdrawAmount] = useState("")
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState("")
 
   const activeBeneficiary = beneficiaries.find((b) => b.is_active)
 
@@ -195,38 +191,6 @@ export default function PayoutSection({ communityId }: Props) {
     setTransactionsLoading(false)
   }
 
-  const handleWithdraw = async () => {
-    const rupees = parseFloat(withdrawAmount)
-    if (!withdrawAmount || isNaN(rupees) || rupees <= 0) {
-      setError("Enter a valid amount")
-      return
-    }
-    const amount = Math.round(rupees * 100)
-    if (amount <= 0 || amount > walletBalance) {
-      setError("Enter a valid amount within your balance")
-      return
-    }
-    if (!activeBeneficiary) {
-      setError("No active bank account")
-      return
-    }
-    setSubmitting(true)
-    setError("")
-    try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token
-      if (!token) { setError("Not authenticated"); return }
-      const res = await supabaseFetch("/functions/v1/withdraw-wallet", token, { community_id: communityId, amount })
-      const data = await res.json()
-      if (!res.ok) { setError(data.error || "Withdrawal failed"); return }
-      setWalletBalance((prev) => prev - amount)
-      setWithdrawAmount("")
-      loadData()
-    } catch {
-      setError("Something went wrong")
-    }
-    setSubmitting(false)
-  }
-
   const badge = statusBadge(selectedPayout?.status)
 
   const filteredTransactions = transactions.filter((t) => typeFilter === "all" || t.type === typeFilter)
@@ -263,28 +227,8 @@ export default function PayoutSection({ communityId }: Props) {
           </div>
         )}
 
-        <div className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <input
-              type="number"
-              value={withdrawAmount}
-              onChange={(e) => setWithdrawAmount(e.target.value)}
-              placeholder="Amount in rupees (e.g. 500 = ₹500)"
-              className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-cluvo-primary focus:outline-none"
-            />
-            <button onClick={handleWithdraw} disabled={submitting || !activeBeneficiary}
-              className="w-full rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50 sm:w-auto">
-              {submitting ? "Processing..." : "Withdraw"}
-            </button>
-          </div>
-          <p className="text-xs text-neutral-400">Enter amount in rupees (e.g. 500 = ₹500.00). Minimum withdrawal: ₹100.</p>
-          {!activeBeneficiary && beneficiaries.length === 0 && (
-            <p className="text-xs text-neutral-500">Add a bank account in Settings → Payment Accounts to start withdrawing funds.</p>
-          )}
-        </div>
+        <p className="text-sm text-neutral-500">Withdrawals are temporarily unavailable.</p>
       </div>
-
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
       <div className="mt-8">
         <h4 className="font-semibold text-neutral-800 mb-3">Transaction History</h4>
