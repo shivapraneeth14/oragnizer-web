@@ -72,7 +72,7 @@ async function processRefund(paymentId: string, amount: number, reason: string):
 async function retryPendingRefunds(): Promise<number> {
   const { data: dueRefunds, error: dueErr } = await supabase
     .from("payments")
-    .select("id, refund_status, refund_attempt_count")
+    .select("id, refund_status, refund_attempt_count, razorpay_refund_id, amount, refunded_amount")
     // 'refunded': cancellation refund failed. 'failed': money captured but
     // never confirmed (event cancelled) - owed back to the customer.
     // 'success': money captured AND refund attempt already failed - the
@@ -89,43 +89,43 @@ async function retryPendingRefunds(): Promise<number> {
   let handled = 0
   for (const pay of dueRefunds || []) {
     try {
-      const { data: payment } = await supabase
-        .from("payments")
-        .select("id, amount")
-        .eq("id", pay.id)
-        .single()
-      if (!payment) continue
-
-      if (pay.refund_status === "queued" && pay.refund_attempt_count < 5) {
-        // Refund already accepted by Razorpay — sync its real state instead
-        // of double-refunding. Find it via razorpay_refund_id.
-        const { data: known } = await supabase
-          .from("payments")
-          .select("razorpay_refund_id")
-          .eq("id", pay.id)
-          .single()
-        if (known?.razorpay_refund_id) {
-          const refund = await razorpayGet(`refunds/${known.razorpay_refund_id}`).catch(() => null)
-          if (refund?.status === "processed") {
-            await supabase.from("payments").update({
-              refund_status: "processed",
-              status: "refunded",
-              refunded_amount: refund.amount,
-            }).eq("id", pay.id)
-            handled++
-            continue
-          }
-          if (refund?.status === "failed" || refund?.status === "cancelled") {
-            await supabase.from("payments").update({
-              refund_status: "failed",
-              refund_attempt_count: (pay.refund_attempt_count ?? 0) + 1,
-            }).eq("id", pay.id)
-          }
+      // A refund already accepted by Razorpay (we hold its id) is synced from
+      // the provider, never re-issued. Without this, a refund the provider is
+      // still settling ('pending'/'initiated') - or one an older flow left as
+      // 'pending' - stays pending forever: claim_payment_refund answers
+      // already_refunded, so processRefund would be a silent no-op.
+      const inFlight = pay.refund_status === "queued" ||
+        pay.refund_status === "pending" ||
+        pay.refund_status === "requested"
+      if (inFlight && pay.razorpay_refund_id) {
+        const refund = await razorpayGet(`refunds/${pay.razorpay_refund_id}`).catch(() => null)
+        if (refund?.status === "processed") {
+          await supabase.from("payments").update({
+            refund_status: "processed",
+            status: "refunded",
+            refunded_amount: refund.amount ?? pay.refunded_amount ?? pay.amount,
+            refund_claim_state: "issued",
+          }).eq("id", pay.id)
+          handled++
+          continue
         }
+        if (refund?.status === "failed" || refund?.status === "cancelled") {
+          await supabase.from("payments").update({
+            refund_status: "failed",
+            refund_attempt_count: (pay.refund_attempt_count ?? 0) + 1,
+          }).eq("id", pay.id)
+          handled++
+          continue
+        }
+        // Still pending/initiated at Razorpay - leave it, retry next cycle.
         continue
       }
 
-      await processRefund(pay.id, payment.amount, "reconcile_refund_retry")
+      // No provider refund yet, or the last one failed: issue/retry one. Use
+      // the amount we already owe the customer (a self-cancel refunds the
+      // ticket only, keeping the platform fee), falling back to the full amount.
+      const retryAmount = Number(pay.refunded_amount ?? pay.amount ?? 0)
+      await processRefund(pay.id, retryAmount, "reconcile_refund_retry")
       handled++
     } catch (err) {
       console.error(`Refund retry failed for ${pay.id}:`, err)
