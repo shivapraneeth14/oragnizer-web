@@ -8,6 +8,7 @@ import { reverseGeocode, searchPlaces } from "../../lib/geocode"
 import type { PlaceResult } from "../../lib/geocode"
 import type { EventFormData, DescriptionFields } from "../../hooks/use-events"
 import { emptyForm, composeDescription, parseDescription, emptyDescriptionFields } from "../../hooks/use-events"
+import DropdownSelect from "../dropdown-select"
 
 interface Props {
   initial?: EventFormData
@@ -17,6 +18,12 @@ interface Props {
 }
 
 const DEFAULT_CENTER: LatLngLiteral = { lat: 17.385, lng: 78.4867 }
+
+const eventCategories = [
+  "Music", "Technology", "Comedy", "Workshops", "Wellness",
+  "Art & Culture", "Sports & Fitness", "Food & Drink",
+  "Business & Finance", "Education", "Social & Community", "Other",
+]
 
 const pinIcon = L.divIcon({
   className: "",
@@ -59,7 +66,7 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
   const [form, setForm] = useState<EventFormData>(initial || emptyForm)
   const [uploading, setUploading] = useState(false)
   const [locating, setLocating] = useState(false)
-  const [errors, setErrors] = useState<{ start?: string; end?: string; location?: string }>({})
+  const [errors, setErrors] = useState<{ start?: string; end?: string; location?: string; category?: string }>({})
   const [descFields, setDescFields] = useState<DescriptionFields>(() =>
     initial?.description ? parseDescription(initial.description) : emptyDescriptionFields
   )
@@ -169,6 +176,9 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
     if (!form.title.trim()) return
 
     const errs: typeof errors = {}
+    if (!form.category) {
+      errs.category = "Category is required"
+    }
     if (!form.latitude || !form.longitude) {
       errs.location = "Drop a pin on the map for the event location"
     }
@@ -435,6 +445,20 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
             </div>
           </div>
 
+          {/* Category */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-neutral-500">Category</label>
+            <DropdownSelect
+              value={form.category}
+              onChange={(v) => { setErrors((p) => ({ ...p, category: undefined })); update("category", v) }}
+              options={eventCategories.map((c) => ({ value: c, label: c }))}
+              placeholder="Select a category"
+              readOnly
+              emptyText="No matching category"
+            />
+            {errors.category && <p className="mt-1 text-xs text-red-500">{errors.category}</p>}
+          </div>
+
           {/* Status */}
           <div>
             <label className="mb-1 block text-xs font-medium text-neutral-500">Status</label>
@@ -485,7 +509,7 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
             >
               Cancel
             </button>
-            <button type="submit" disabled={saving || locating || !form.title.trim()}
+            <button type="submit" disabled={saving || locating || !form.title.trim() || !form.category}
               className="w-full rounded-lg bg-cluvo-primary px-4 py-2 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50 sm:w-auto"
             >
               {saving ? "Saving..." : locating ? "Locating..." : isEditing ? "Save changes" : "Create event"}
