@@ -13,6 +13,7 @@ interface Props {
   placeholder?: string
   disabled?: boolean
   freeInput?: boolean
+  readOnly?: boolean
   emptyText?: string
 }
 
@@ -32,6 +33,7 @@ export default function DropdownSelect({
   placeholder = "Select...",
   disabled = false,
   freeInput = false,
+  readOnly = false,
   emptyText = "No matching options",
 }: Props) {
   const [open, setOpen] = useState(false)
@@ -43,7 +45,7 @@ export default function DropdownSelect({
   const inputRef = useRef<HTMLInputElement>(null)
 
   const selectedLabel = options.find((o) => o.value === value)?.label ?? ""
-  const display = freeInput ? value : open ? query : selectedLabel
+  const display = freeInput ? value : readOnly ? selectedLabel : open ? query : selectedLabel
   const filtered = options.filter((o) =>
     o.label.toLowerCase().includes(query.trim().toLowerCase())
   )
@@ -129,11 +131,12 @@ export default function DropdownSelect({
         ref={inputRef}
         value={display}
         disabled={disabled}
+        readOnly={readOnly}
         placeholder={placeholder}
         autoComplete="off"
         onFocus={() => !disabled && setOpen(true)}
         onChange={(e) => {
-          if (disabled) return
+          if (disabled || readOnly) return
           setQuery(e.target.value)
           setOpen(true)
           if (freeInput) onChange(e.target.value)

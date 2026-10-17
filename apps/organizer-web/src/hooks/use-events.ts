@@ -6,6 +6,7 @@ export type EventFormData = {
   title: string
   description: string
   image_url: string
+  category: string
   start_date: string
   end_date: string
   location: string
@@ -63,7 +64,7 @@ export const emptyDescriptionFields: DescriptionFields = {
 }
 
 export const emptyForm: EventFormData = {
-  title: "", description: "", image_url: "",
+  title: "", description: "", image_url: "", category: "",
   start_date: "", end_date: "",
   location: "", latitude: "", longitude: "", capacity: "", price: "",
   status: "draft",
@@ -76,6 +77,7 @@ export function eventToForm(e: Event): EventFormData {
     title: e.title,
     description: e.description || "",
     image_url: e.image_url || "",
+    category: e.category || "",
     start_date: toDatetimeLocal(e.start_date),
     end_date: e.end_date ? toDatetimeLocal(e.end_date) : "",
     location: e.location || "",
@@ -149,12 +151,14 @@ export function useEvents(communityId: string | undefined) {
     if (!data.end_date) return "End date is required"
     const endDate = new Date(data.end_date)
     if (!endDate.getTime() || endDate <= startDate) return "End date must be after start date"
+    if (!data.category) return "Category is required"
 
     const { error } = await supabase.from("events").insert({
       community_id: communityId,
       title: data.title.trim(),
       description: data.description.trim() || null,
       image_url: data.image_url || null,
+      category: data.category.trim() || null,
       start_date: new Date(data.start_date).toISOString(),
       end_date: data.end_date ? new Date(data.end_date).toISOString() : null,
       location: data.location.trim() || null,
@@ -179,11 +183,13 @@ export function useEvents(communityId: string | undefined) {
     if (!endDate.getTime() || (data.start_date && endDate <= new Date(data.start_date))) {
       return "End date must be after start date"
     }
+    if (!data.category) return "Category is required"
 
     const { error } = await supabase.from("events").update({
       title: data.title.trim(),
       description: data.description.trim() || null,
       image_url: data.image_url || null,
+      category: data.category.trim() || null,
       start_date: new Date(data.start_date).toISOString(),
       end_date: data.end_date ? new Date(data.end_date).toISOString() : null,
       location: data.location.trim() || null,

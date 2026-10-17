@@ -64,6 +64,7 @@ export interface Event {
   title: string
   description: string | null
   image_url: string | null
+  category: string | null
   start_date: string
   end_date: string | null
   location: string | null
