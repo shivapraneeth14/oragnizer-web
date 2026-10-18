@@ -4,8 +4,9 @@ import { supabase } from "../supabase"
 import { useAuth } from "../auth-context"
 import EmailFirst from "../components/email-first"
 import NewUserFlow from "../components/new-user-flow"
+import OrganizerConsentGate from "../components/organizer-consent-gate"
 
-type Flow = "auth" | "new"
+type Flow = "auth" | "new" | "consent"
 
 const features = [
   {
@@ -87,7 +88,40 @@ export default function LandingPage() {
       if (runId !== runIdRef.current) return
       const ownsCommunity = Array.isArray(communityRes) && communityRes.length > 0
       if (ownsCommunity) {
-        window.location.href = "/dashboard"
+        // Organizer consent gate: existing organizers must have a consent
+        // record for the CURRENT policy version before entering the dashboard
+        // (closes the "existing organizer skips the terms checkbox" bypass).
+        let upToDate = false
+        try {
+          const { data: { session } } = await supabase.auth.getSession()
+          if (session?.access_token) {
+            const { env } = await import("../config")
+            const res = await fetch(`${env.supabaseUrl}/functions/v1/record-consent`, {
+              method: "GET",
+              headers: { Authorization: `Bearer ${session.access_token}` },
+            })
+            if (res.ok) {
+              const data = await res.json().catch(() => ({}))
+              upToDate = data?.upToDate === true
+            } else {
+              // Server reachable but rejected — treat as not up to date so
+              // the user can re-accept (record-consent POST is idempotent).
+              upToDate = false
+            }
+          }
+        } catch {
+          // Network error: fail open to the dashboard to avoid locking the
+          // organizer out offline. Server-side booking/payment functions
+          // still enforce the presence of a consent record.
+          upToDate = true
+        }
+        if (runId !== runIdRef.current) return
+        if (upToDate) {
+          window.location.href = "/dashboard"
+          return
+        }
+        setFlow("consent")
+        setCheckingSession(false)
         return
       }
       // Not an organizer yet — send them straight to the community form. There
@@ -147,6 +181,9 @@ export default function LandingPage() {
 
                 {flow === "auth" && <EmailFirst />}
                 {flow === "new" && <NewUserFlow onBack={() => setFlow("auth")} />}
+                {flow === "consent" && (
+                  <OrganizerConsentGate onBack={() => setFlow("auth")} />
+                )}
               </div>
             </div>
           </div>

@@ -1,7 +1,8 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { feeBreakdown } from "../_shared/fees.ts"
+import { platformFeeForTicket } from "../_shared/fees.ts"
+import { hasConsentRecord } from "../_shared/consent.ts"
 import {
   clearRefundFieldsForRequote,
   paymentNonRequotableReason,
@@ -109,6 +110,13 @@ Deno.serve(async (req) => {
     const rl = await checkRateLimit(user.id, "create-payment")
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
+    // Server-side consent backstop: no payment without a recorded policy
+    // consent (see _shared/consent.ts). Version re-prompting is the client
+    // consent gate's job — any recorded version satisfies this check.
+    if (!(await hasConsentRecord(supabase, user.id))) {
+      return new Response(JSON.stringify({ error: "Please accept the Privacy Policy and Terms of Service to continue." }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
     const { event_id, coupon_code } = await req.json()
     if (!event_id) return new Response(JSON.stringify({ error: "event_id is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
@@ -129,10 +137,9 @@ Deno.serve(async (req) => {
 
     const { data: community } = await supabase
       .from("communities")
-      .select("id, platform_fee_amount")
+      .select("id, commission_percent")
       .eq("id", event.community_id)
       .maybeSingle()
-    const fee = feeBreakdown(community?.platform_fee_amount)
 
     const { data: existing } = await supabase
       .from("registrations")
@@ -201,6 +208,9 @@ Deno.serve(async (req) => {
     if (ticket <= 0) {
       return new Response(JSON.stringify({ error: "Coupon covers the full ticket. Register for free instead." }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
+    // Fee-on-top: charge = ticket + commission_percent of ticket (no GST).
+    // Split persisted once, at order creation; confirm_payment reads it back.
+    const fee = platformFeeForTicket(ticket, community?.commission_percent)
     const finalAmount = ticket + fee.total
 
     // --- Reuse a valid in-flight order (Path C: if the money already landed,
@@ -271,7 +281,7 @@ Deno.serve(async (req) => {
               status: "pending",
               amount: finalAmount,
               platform_fee: fee.total,
-              platform_fee_gst: fee.gst,
+              platform_fee_gst: null,
               coupon_id: couponId,
               attempt_count: attemptCount,
               created_at: new Date().toISOString(),
@@ -284,7 +294,7 @@ Deno.serve(async (req) => {
               registration_id: registrationId,
               amount: finalAmount,
               platform_fee: fee.total,
-              platform_fee_gst: fee.gst,
+              platform_fee_gst: null,
               razorpay_order_id: order.id,
               status: "pending",
               coupon_id: couponId,

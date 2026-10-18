@@ -49,18 +49,29 @@ Deno.serve(async (req) => {
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
     let id: string | undefined
+    let includeDeleted = false
+    let deletedOnly = false
     try {
       const body = await req.json()
       id = typeof body?.id === "string" ? body.id : undefined
+      includeDeleted = body?.include_deleted === true
+      deletedOnly = body?.deleted_only === true
     } catch (_) {
       id = undefined
     }
+    // A single-id fetch (detail page) always includes deleted users so an
+    // admin can open and restore them; list views default to active-only.
+    if (id) includeDeleted = true
 
     let query = supabase
       .from("profiles")
-      .select("id, email, first_name, last_name, username, avatar_url, is_admin, created_at")
-      .is("deleted_at", null)
+      .select("id, email, first_name, last_name, username, avatar_url, is_admin, created_at, deleted_at")
       .order("created_at", { ascending: false })
+    if (deletedOnly) {
+      query = query.not("deleted_at", "is", null)
+    } else if (!includeDeleted) {
+      query = query.is("deleted_at", null)
+    }
     if (id) query = query.eq("id", id)
 
     const { data, error } = await query

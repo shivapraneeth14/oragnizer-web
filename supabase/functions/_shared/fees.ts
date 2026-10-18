@@ -1,16 +1,15 @@
-// Fee-on-top pricing — the ONE place edge functions compute money.
+// Percent platform fee — the ONE place edge functions compute money.
 //
-//   ticket = price after coupon discount
-//   fee    = communities.platform_fee_amount (flat, pre-GST, default ₹20)
-//   gst    = 18% of fee, charged to the customer as part of the fee
-//   charged to customer = ticket + fee + gst
-//   organizer share     = ticket
+//   ticket (T) = price after coupon discount
+//   fee (F)    = round(T * communities.commission_percent / 100), charged ON TOP
+//   charged to customer = T + F        -> payments.amount
+//   organizer share     = T            -> payments.organizer_share
+//   platform fee        = F            -> payments.platform_fee (no GST)
 //
 // Everything is integer paise. Callers persist the breakdown on the payment
 // row at order creation; confirm_payment and every refund path READ those
 // columns instead of recomputing (never let the same money math exist twice).
-export const PLATFORM_FEE_GST_PERCENT = 18
-export const DEFAULT_PLATFORM_FEE_AMOUNT = 2000
+export const DEFAULT_COMMISSION_PERCENT = 6
 
 export interface FeeBreakdown {
   net: number
@@ -18,16 +17,15 @@ export interface FeeBreakdown {
   total: number
 }
 
-export function feeBreakdown(feeAmountPaise: number | null | undefined): FeeBreakdown {
-  const raw = feeAmountPaise ?? DEFAULT_PLATFORM_FEE_AMOUNT
+/** Platform fee for one ticket: commission_percent of the (post-coupon) ticket. */
+export function platformFeeForTicket(
+  ticketPaise: number,
+  commissionPercent: number | null | undefined,
+): FeeBreakdown {
+  const raw = commissionPercent ?? DEFAULT_COMMISSION_PERCENT
   const parsed = Number(raw)
-  const net = Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : DEFAULT_PLATFORM_FEE_AMOUNT
-  const gst = Math.round((net * PLATFORM_FEE_GST_PERCENT) / 100)
-  return { net, gst, total: net + gst }
-}
-
-/** Total the customer is charged for one ticket (ticket paise + fee + GST). */
-export function chargeForTicket(ticketPaise: number, feeAmountPaise: number | null | undefined): number {
-  if (ticketPaise <= 0) return 0
-  return ticketPaise + feeBreakdown(feeAmountPaise).total
+  const pct = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 0), 100) : DEFAULT_COMMISSION_PERCENT
+  const ticket = Number.isFinite(Number(ticketPaise)) ? Math.max(0, Math.trunc(Number(ticketPaise))) : 0
+  const net = Math.round((ticket * pct) / 100)
+  return { net, gst: 0, total: net }
 }

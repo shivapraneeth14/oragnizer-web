@@ -1,7 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { isOrganizerAccount, NOT_ORGANIZER_MESSAGE } from "../_shared/organizer.ts"
+import { isOrganizerAccount, NOT_ORGANIZER_MESSAGE, SUSPENDED_MESSAGE } from "../_shared/organizer.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -48,6 +48,20 @@ Deno.serve(async (req) => {
     }
 
     const user = data.user
+
+    // Soft-deleted (admin-blocked) accounts are rejected here so the portal
+    // shows the suspension message and kills the session. GoTrue's auth ban
+    // (set by admin-delete-user) already blocks fresh sign-ins; this covers
+    // sessions that outlive the deletion.
+    const { data: callerProfile } = await supabase
+      .from("profiles")
+      .select("deleted_at")
+      .eq("id", user.id)
+      .maybeSingle()
+    if (callerProfile?.deleted_at) {
+      return jsonResponse({ organizer: false, message: SUSPENDED_MESSAGE }, 403)
+    }
+
     // Organizer access is decided purely by ownership/admin — never by the
     // sign-in provider. Google is used both for new-organizer onboarding and
     // for ordinary customer accounts, so provider is not a valid signal.

@@ -162,6 +162,28 @@ Deno.serve(async (req) => {
 
     if (communityError) {
       console.error("Community creation failed:", communityError)
+
+      // Race condition: another request created a community for this owner
+      // (or name/email uniqueness via DB constraints)
+      if ((communityError as any).code === "23505") {
+        const msg = (communityError as any).message || ""
+        if (msg.includes("communities_owner_id_key") || msg.includes("owner_unique") || msg.includes("owner_id")) {
+          return new Response(JSON.stringify({ error: "You already own a community. Each account can only create one." }), {
+            status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
+          })
+        }
+        if (msg.includes("name") || msg.includes("communities_name")) {
+          return new Response(JSON.stringify({ error: "This community name is already taken. Try another." }), {
+            status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
+          })
+        }
+        if (msg.includes("contact_email") || msg.includes("communities_contact_email")) {
+          return new Response(JSON.stringify({ error: "This contact email is already associated with another community." }), {
+            status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
+          })
+        }
+      }
+
       return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
         status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
