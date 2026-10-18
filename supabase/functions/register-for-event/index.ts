@@ -1,5 +1,6 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
+import { hasConsentRecord } from "../_shared/consent.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -38,6 +39,14 @@ Deno.serve(async (req) => {
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Invalid session. Please sign in again." }), {
         status: 401, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    // Server-side consent backstop: no registration without a recorded policy
+    // consent (see _shared/consent.ts). Any recorded version suffices.
+    if (!(await hasConsentRecord(supabase, user.id))) {
+      return new Response(JSON.stringify({ error: "Please accept the Privacy Policy and Terms of Service to continue." }), {
+        status: 403, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 

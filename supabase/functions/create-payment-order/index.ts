@@ -1,8 +1,9 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { feeBreakdown } from "../_shared/fees.ts"
+import { platformFeeForTicket } from "../_shared/fees.ts"
 import { clearRefundFieldsForRequote, paymentNonRequotableReason } from "../_shared/payments.ts"
+import { hasConsentRecord } from "../_shared/consent.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -63,6 +64,12 @@ Deno.serve(async (req) => {
     const rl = await checkRateLimit(user.id, "create-payment-order")
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
+    // Server-side consent backstop: no payment order without a recorded
+    // policy consent (see _shared/consent.ts). Any recorded version suffices.
+    if (!(await hasConsentRecord(supabase, user.id))) {
+      return new Response(JSON.stringify({ error: "Please accept the Privacy Policy and Terms of Service to continue." }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
     const { registration_id, coupon_code } = await req.json()
     if (!registration_id) return new Response(JSON.stringify({ error: "registration_id is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
@@ -90,10 +97,9 @@ Deno.serve(async (req) => {
 
     const { data: community } = await supabase
       .from("communities")
-      .select("id, platform_fee_amount")
+      .select("id, commission_percent")
       .eq("id", event.community_id)
       .maybeSingle()
-    const fee = feeBreakdown(community?.platform_fee_amount)
 
     const amount = event.price
     let ticket = amount
@@ -130,11 +136,13 @@ Deno.serve(async (req) => {
       pendingCouponId = coupon.id
     }
 
-    // Fee-on-top: charge = ticket + flat fee + 18% GST. Split persisted once,
-    // at order creation; confirm_payment only reads it back.
     if (ticket <= 0) {
       return new Response(JSON.stringify({ error: "Coupon covers the full ticket. Register for free instead." }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
+
+    // Fee-on-top: charge = ticket + commission_percent of ticket (no GST).
+    // Split persisted once, at order creation; confirm_payment reads it back.
+    const fee = platformFeeForTicket(ticket, community?.commission_percent)
     const finalAmount = ticket + fee.total
 
     // Check for existing payment — reuse valid order, avoid duplicate
@@ -192,7 +200,7 @@ Deno.serve(async (req) => {
             status: "pending",
             amount: finalAmount,
             platform_fee: fee.total,
-            platform_fee_gst: fee.gst,
+            platform_fee_gst: null,
             coupon_id: couponId,
             attempt_count: attemptCount,
             created_at: new Date().toISOString(),
@@ -206,7 +214,7 @@ Deno.serve(async (req) => {
             registration_id,
             amount: finalAmount,
             platform_fee: fee.total,
-            platform_fee_gst: fee.gst,
+            platform_fee_gst: null,
             razorpay_order_id: order.id,
             status: "pending",
             coupon_id: couponId,
@@ -224,7 +232,9 @@ Deno.serve(async (req) => {
       if (err?.code === "23505") {
         // Concurrent double-tap: another request won the payment row. Release
         // THIS call's claim — the winner's claim is the one tied to the row.
-        if (couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId }).catch(() => {})
+        if (couponId) {
+          try { await supabase.rpc("release_coupon", { p_coupon_id: couponId }) } catch { /* best-effort */ }
+        }
         const { data: recovered } = await supabase
           .from("payments")
           .select("razorpay_order_id")
@@ -235,7 +245,9 @@ Deno.serve(async (req) => {
         }
       }
       // Any other failure (provider, insert) → release the claim, then rethrow.
-      if (couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId }).catch(() => {})
+      if (couponId) {
+        try { await supabase.rpc("release_coupon", { p_coupon_id: couponId }) } catch { /* best-effort */ }
+      }
       throw err
     }
   } catch (err) {

@@ -7,18 +7,29 @@ import { supabase } from "../supabase"
 export type AdminProfile = Pick<
   Profile,
   "id" | "email" | "first_name" | "last_name" | "username" | "avatar_url" | "is_admin" | "created_at"
->
+> & { deleted_at: string | null }
 
-export async function fetchAdminProfiles(id?: string): Promise<AdminProfile[]> {
+export interface AdminProfileFilter {
+  /** Return deleted users too (single-id fetches always do). */
+  includeDeleted?: boolean
+  /** Return ONLY deleted users. */
+  deletedOnly?: boolean
+}
+
+export async function fetchAdminProfiles(id?: string, filter?: AdminProfileFilter): Promise<AdminProfile[]> {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) return []
   const { supabaseFetch } = await import("../supabase-fetch")
+  const body: Record<string, unknown> = {}
+  if (id) body.id = id
+  if (filter?.includeDeleted) body.include_deleted = true
+  if (filter?.deletedOnly) body.deleted_only = true
   const res = await supabaseFetch(
     "/functions/v1/admin-list-profiles",
     session.access_token,
-    id ? { id } : {},
+    body,
   )
   if (!res.ok) return []
-  const body = await res.json().catch(() => null)
-  return (body?.profiles ?? []) as AdminProfile[]
+  const parsed = await res.json().catch(() => null)
+  return (parsed?.profiles ?? []) as AdminProfile[]
 }

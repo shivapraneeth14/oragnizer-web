@@ -69,20 +69,35 @@ Deno.serve(async (req) => {
 
     const { data: profileData } = await supabase
       .from("profiles")
-      .select("*")
+      .select("id, email, deleted_at")
       .eq("id", user_id)
       .single()
+
+    if (!profileData) {
+      return new Response(JSON.stringify({ error: "User not found." }), {
+        status: 404, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+    if (profileData.deleted_at) {
+      return new Response(JSON.stringify({ error: "User is already deleted." }), {
+        status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
 
     const now = new Date().toISOString()
     await supabase.from("profiles").update({ deleted_at: now }).eq("id", user_id)
     await supabase.auth.admin.signOut(user_id)
+    // Auth-level ban: blocks fresh sign-ins (password AND Google OAuth) on every
+    // client — the soft-delete timestamp alone is never consulted by GoTrue.
+    // ~10 years: effectively permanent but reversible via admin-undelete-user.
+    await supabase.auth.admin.updateUserById(user_id, { ban_duration: "87600h" })
 
     await supabase.from("audit_log").insert({
       actor_id: user.id,
       action: "user_deleted",
       target_type: "user",
       target_id: user_id,
-      details: { profile_data: profileData },
+      details: { email: profileData.email },
     })
 
     return new Response(JSON.stringify({ success: true }), {

@@ -1,20 +1,26 @@
-import { useEffect, useState } from "react"
-import { useParams, Link, useNavigate } from "react-router-dom"
+import { useCallback, useEffect, useState } from "react"
+import { useParams, Link } from "react-router-dom"
 import { supabase } from "../supabase"
 import { fetchAdminProfiles, type AdminProfile } from "../lib/admin-profiles"
 import type { Community, CommunityMember, Registration, Event } from "shared"
 
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
   const [profile, setProfile] = useState<AdminProfile | null>(null)
   const [ownedCommunities, setOwnedCommunities] = useState<Community[]>([])
   const [memberships, setMemberships] = useState<(CommunityMember & { community_name?: string })[]>([])
   const [registrations, setRegistrations] = useState<(Registration & { event_title?: string })[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [deleteError, setDeleteError] = useState("")
+  const [actionError, setActionError] = useState("")
+
+  const loadProfile = useCallback(async () => {
+    if (!id) return
+    const adminProfiles = await fetchAdminProfiles(id)
+    setProfile(adminProfiles[0] ?? null)
+  }, [id])
 
   useEffect(() => {
     if (!id) return
@@ -35,16 +41,33 @@ export default function UserDetailPage() {
   const handleDelete = async () => {
     if (!id) return
     setDeleting(true)
-    setDeleteError("")
+    setActionError("")
     const { data: { session } } = await supabase.auth.getSession()
     const { supabaseFetch } = await import("../supabase-fetch")
     const res = await supabaseFetch("/functions/v1/admin-delete-user", session?.access_token, { user_id: id })
     const result = await res.json()
     setDeleting(false)
     if (result.success) {
-      navigate("/users", { replace: true })
+      setConfirmDelete(false)
+      await loadProfile()
     } else {
-      setDeleteError(result.error || "Something went wrong.")
+      setActionError(result.error || "Something went wrong.")
+    }
+  }
+
+  const handleRestore = async () => {
+    if (!id) return
+    setRestoring(true)
+    setActionError("")
+    const { data: { session } } = await supabase.auth.getSession()
+    const { supabaseFetch } = await import("../supabase-fetch")
+    const res = await supabaseFetch("/functions/v1/admin-undelete-user", session?.access_token, { user_id: id })
+    const result = await res.json()
+    setRestoring(false)
+    if (result.success) {
+      await loadProfile()
+    } else {
+      setActionError(result.error || "Something went wrong.")
     }
   }
 
@@ -68,6 +91,8 @@ export default function UserDetailPage() {
     )
   }
 
+  const isDeleted = Boolean(profile.deleted_at)
+
   return (
     <div className="space-y-6">
       <Link to="/users" className="text-sm text-neutral-500 hover:text-cluvo-primary">&larr; Back to Users</Link>
@@ -88,15 +113,36 @@ export default function UserDetailPage() {
             {profile.is_admin && (
               <span className="rounded-full bg-cluvo-primary/10 px-3 py-1 text-xs font-medium text-cluvo-primary">Admin</span>
             )}
-            <button
-              onClick={() => { setConfirmDelete(true); setDeleteError("") }}
-              className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
-            >
-              Delete
-            </button>
+            {isDeleted && (
+              <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-600">Deleted</span>
+            )}
+            {isDeleted ? (
+              <button
+                onClick={handleRestore}
+                disabled={restoring}
+                className="rounded-lg bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
+              >
+                {restoring ? "Restoring..." : "Restore"}
+              </button>
+            ) : (
+              <button
+                onClick={() => { setConfirmDelete(true); setActionError("") }}
+                className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
+              >
+                Delete
+              </button>
+            )}
           </div>
         </div>
-        <div className="mt-4 text-sm text-neutral-500">Joined {new Date(profile.created_at).toLocaleDateString()}</div>
+        <div className="mt-4 text-sm text-neutral-500">
+          Joined {new Date(profile.created_at).toLocaleDateString()}
+          {isDeleted && (
+            <span className="ml-2 text-red-600">· Deleted {new Date(profile.deleted_at!).toLocaleDateString()}</span>
+          )}
+        </div>
+        {actionError && (
+          <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{actionError}</div>
+        )}
       </div>
 
       <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-soft sm:p-6">
@@ -184,10 +230,10 @@ export default function UserDetailPage() {
           <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-xl bg-white p-5 shadow-strong sm:p-6">
             <h4 className="text-sm font-semibold text-neutral-900">Delete User</h4>
             <p className="mt-2 text-sm text-neutral-500">
-              Permanently delete {profile.first_name} {profile.last_name} ({profile.email})? Their profile will be hidden and their session revoked.
+              Delete {profile.first_name} {profile.last_name} ({profile.email})? They will no longer be able to sign in. You can restore them later.
             </p>
-            {deleteError && (
-              <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{deleteError}</div>
+            {actionError && (
+              <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{actionError}</div>
             )}
             <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button

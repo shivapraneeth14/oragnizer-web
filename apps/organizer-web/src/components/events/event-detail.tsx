@@ -11,7 +11,7 @@ interface RegistrationWithDetails {
   status: "pending" | "confirmed" | "cancelled" | "attended"
   registered_at: string
   profiles: Pick<Profile, "email" | "first_name" | "last_name">
-  payments: Pick<Payment, "amount" | "status">[] | null
+  payments: Pick<Payment, "amount" | "organizer_share" | "status">[] | null
 }
 
 interface MessageWithProfile {
@@ -148,7 +148,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
   const loadRegistrations = useCallback(async () => {
     const { data, error } = await supabase
       .from("registrations")
-      .select("id, user_id, status, registered_at, profiles(first_name, last_name), payments(amount, status)")
+      .select("id, user_id, status, registered_at, profiles(first_name, last_name), payments(amount, organizer_share, status)")
       .eq("event_id", event.id)
       .is("deleted_at", null)
       .order("registered_at", { ascending: false })
@@ -612,7 +612,9 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                                   {reg.payments[0].status.charAt(0).toUpperCase() + reg.payments[0].status.slice(1)}
                                 </span>
                                 {reg.payments[0].amount > 0 && (
-                                  <span className="font-medium text-neutral-600">₹{(reg.payments[0].amount / 100).toFixed(0)}</span>
+                                  <span className="font-medium text-neutral-600" title="Credited to your wallet">
+                                    ₹{(((reg.payments[0].organizer_share ?? reg.payments[0].amount) as number) / 100).toFixed(0)}
+                                  </span>
                                 )}
                               </>
                             ) : (

@@ -1,17 +1,43 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { fetchAdminProfiles, type AdminProfile } from "../lib/admin-profiles"
+
+type UserFilter = "active" | "deleted" | "all"
+
+const FILTERS: { key: UserFilter; label: string }[] = [
+  { key: "active", label: "Active" },
+  { key: "deleted", label: "Deleted" },
+  { key: "all", label: "All" },
+]
+
+function StatusBadge({ user }: { user: AdminProfile }) {
+  if (user.deleted_at) {
+    return (
+      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">Deleted</span>
+    )
+  }
+  return <span className="text-neutral-400">—</span>
+}
 
 export default function UsersPage() {
   const [users, setUsers] = useState<AdminProfile[]>([])
   const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<UserFilter>("active")
 
-  useEffect(() => {
-    fetchAdminProfiles().then((profiles) => {
+  const load = useCallback((f: UserFilter) => {
+    setLoading(true)
+    fetchAdminProfiles(undefined, {
+      includeDeleted: f === "all",
+      deletedOnly: f === "deleted",
+    }).then((profiles) => {
       setUsers(profiles)
       setLoading(false)
     }, () => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    load(filter)
+  }, [filter, load])
 
   if (loading) {
     return (
@@ -26,12 +52,33 @@ export default function UsersPage() {
 
   return (
     <div>
-      <h3 className="text-xl font-semibold text-neutral-900">All Users</h3>
-      <p className="mt-2 text-sm text-neutral-500">View and manage all registered users.</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-xl font-semibold text-neutral-900">All Users</h3>
+          <p className="mt-2 text-sm text-neutral-500">View and manage all registered users.</p>
+        </div>
+        <div className="flex items-center gap-1 self-start rounded-lg border border-neutral-200 bg-white p-1">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                filter === f.key
+                  ? "bg-cluvo-primary text-white"
+                  : "text-neutral-600 hover:bg-neutral-50"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {users.length === 0 ? (
         <div className="mt-8 rounded-xl border border-neutral-200 bg-white p-8 text-center">
-          <p className="text-sm text-neutral-500">No users yet.</p>
+          <p className="text-sm text-neutral-500">
+            {filter === "deleted" ? "No deleted users." : filter === "all" ? "No users yet." : "No active users."}
+          </p>
         </div>
       ) : (
         <>
@@ -40,9 +87,14 @@ export default function UsersPage() {
               <Link key={u.id} to={`/users/${u.id}`} className="block rounded-xl border border-neutral-200 bg-white p-4">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-cluvo-primary">{u.first_name} {u.last_name}</span>
-                  {u.is_admin && (
-                    <span className="rounded-full bg-cluvo-primary/10 px-2 py-0.5 text-xs font-medium text-cluvo-primary">Admin</span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {u.is_admin && (
+                      <span className="rounded-full bg-cluvo-primary/10 px-2 py-0.5 text-xs font-medium text-cluvo-primary">Admin</span>
+                    )}
+                    {u.deleted_at && (
+                      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">Deleted</span>
+                    )}
+                  </div>
                 </div>
                 <dl className="mt-3 space-y-1 text-xs text-neutral-500">
                   <div className="flex justify-between gap-3">
@@ -70,6 +122,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3 font-medium text-neutral-600">Email</th>
                   <th className="px-4 py-3 font-medium text-neutral-600">Username</th>
                   <th className="px-4 py-3 font-medium text-neutral-600">Admin</th>
+                  <th className="px-4 py-3 font-medium text-neutral-600">Status</th>
                   <th className="px-4 py-3 font-medium text-neutral-600">Joined</th>
                 </tr>
               </thead>
@@ -89,6 +142,9 @@ export default function UsersPage() {
                       ) : (
                         <span className="text-neutral-400">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge user={u} />
                     </td>
                     <td className="px-4 py-3 text-neutral-600">{new Date(u.created_at).toLocaleDateString()}</td>
                   </tr>

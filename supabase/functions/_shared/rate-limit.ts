@@ -26,6 +26,7 @@ const DEFAULTS: Record<string, RateLimitConfig> = {
   "cancel-registration": { maxRequests: 10, windowSeconds: 300, action: "cancel_registration" },
   "seed-admin": { maxRequests: 3, windowSeconds: 3600, action: "seed_admin" },
   "admin-delete-user": { maxRequests: 10, windowSeconds: 300, action: "admin_delete_user" },
+  "admin-undelete-user": { maxRequests: 10, windowSeconds: 300, action: "admin_undelete_user" },
   "admin-list-profiles": { maxRequests: 60, windowSeconds: 60, action: "admin_list_profiles" },
   "organizer-contacts": { maxRequests: 60, windowSeconds: 60, action: "organizer_contacts" },
   "delete-account": { maxRequests: 5, windowSeconds: 300, action: "delete_account" },

@@ -15,6 +15,7 @@ import SettingsPage from "../components/settings/settings-page"
 import MemberRow from "../components/members/member-row"
 import { useEvents, eventToForm } from "../hooks/use-events"
 import CommunityDetailsForm, { initialCommunityData, missingCommunityFields, type CommunityData } from "../components/community-details-form"
+import TermsCheckbox from "../components/terms-checkbox"
 import { useIsDesktop } from "../hooks/use-is-desktop"
 import type { Event } from "shared"
 import type { EventFormData } from "../hooks/use-events"
@@ -74,6 +75,7 @@ export default function DashboardPage() {
   const [communityData, setCommunityData] = useState<CommunityData>(initialCommunityData)
   const [communityStep, setCommunityStep] = useState<1 | 2>(1)
   const [communityCreating, setCommunityCreating] = useState(false)
+  const [communityTermsAccepted, setCommunityTermsAccepted] = useState(false)
   const [communityError, setCommunityError] = useState<string | null>(null)
   const [upcomingError, setUpcomingError] = useState<string | null>(null)
   const [membersError, setMembersError] = useState<string | null>(null)
@@ -206,11 +208,23 @@ export default function DashboardPage() {
 
   const handleCreateCommunity = async () => {
     if (!user) return
+    if (!communityTermsAccepted) {
+      alert("Please accept the Privacy Policy and Terms of Service to continue.")
+      return
+    }
     setCommunityCreating(true)
     try {
       const token = (await supabase.auth.getSession()).data.session?.access_token
       if (!token) return
       const { supabaseFetch } = await import("../supabase-fetch")
+
+      // Record consent server-side before creating the community. Idempotent.
+      const consentRes = await supabaseFetch("/functions/v1/record-consent", token, { source: "web" })
+      if (!consentRes.ok) {
+        alert("Could not record your agreement. Check your connection and try again.")
+        return
+      }
+
       const res = await supabaseFetch("/functions/v1/create-community", token,
         { ...communityData, community_name: communityData.community_name.trim() })
       const result = await res.json()
@@ -241,7 +255,9 @@ export default function DashboardPage() {
             </div>
             <p className="mt-2 text-sm text-neutral-500">Welcome! Set up your community to get started.</p>
             <div className="mt-6">
-              <CommunityDetailsForm data={communityData} onChange={setCommunityData}
+              <CommunityDetailsForm
+                data={communityData}
+                onChange={setCommunityData}
                 checkName={async (name) => {
                   try {
                     const { supabaseFetchNoAuth } = await import("../supabase-fetch")
@@ -259,6 +275,9 @@ export default function DashboardPage() {
                 step={communityStep}
               />
             </div>
+            <div className="mt-5">
+              <TermsCheckbox value={communityTermsAccepted} onChange={setCommunityTermsAccepted} />
+            </div>
             <div className="mt-6 flex items-center justify-between">
               {communityStep === 2 && (
                 <button type="button" onClick={() => setCommunityStep(1)}
@@ -274,7 +293,7 @@ export default function DashboardPage() {
                   Next
                 </button>
               ) : (
-                <button onClick={handleCreateCommunity} disabled={communityCreating || missingCommunityFields(communityData).step2.length > 0}
+                <button onClick={handleCreateCommunity} disabled={communityCreating || !communityTermsAccepted || missingCommunityFields(communityData).step2.length > 0}
                   className="rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50">
                   {communityCreating ? "Creating..." : "Create Community"}
                 </button>

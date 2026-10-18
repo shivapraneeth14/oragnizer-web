@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     const rl = await checkRateLimit(user.id, "cancel-registration")
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
-    const { event_id } = await req.json()
+    const { event_id, policy_acknowledged } = await req.json()
     if (!event_id) return new Response(JSON.stringify({ error: "Event ID required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
     const { data: registration, error: findError } = await supabase
@@ -93,6 +93,28 @@ Deno.serve(async (req) => {
     }
 
     let refund: Record<string, unknown> = { initiated: false, reason: "no_payment" }
+
+    // Audit the client's cancellation-policy acknowledgment (the mobile app
+    // requires a ticked "I understand the cancellation and refund policy"
+    // checkbox before enabling Confirm). Optional on purpose: released app
+    // builds that predate the checkbox still cancel exactly as before.
+    if (typeof policy_acknowledged === "boolean") {
+      if (payment) {
+        await supabase.from("payment_audit_log").insert({
+          action: "cancellation_policy_ack",
+          payment_id: payment.id,
+          details: { acknowledged: policy_acknowledged, registration_id: registration.id },
+        })
+      } else {
+        await supabase.from("audit_log").insert({
+          actor_id: user.id,
+          action: "cancellation_policy_ack",
+          target_type: "registration",
+          target_id: registration.id,
+          details: { acknowledged: policy_acknowledged },
+        })
+      }
+    }
 
     if (payment && payment.status === "success" && payment.razorpay_payment_id) {
       try {

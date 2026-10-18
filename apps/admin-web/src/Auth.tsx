@@ -119,7 +119,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password })
       dispatch({ type: "SET_LOADING", loading: false })
       if (error) {
-      const msg = error.message.includes("Invalid login credentials")
+      const raw = error.message.toLowerCase()
+      const isBanned =
+        raw.includes("banned") ||
+        raw.includes("should not be able to sign in") ||
+        // supabase-js v2 surfaces GoTrue's ban as this code on newer versions
+        (error as { code?: string }).code === "user_banned"
+      const msg = isBanned
+        ? "This account has been suspended. Please contact customer support."
+        : error.message.includes("Invalid login credentials")
         ? "Invalid email or password. Please try again."
         : error.message
       dispatch({ type: "SET_ERROR", error: msg })
