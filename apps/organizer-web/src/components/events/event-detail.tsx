@@ -107,6 +107,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
   const [descTabIndex, setDescTabIndex] = useState(0)
   const [showShareOptions, setShowShareOptions] = useState(false)
   const [shareCopied, setShareCopied] = useState(false)
+  const [isTeam, setIsTeam] = useState(false)
   const regIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => { setDescTabIndex(0) }, [event.id])
@@ -116,6 +117,29 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
       if (session) setCurrentUserId(session.user.id)
     })
   }, [])
+
+  useEffect(() => {
+    if (!currentUserId || !event.community_id) return
+    let active = true
+    ;(async () => {
+      try {
+        const { data } = await supabase
+          .from("community_members")
+          .select("role")
+          .eq("community_id", event.community_id)
+          .eq("user_id", currentUserId)
+          .maybeSingle()
+        if (!active) return
+        const role = data?.role as string | undefined
+        setIsTeam(role === "OWNER" || role === "ORGANIZER" || role === "MODERATOR")
+      } catch {
+        if (active) setIsTeam(false)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [currentUserId, event.community_id])
 
   // Contacts (email) are fetched once through the authorized organizer
   // endpoint and used to decorate rows below. profiles.email is no longer
@@ -197,6 +221,26 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
     loadDiscussion()
     loadRestrictedUsers()
   }, [activeTab, event.id, contacts])
+
+  useEffect(() => {
+    if (activeTab !== "discussion") return
+    const channel = supabase
+      .channel(`event-messages-live-${event.id}-${crypto.randomUUID().slice(0, 8)}`)
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "event_messages", filter: `event_id=eq.${event.id}` },
+        (payload: { old: { id?: string } | null }) => {
+          const deletedId = payload.old?.id
+          if (deletedId) {
+            setMessages((prev) => prev.filter((m) => m.id !== deletedId))
+          }
+        }
+      )
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [activeTab, event.id])
 
   async function loadDiscussion() {
     setMessagesLoading(true)
@@ -811,6 +855,17 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                                               <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                                             </svg>
                                             Restrict user
+                                          </button>
+                                        )}
+                                        {isTeam && (
+                                          <button
+                                            onClick={() => { setMenuForId(null); deleteMessage(msg.id) }}
+                                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                          >
+                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            Delete message
                                           </button>
                                         )}
                                       </div>

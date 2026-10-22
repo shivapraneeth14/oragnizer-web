@@ -2,6 +2,8 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { isOrganizerAccount, NOT_ORGANIZER_MESSAGE, SUSPENDED_MESSAGE } from "../_shared/organizer.ts"
+import { DELETION_PENDING_MESSAGE } from "../_shared/deletion.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -55,11 +57,18 @@ Deno.serve(async (req) => {
     // sessions that outlive the deletion.
     const { data: callerProfile } = await supabase
       .from("profiles")
-      .select("deleted_at")
+      .select("deleted_at, deletion_grace_started_at")
       .eq("id", user.id)
       .maybeSingle()
     if (callerProfile?.deleted_at) {
       return jsonResponse({ organizer: false, message: SUSPENDED_MESSAGE }, 403)
+    }
+    if (callerProfile?.deletion_grace_started_at) {
+      return jsonResponse({
+        organizer: false,
+        message: DELETION_PENDING_MESSAGE,
+        deletion_grace: true,
+      }, 403)
     }
 
     // Organizer access is decided purely by ownership/admin — never by the
@@ -70,7 +79,7 @@ Deno.serve(async (req) => {
       ? jsonResponse({ organizer: true })
       : jsonResponse({ organizer: false, message: NOT_ORGANIZER_MESSAGE })
   } catch (err) {
-    console.error(err)
+    logError("check-organizer", err)
     return jsonResponse({ error: "Something went wrong. Try again." }, 500)
   }
 })

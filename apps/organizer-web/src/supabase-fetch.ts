@@ -33,6 +33,9 @@ export interface OrganizerSessionVerdict {
   // True only when the gate could not be reached (network/offline). Callers
   // should offer a retry rather than treating this as a denial.
   networkError: boolean
+  // True when the account is in its 30-day deletion grace period. This is not
+  // a session failure — the user can restore the account from the mobile app.
+  deletionGrace?: boolean
   message: string
   error: string | null
 }
@@ -44,6 +47,22 @@ export async function checkOrganizerSession(
     const res = await supabaseFetch("/functions/v1/check-organizer", token, {})
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
+      if (data.deletion_grace === true) {
+        // Account is in its deletion grace period. Not an auth failure —
+        // surface it so the UI can offer a restore path instead of signing
+        // the user out.
+        return {
+          ok: false,
+          organizer: false,
+          networkError: false,
+          deletionGrace: true,
+          message:
+            typeof data.message === "string"
+              ? data.message
+              : "Your account is scheduled for deletion.",
+          error: null,
+        }
+      }
       // Reached the server but the session was rejected (e.g. invalid/expired).
       return {
         ok: false,

@@ -1,6 +1,8 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { hasConsentRecord } from "../_shared/consent.ts"
+import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -49,6 +51,8 @@ Deno.serve(async (req) => {
         status: 403, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
+
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
 
     const { event_id } = await req.json()
 
@@ -130,7 +134,7 @@ Deno.serve(async (req) => {
         .single()
 
       if (updateError) {
-        console.error("Registration update failed:", updateError)
+        logError("register-for-event update", updateError)
         return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
           status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
         })
@@ -148,7 +152,7 @@ Deno.serve(async (req) => {
         .single()
 
       if (insertError) {
-        console.error("Registration insert failed:", insertError)
+        logError("register-for-event insert", insertError)
         if (insertError.message?.includes("duplicate key")) {
           return new Response(JSON.stringify({ error: "You are already registered for this event." }), {
             status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -188,7 +192,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })
   } catch (err) {
-    console.error(err)
+    logError("register-for-event", err)
     return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },

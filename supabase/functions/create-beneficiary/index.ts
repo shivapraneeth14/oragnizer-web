@@ -2,6 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { cashfreePost } from "../_shared/cashfree.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -85,7 +86,7 @@ Deno.serve(async (req) => {
       .eq("id", community_id)
 
     if (updateErr) {
-      console.error("Failed to update community cashfree_beneficiary_id:", updateErr)
+      logError("create-beneficiary update", updateErr)
       return new Response(JSON.stringify({ error: "Failed to save beneficiary. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
@@ -96,7 +97,7 @@ Deno.serve(async (req) => {
 
     if (deactivateErr) {
       await supabase.from("communities").update({ cashfree_beneficiary_id: null }).eq("id", community_id)
-      console.error("Failed to deactivate old beneficiaries:", deactivateErr)
+      logError("create-beneficiary deactivate", deactivateErr)
       return new Response(JSON.stringify({ error: "Failed to save beneficiary. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
@@ -113,7 +114,7 @@ Deno.serve(async (req) => {
       })
     if (benInsertErr) {
       await supabase.from("communities").update({ cashfree_beneficiary_id: null }).eq("id", community_id)
-      console.error("Failed to insert community_beneficiary:", benInsertErr)
+      logError("create-beneficiary insert", benInsertErr)
       return new Response(JSON.stringify({ error: "Failed to save beneficiary. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
@@ -122,13 +123,14 @@ Deno.serve(async (req) => {
       details: {
         community_id,
         cashfree_beneficiary_id: beneficiaryId,
-        cashfree_response: result,
+        // Store only the beneficiary id — never the raw Cashfree response,
+        // which echoes bank account numbers and IFSCs.
       },
     })
 
     return new Response(JSON.stringify({ beneficiary_id: beneficiaryId }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
-    console.error("create-beneficiary error:", err)
+    logError("create-beneficiary", err)
     return new Response(JSON.stringify({ error: "Something went wrong. Please check the details and try again." }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

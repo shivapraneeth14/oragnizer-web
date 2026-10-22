@@ -1,6 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { paymentNonRequotableReason } from "../_shared/payments.ts"
+import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -27,6 +28,8 @@ Deno.serve(async (req) => {
 
     const { event_id } = await req.json()
     if (!event_id) return new Response(JSON.stringify({ error: "event_id is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
 
     const { data: event, error: eventErr } = await supabase
       .from("events")

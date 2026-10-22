@@ -50,6 +50,10 @@ check "google/firebase api key"       "AIza[0-9A-Za-z_-]{20,}"                  
 check "stripe api key"                "(pk|sk)_(test|live)_[A-Za-z0-9]{10,}"     "${APP_SRC[@]}" supabase/functions
 check "aws access key"                "AKIA[0-9A-Z]{16}"                        "${APP_SRC[@]}" supabase/functions
 check "sendgrid api key"              "SG\\.[A-Za-z0-9_-]{10,}"                  "${APP_SRC[@]}" supabase/functions
+# Shared-secret headers must come from Vault/env, never literals in live code.
+# (Historical migrations are excluded on purpose — they are immutable history
+# and the leaked payout-sync value is handled by rotation + filter-repo.)
+check "hardcoded sync secret"         "x-sync-secret['\"[:space:]]*,[[:space:]]*['\"][0-9a-f]{24,}" "${APP_SRC[@]}" supabase/functions scripts
 
 check "env fallback (|| default)"     "import\\.meta\\.env\\.[A-Z0-9_]+\\s*\\|\\|\\s*[\"']"  "${APP_SRC[@]}"
 check "env fallback (?? default)"     "import\\.meta\\.env\\.[A-Z0-9_]+\\s*\\?\\?\\s*[\"']"  "${APP_SRC[@]}"

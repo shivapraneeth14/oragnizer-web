@@ -1,15 +1,18 @@
 import { optionalEnv, requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { safeEqual } from "../_shared/crypto.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
+const SEED_ADMIN_SECRET = optionalEnv("SEED_ADMIN_SECRET")
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-seed-admin-secret",
   "Access-Control-Max-Age": "86400",
 }
 
@@ -45,6 +48,20 @@ Deno.serve(async (req) => {
         status: 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       })
+    }
+
+    if (!existingAdmin) {
+      // F-5 fix (bootstrap exposure): with no admin in the system, anyone
+      // could call this endpoint and create the first admin. A bootstrap
+      // secret — set once in Vault and never present in the repo — is now
+      // required for the no-admin path.
+      const presented = req.headers.get("x-seed-admin-secret") ?? ""
+      if (!SEED_ADMIN_SECRET || !safeEqual(presented, SEED_ADMIN_SECRET)) {
+        return new Response(JSON.stringify({ error: "Not authorized." }), {
+          status: 403,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
     }
 
     if (existingAdmin) {
@@ -115,7 +132,8 @@ Deno.serve(async (req) => {
       status: 200,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })
-  } catch {
+  } catch (err) {
+    logError("seed-admin", err)
     return new Response(JSON.stringify({ error: "Something went wrong." }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },

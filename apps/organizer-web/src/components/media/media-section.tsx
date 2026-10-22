@@ -89,8 +89,8 @@ export default function MediaSection({ communityId }: Props) {
     setUploadProgress(0)
     try {
       const url = uploadType === "video"
-        ? await uploadVideoToCloudinary(file, setUploadProgress)
-        : await uploadToCloudinary(file, setUploadProgress)
+        ? await uploadVideoToCloudinary(file, { onProgress: setUploadProgress })
+        : await uploadToCloudinary(file, { onProgress: setUploadProgress })
       const mediableId = uploadTarget === "community" ? communityId : selectedEventId
       if (!mediableId) return
 

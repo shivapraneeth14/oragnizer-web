@@ -14,7 +14,7 @@ export interface Profile {
 export interface Community {
   id: string
   name: string
-  description: string | null
+  description: string
   location: string | null
   banner_url: string | null
   community_avatar_url: string | null
@@ -64,6 +64,7 @@ export interface Event {
   title: string
   description: string | null
   image_url: string | null
+  video_url: string | null
   category: string | null
   start_date: string
   end_date: string | null

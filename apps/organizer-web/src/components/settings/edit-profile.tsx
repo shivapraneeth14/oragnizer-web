@@ -138,6 +138,7 @@ export default function EditProfile() {
   }
 
   const handleSave = async () => {
+    if (community && !commDesc.trim()) return
     await updateProfile({
       first_name: firstName.trim() || null,
       last_name: lastName.trim() || null,
@@ -146,7 +147,7 @@ export default function EditProfile() {
     if (community) {
       await updateCommunity({
         name: commName.trim(),
-        description: commDesc.trim() || null,
+        description: commDesc.trim(),
         category: commCategory.trim() || null,
         city: commCity.trim() || null,
         state: commState.trim() || null,
@@ -301,9 +302,12 @@ export default function EditProfile() {
             )}
           </div>
           <div className="mt-4">
-            <label className="mb-1 block text-xs font-medium text-neutral-500">Description</label>
+            <label className="mb-1 block text-xs font-medium text-neutral-500">Description *</label>
             <textarea value={commDesc} onChange={(e) => setCommDesc(e.target.value)} rows={3}
               className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20" />
+            {!commDesc.trim() && (
+              <p className="mt-0.5 text-xs text-red-500">Description is required</p>
+            )}
           </div>
           <div className="mt-4">
             <label className="mb-1 block text-xs font-medium text-neutral-500">Category</label>
@@ -366,7 +370,7 @@ export default function EditProfile() {
       <div className="mt-6">
         <button
           onClick={handleSave}
-          disabled={saving || checkingUsername || checkingCommName || checkingCommEmail || usernameAvailable === false || commNameAvailable === false || commEmailAvailable === false}
+          disabled={saving || checkingUsername || checkingCommName || checkingCommEmail || usernameAvailable === false || commNameAvailable === false || commEmailAvailable === false || (!!community && !commDesc.trim())}
           className="w-full rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white transition hover:bg-cluvo-primary-dark disabled:opacity-50 sm:w-auto"
         >
           {saving ? "Saving..." : "Save Changes"}

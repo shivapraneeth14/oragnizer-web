@@ -22,11 +22,33 @@ interface UploadResult {
   eagerUrl?: string
 }
 
+/**
+ * Thrown/cancelled uploads reject with this sentinel so callers can tell an
+ * intentional cancel (from an AbortSignal) apart from a real failure.
+ */
+export const UPLOAD_CANCELLED = "UPLOAD_CANCELLED"
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.message === UPLOAD_CANCELLED
+}
+
+/** Pull the most useful message out of a Cloudinary error response body. */
+function parseCloudinaryError(body: string): string {
+  try {
+    const d = JSON.parse(body) as { error?: { message?: string } }
+    if (d?.error?.message) return d.error.message
+  } catch {
+    // non-JSON body — fall through
+  }
+  return "Upload failed"
+}
+
 function uploadFile(
   file: File,
   resourceType: "image" | "video",
   timeoutMs: number,
   onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
   extraParams: Record<string, string> = {},
 ): Promise<UploadResult> {
   const formData = new FormData()
@@ -38,17 +60,28 @@ function uploadFile(
   }
 
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(UPLOAD_CANCELLED))
+      return
+    }
     const xhr = new XMLHttpRequest()
     xhr.open("POST", `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`)
     xhr.timeout = timeoutMs
+    const onAbort = () => {
+      xhr.abort()
+      reject(new Error(UPLOAD_CANCELLED))
+    }
+    signal?.addEventListener("abort", onAbort)
+    const cleanup = () => signal?.removeEventListener("abort", onAbort)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) {
         onProgress(Math.round((e.loaded / e.total) * 100))
       }
     }
     xhr.onload = () => {
+      cleanup()
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new Error("Upload failed"))
+        reject(new Error(parseCloudinaryError(xhr.responseText)))
         return
       }
       try {
@@ -68,20 +101,41 @@ function uploadFile(
         reject(new Error("Upload failed"))
       }
     }
-    xhr.onerror = () => reject(new Error("Upload failed"))
-    xhr.ontimeout = () => reject(new Error("Upload timed out"))
+    xhr.onerror = () => {
+      cleanup()
+      reject(new Error("Upload failed. Check your connection and try again."))
+    }
+    xhr.ontimeout = () => {
+      cleanup()
+      reject(new Error("Upload timed out"))
+    }
+    xhr.onabort = () => {
+      cleanup()
+      reject(new Error(UPLOAD_CANCELLED))
+    }
     xhr.send(formData)
   })
 }
 
-export function uploadToCloudinary(file: File, onProgress?: (percent: number) => void): Promise<string> {
+export interface UploadOptions {
+  onProgress?: (percent: number) => void
+  /** Fired after the bytes are sent, while Cloudinary processes/transcodes. */
+  onProcessing?: () => void
+  signal?: AbortSignal
+}
+
+export function uploadToCloudinary(file: File, options: UploadOptions = {}): Promise<string> {
+  const { onProgress, onProcessing, signal } = options
   if (!ALLOWED_TYPES.includes(file.type)) {
     return Promise.reject(new Error("Only JPEG, PNG, WebP, and GIF images are allowed."))
   }
   if (file.size > MAX_FILE_SIZE) {
     return Promise.reject(new Error("File is too large. Maximum size is 10 MB."))
   }
-  return uploadFile(file, "image", 30_000, onProgress).then((r) => r.secureUrl)
+  return uploadFile(file, "image", 30_000, onProgress, signal).then((r) => {
+    onProcessing?.()
+    return r.secureUrl
+  })
 }
 
 function videoDimensions(file: File): Promise<{ width: number; height: number }> {
@@ -115,7 +169,8 @@ export function cloudinaryPlayableVideoUrl(url: string): string {
   return url.slice(0, idx + marker.length) + "w_1080,q_auto/" + noExt + ".mp4"
 }
 
-export async function uploadVideoToCloudinary(file: File, onProgress?: (percent: number) => void): Promise<string> {
+export async function uploadVideoToCloudinary(file: File, options: UploadOptions = {}): Promise<string> {
+  const { onProgress, onProcessing, signal } = options
   if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
     return Promise.reject(new Error("Only MP4, WebM, MOV, M4V, and OGG videos are allowed."))
   }
@@ -130,7 +185,8 @@ export async function uploadVideoToCloudinary(file: File, onProgress?: (percent:
   } catch {
     // metadata unreadable — proceed; size/type checks already passed
   }
-  const result = await uploadFile(file, "video", 120_000, onProgress)
+  const result = await uploadFile(file, "video", 120_000, onProgress, signal)
+  onProcessing?.()
   return result.eagerUrl ?? cloudinaryPlayableVideoUrl(result.secureUrl)
 }
 

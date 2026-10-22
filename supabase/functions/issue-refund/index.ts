@@ -2,6 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { attemptRefund } from "../_shared/refunds.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -136,17 +137,19 @@ Deno.serve(async (req) => {
       })
     }
 
-    await supabase.from("notifications").insert({
-      user_id: registration.user_id,
-      type: "refund_initiated",
-      title: "Refund Initiated",
-      body: `Refund of ₹${(baseAmount / 100).toFixed(0)} for "${event.title}" has been initiated by the organizer.`,
-      payload: { event_id: event.id, payment_id: payment.id, registration_id: registration.id, amount: baseAmount },
-    })
+    if (registration.user_id) {
+      await supabase.from("notifications").insert({
+        user_id: registration.user_id,
+        type: "refund_initiated",
+        title: "Refund Initiated",
+        body: `Refund of ₹${(baseAmount / 100).toFixed(0)} for "${event.title}" has been initiated by the organizer.`,
+        payload: { event_id: event.id, payment_id: payment.id, registration_id: registration.id, amount: baseAmount },
+      })
+    }
 
     return new Response(JSON.stringify({ success: true, refund_id: outcome.refund_id, amount: payment.amount, status: outcome.refund_status }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
-    console.error("issue-refund error:", err)
+    logError("issue-refund", err)
     return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

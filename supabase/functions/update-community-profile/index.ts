@@ -1,5 +1,6 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -84,6 +85,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (description !== undefined && (typeof description !== "string" || !description.trim())) {
+      return new Response(JSON.stringify({ error: "Community description is required." }), {
+        status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
     const tooLong = (v: unknown, max: number) => typeof v === "string" && v.length > max
     const lengthChecks: Array<[unknown, number, string]> = [
       [name, 100, "Community name is too long (max 100 characters)."],
@@ -145,7 +152,7 @@ Deno.serve(async (req) => {
 
     const updates: Record<string, unknown> = {}
     if (name !== undefined) updates.name = name.trim()
-    if (description !== undefined) updates.description = description?.trim() || null
+    if (description !== undefined) updates.description = description.trim()
     if (category !== undefined) updates.category = category?.trim() || null
     if (city !== undefined) updates.city = city?.trim() || null
     if (state !== undefined) updates.state = state?.trim() || null
@@ -171,7 +178,7 @@ Deno.serve(async (req) => {
       .eq("id", community.id)
 
     if (updateError) {
-      console.error("Community update failed:", updateError)
+      logError("update-community-profile update", updateError)
       return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
         status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
@@ -182,7 +189,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })
   } catch (err) {
-    console.error(err)
+    logError("update-community-profile", err)
     return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },

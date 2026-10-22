@@ -106,9 +106,34 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ state: "paid_needs_repair", registration_id: registration.id, payment_status: "success" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
-    // Refund in flight / already refunded → terminal.
+    // Refund in flight / already refunded → terminal. Expose the refund
+    // state so the app can show "processing / completed / failed" instead of
+    // guessing, and whether rebooking is currently possible (blocked only
+    // while the refund is still in flight).
     if (payment.status === "refunded") {
-      return new Response(JSON.stringify({ state: "refunded", registration_id: registration.id, payment_status: "refunded" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      const refundInFlight = payment.refund_status != null &&
+        !["processed", "failed"].includes(payment.refund_status)
+      return new Response(JSON.stringify({
+        state: "refunded",
+        registration_id: registration.id,
+        payment_status: "refunded",
+        refund_status: payment.refund_status ?? null,
+        rebookable: !refundInFlight,
+      }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    // A refund was issued but the provider hasn't processed it yet, and the
+    // registration is cancelled — the customer must see the in-flight state
+    // (not "pending payment") so they never tap Pay into a refunding row.
+    if (payment.refund_status && registration.status === "cancelled") {
+      const refundInFlight = !["processed", "failed"].includes(payment.refund_status)
+      return new Response(JSON.stringify({
+        state: "refunded",
+        registration_id: registration.id,
+        payment_status: payment.status,
+        refund_status: payment.refund_status,
+        rebookable: !refundInFlight,
+      }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
     // In-flight order: ask Razorpay whether the money actually landed (this is

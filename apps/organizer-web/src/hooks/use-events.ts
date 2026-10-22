@@ -6,6 +6,7 @@ export type EventFormData = {
   title: string
   description: string
   image_url: string
+  video_url: string
   category: string
   start_date: string
   end_date: string
@@ -64,7 +65,7 @@ export const emptyDescriptionFields: DescriptionFields = {
 }
 
 export const emptyForm: EventFormData = {
-  title: "", description: "", image_url: "", category: "",
+  title: "", description: "", image_url: "", video_url: "", category: "",
   start_date: "", end_date: "",
   location: "", latitude: "", longitude: "", capacity: "", price: "",
   status: "draft",
@@ -77,6 +78,7 @@ export function eventToForm(e: Event): EventFormData {
     title: e.title,
     description: e.description || "",
     image_url: e.image_url || "",
+    video_url: e.video_url || "",
     category: e.category || "",
     start_date: toDatetimeLocal(e.start_date),
     end_date: e.end_date ? toDatetimeLocal(e.end_date) : "",
@@ -91,7 +93,7 @@ export function eventToForm(e: Event): EventFormData {
   }
 }
 
-function toDatetimeLocal(dateStr: string): string {
+export function toDatetimeLocal(dateStr: string): string {
   const d = new Date(dateStr)
   const pad = (n: number) => n.toString().padStart(2, "0")
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
@@ -158,6 +160,7 @@ export function useEvents(communityId: string | undefined) {
       title: data.title.trim(),
       description: data.description.trim() || null,
       image_url: data.image_url || null,
+      video_url: data.video_url || null,
       category: data.category.trim() || null,
       start_date: new Date(data.start_date).toISOString(),
       end_date: data.end_date ? new Date(data.end_date).toISOString() : null,
@@ -185,10 +188,21 @@ export function useEvents(communityId: string | undefined) {
     }
     if (!data.category) return "Category is required"
 
+    // Prevent editing cancelled events
+    const { data: currentEvent } = await supabase
+      .from("events")
+      .select("status")
+      .eq("id", id)
+      .maybeSingle()
+    if (currentEvent?.status === "cancelled") {
+      return "Cannot edit a cancelled event"
+    }
+
     const { error } = await supabase.from("events").update({
       title: data.title.trim(),
       description: data.description.trim() || null,
       image_url: data.image_url || null,
+      video_url: data.video_url || null,
       category: data.category.trim() || null,
       start_date: new Date(data.start_date).toISOString(),
       end_date: data.end_date ? new Date(data.end_date).toISOString() : null,

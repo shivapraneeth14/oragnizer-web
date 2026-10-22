@@ -4,7 +4,7 @@
 // history) while new signups record the new version. Keep in sync with:
 //   apps/mobile/lib/legal_content.dart (consentVersion)
 //   apps/organizer-web/src/legal/consent-version.ts
-export const CONSENT_VERSION = "2026-08-07"
+export const CONSENT_VERSION = "2026-10-22"
 
 export function isValidConsentSource(source: unknown): source is "mobile" | "web" {
   return source === "mobile" || source === "web"

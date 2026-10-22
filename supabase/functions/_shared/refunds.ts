@@ -77,9 +77,68 @@ export interface RefundOutcome {
   attempt?: number
 }
 
+// --- Refund-amount policy -----------------------------------------------------
+// Business rule, applied identically by every call site, retry and reconcile
+// pass:
+//   organizer-cancelled  -> refund the FULL amount (platform fee included):
+//     event_cancellation, organizer_issue_refund, capacity_full,
+//     event_cancelled, registration_cancelled (auto full refund on a capture
+//     that landed on a cancelled booking).
+//   customer-cancelled   -> refund amount MINUS the persisted platform fee:
+//     registration_cancellation (self-cancel via cancel-registration).
+// The cancellation type is persisted on payments.refund_reason at the first
+// claim and never overwritten; retries always re-use it (and the persisted
+// refund_amount_due) instead of re-deriving.
+export type RefundPolicy = "customer" | "organizer"
+
+export function refundPolicyForReason(reason: string | null | undefined): RefundPolicy {
+  return reason === "registration_cancellation" ? "customer" : "organizer"
+}
+
+// The exact customer-owed amount under a policy, from the stored breakdown —
+// never a recomputed percentage.
+export function refundAmountForPolicy(
+  policy: RefundPolicy,
+  payment: { amount: number | null | undefined; platform_fee?: number | null },
+): number {
+  const amount = Math.max(Number(payment.amount ?? 0), 0)
+  if (policy === "customer") return customerOwedAmount(payment)
+  return amount
+}
+
+export function customerOwedAmount(payment: {
+  amount: number | null | undefined
+  platform_fee?: number | null
+}): number {
+  const fee = Math.max(Number(payment.platform_fee ?? 0), 0)
+  return Math.max(Number(payment.amount ?? 0) - fee, 0)
+}
+
+// How a failed/in-flight refund must be RETRIED: the persisted owed amount
+// and the persisted cancellation type — never re-derived. A failed
+// customer-cancellation refund retries exactly refund_amount_due (ticket
+// only, fee kept); an organizer-cancellation refund retries the full amount.
+// The old `refunded_amount ?? amount` fallback retried the FULL amount for
+// failed self-cancels — handing back the fee the platform is entitled to
+// keep. Legacy rows without persisted due/reason keep the historical
+// fallback (documented residual for pre-migration failures only).
+export function refundRetryPlan(row: {
+  amount?: number | null
+  refunded_amount?: number | null
+  refund_amount_due?: number | null
+  refund_reason?: string | null
+}): { amount: number; reason: string } {
+  return {
+    amount: Number(row.refund_amount_due ?? row.refunded_amount ?? row.amount ?? 0),
+    reason: row.refund_reason ?? "reconcile_refund_retry",
+  }
+}
+
 // Exactly-once refund issuance. All refund entry points (cancel-event,
 // cancel-registration, issue-refund, reconcile retry) must go through this:
 //   1. claim_payment_refund     -> atomic lock; exactly one winner per payment
+//                                  (also persists refund_reason + the owed
+//                                  refund_amount_due exactly once)
 //   2. Razorpay refund          -> the single provider call
 //   3. complete_payment_refund  -> persists 'issued', records wallet clawback
 // On a stale claim or a provider failure it re-checks the provider for an
@@ -94,6 +153,8 @@ export async function attemptRefund(
 
   const { data: claim, error: claimErr } = await supabase.rpc("claim_payment_refund", {
     p_payment_id: payment.id,
+    p_reason: walletReason,
+    p_amount: amount,
   })
   if (claimErr) throw claimErr
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { useParams, Link } from "react-router-dom"
 import { supabase } from "../supabase"
 import { fetchAdminProfiles, type AdminProfile } from "../lib/admin-profiles"
+import { daysRemaining, deletionDueAt } from "../lib/deletion"
 import type { Community, CommunityMember, Registration, Event } from "shared"
 
 export default function UserDetailPage() {
@@ -14,6 +15,8 @@ export default function UserDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmGrace, setConfirmGrace] = useState(false)
+  const [scheduling, setScheduling] = useState(false)
   const [actionError, setActionError] = useState("")
 
   const loadProfile = useCallback(async () => {
@@ -49,6 +52,26 @@ export default function UserDetailPage() {
     setDeleting(false)
     if (result.success) {
       setConfirmDelete(false)
+      await loadProfile()
+    } else {
+      setActionError(result.error || "Something went wrong.")
+    }
+  }
+
+  const handleScheduleDeletion = async () => {
+    if (!id) return
+    setScheduling(true)
+    setActionError("")
+    const { data: { session } } = await supabase.auth.getSession()
+    const { supabaseFetch } = await import("../supabase-fetch")
+    const res = await supabaseFetch("/functions/v1/admin-delete-user", session?.access_token, {
+      user_id: id,
+      mode: "grace",
+    })
+    const result = await res.json()
+    setScheduling(false)
+    if (result.success) {
+      setConfirmGrace(false)
       await loadProfile()
     } else {
       setActionError(result.error || "Something went wrong.")
@@ -92,6 +115,7 @@ export default function UserDetailPage() {
   }
 
   const isDeleted = Boolean(profile.deleted_at)
+  const isGrace = !isDeleted && Boolean(profile.deletion_grace_started_at)
 
   return (
     <div className="space-y-6">
@@ -114,30 +138,52 @@ export default function UserDetailPage() {
               <span className="rounded-full bg-cluvo-primary/10 px-3 py-1 text-xs font-medium text-cluvo-primary">Admin</span>
             )}
             {isDeleted && (
-              <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-600">Deleted</span>
+              <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-600">Suspended</span>
             )}
-            {isDeleted ? (
+            {isGrace && (
+              <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-600">
+                Deletion scheduled · {daysRemaining(profile.deletion_grace_started_at!)}d left
+              </span>
+            )}
+            {isDeleted || isGrace ? (
               <button
                 onClick={handleRestore}
                 disabled={restoring}
                 className="rounded-lg bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
               >
-                {restoring ? "Restoring..." : "Restore"}
+                {restoring ? "Restoring..." : isGrace ? "Cancel deletion" : "Restore"}
               </button>
             ) : (
-              <button
-                onClick={() => { setConfirmDelete(true); setActionError("") }}
-                className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
-              >
-                Delete
-              </button>
+              <>
+                <button
+                  onClick={() => { setConfirmDelete(true); setActionError("") }}
+                  className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
+                >
+                  Suspend
+                </button>
+                {!isGrace && (
+                  <button
+                    onClick={() => { setConfirmGrace(true); setActionError("") }}
+                    className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Schedule deletion
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
         <div className="mt-4 text-sm text-neutral-500">
           Joined {new Date(profile.created_at).toLocaleDateString()}
           {isDeleted && (
-            <span className="ml-2 text-red-600">· Deleted {new Date(profile.deleted_at!).toLocaleDateString()}</span>
+            <span className="ml-2 text-red-600">· Suspended {new Date(profile.deleted_at!).toLocaleDateString()}</span>
+          )}
+          {isGrace && (
+            <span className="ml-2 text-orange-600">
+              · Deletion scheduled {new Date(profile.deletion_grace_started_at!).toLocaleDateString()} ·{" "}
+              {daysRemaining(profile.deletion_grace_started_at!)} days left (purges{" "}
+              {deletionDueAt(profile.deletion_grace_started_at!).toLocaleDateString()})
+            </span>
           )}
         </div>
         {actionError && (
@@ -228,9 +274,9 @@ export default function UserDetailPage() {
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-xl bg-white p-5 shadow-strong sm:p-6">
-            <h4 className="text-sm font-semibold text-neutral-900">Delete User</h4>
+            <h4 className="text-sm font-semibold text-neutral-900">Suspend User</h4>
             <p className="mt-2 text-sm text-neutral-500">
-              Delete {profile.first_name} {profile.last_name} ({profile.email})? They will no longer be able to sign in. You can restore them later.
+              Suspend {profile.first_name} {profile.last_name} ({profile.email})? They will no longer be able to sign in. This is reversible with Restore.
             </p>
             {actionError && (
               <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{actionError}</div>
@@ -254,7 +300,41 @@ export default function UserDetailPage() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 )}
-                {deleting ? "Deleting..." : "Delete"}
+                {deleting ? "Suspending..." : "Suspend"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmGrace && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-strong sm:p-6">
+            <h4 className="text-sm font-semibold text-neutral-900">Schedule Account Deletion</h4>
+            <p className="mt-2 text-sm text-neutral-500">
+              Schedule {profile.first_name} {profile.last_name} ({profile.email}) for permanent deletion.
+              They have a 30-day grace period and can still log in to cancel. After 30 days their profile
+              and personal content are permanently deleted; financial records are retained unlinked.
+            </p>
+            <p className="mt-2 text-xs text-orange-600">
+              This is irreversible once the grace period expires. For a reversible block, use Suspend instead.
+            </p>
+            {actionError && (
+              <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{actionError}</div>
+            )}
+            <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                onClick={() => setConfirmGrace(false)}
+                disabled={scheduling}
+                className="w-full rounded-lg border border-neutral-200 px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-50 sm:w-auto"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleScheduleDeletion}
+                disabled={scheduling}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50 sm:w-auto"
+              >
+                {scheduling ? "Scheduling..." : "Schedule deletion"}
               </button>
             </div>
           </div>

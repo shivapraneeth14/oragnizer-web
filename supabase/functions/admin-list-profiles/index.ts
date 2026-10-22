@@ -1,6 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -51,11 +52,15 @@ Deno.serve(async (req) => {
     let id: string | undefined
     let includeDeleted = false
     let deletedOnly = false
+    let scheduledOnly = false
+    let reason: string | null = null
     try {
       const body = await req.json()
       id = typeof body?.id === "string" ? body.id : undefined
       includeDeleted = body?.include_deleted === true
       deletedOnly = body?.deleted_only === true
+      scheduledOnly = body?.scheduled_only === true
+      reason = typeof body?.reason === "string" ? body.reason.slice(0, 200) : null
     } catch (_) {
       id = undefined
     }
@@ -65,20 +70,34 @@ Deno.serve(async (req) => {
 
     let query = supabase
       .from("profiles")
-      .select("id, email, first_name, last_name, username, avatar_url, is_admin, created_at, deleted_at")
+      .select("id, email, first_name, last_name, username, avatar_url, is_admin, created_at, deleted_at, deletion_grace_started_at")
       .order("created_at", { ascending: false })
-    if (deletedOnly) {
+    if (scheduledOnly) {
+      query = query.is("deleted_at", null).not("deletion_grace_started_at", "is", null)
+    } else if (deletedOnly) {
       query = query.not("deleted_at", "is", null)
     } else if (!includeDeleted) {
-      query = query.is("deleted_at", null)
+      // Active means neither suspended nor scheduled for deletion.
+      query = query.is("deleted_at", null).is("deletion_grace_started_at", null)
     }
     if (id) query = query.eq("id", id)
 
     const { data, error } = await query
     if (error) return json({ error: "Unable to load profiles." }, 500)
 
+    // Audit admin reads of PII (email/is_admin). Single-id reads are the
+    // sensitive case; list reads are recorded too, without a target id.
+    await supabase.from("audit_log").insert({
+      actor_id: user.id,
+      action: id ? "admin_profile_read" : "admin_profiles_listed",
+      target_type: "user",
+      target_id: id ?? null,
+      details: { reason },
+    })
+
     return json({ profiles: data ?? [] })
-  } catch {
+  } catch (err) {
+    logError("admin-list-profiles", err)
     return json({ error: "Something went wrong." }, 500)
   }
 })

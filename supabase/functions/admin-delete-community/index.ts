@@ -1,5 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -50,6 +52,9 @@ Deno.serve(async (req) => {
       })
     }
 
+    const rl = await checkRateLimit(user.id, "admin-delete-community")
+    if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
+
     const { community_id } = await req.json()
     if (!community_id) {
       return new Response(JSON.stringify({ error: "community_id is required." }), {
@@ -59,7 +64,7 @@ Deno.serve(async (req) => {
 
     const { data: community } = await supabase
       .from("communities")
-      .select("name, owner_id")
+      .select("name, deleted_at")
       .eq("id", community_id)
       .single()
 
@@ -69,22 +74,34 @@ Deno.serve(async (req) => {
       })
     }
 
-    const now = new Date().toISOString()
-    await supabase.from("communities").update({ deleted_at: now }).eq("id", community_id)
-    await supabase.from("events").update({ deleted_at: now }).eq("community_id", community_id)
+    if (community.deleted_at) {
+      return new Response(JSON.stringify({ error: "Community is already deleted." }), {
+        status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
 
+    const now = new Date().toISOString()
+    const { error: communityErr } = await supabase
+      .from("communities").update({ deleted_at: now }).eq("id", community_id)
+    if (communityErr) throw communityErr
+    const { error: eventsErr } = await supabase
+      .from("events").update({ deleted_at: now }).eq("community_id", community_id)
+    if (eventsErr) throw eventsErr
+
+    // Audit: no owner UUID or other user identifiers in details.
     await supabase.from("audit_log").insert({
       actor_id: user.id,
       action: "community_deleted",
       target_type: "community",
       target_id: community_id,
-      details: { community_name: community?.name, community_owner_id: community?.owner_id },
+      details: { community_name: community.name },
     })
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200, headers: { "Content-Type": "application/json", ...corsHeaders },
     })
-  } catch {
+  } catch (err) {
+    logError("admin-delete-community", err)
     return new Response(JSON.stringify({ error: "Something went wrong." }), {
       status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
     })

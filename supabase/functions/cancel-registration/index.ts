@@ -116,6 +116,20 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ORDER MATTERS: cancel the registration FIRST (one transaction — the RPC
+    // only decrements booked_count when the registration actually transitioned
+    // confirmed -> cancelled, so concurrent cancels can never double-release),
+    // THEN issue the refund. The old order (refund first) left a window where
+    // the payment could be refunded while the registration was still
+    // confirmed — a concurrent payment capture in that window ended up paid
+    // with no recoverable booking. If the refund fails here, the claim is
+    // released as 'failed' and the reconcile retry job re-issues it later
+    // using the persisted refund_amount_due (never re-deriving the policy).
+    await supabase.rpc("cancel_registration_and_decrement", {
+      p_registration_id: registration.id,
+      p_deleted_at: new Date().toISOString(),
+    })
+
     if (payment && payment.status === "success" && payment.razorpay_payment_id) {
       try {
         // POLICY: customer self-cancellation refunds the ticket only — the
@@ -169,19 +183,11 @@ Deno.serve(async (req) => {
         await supabase.from("payment_audit_log").insert({
           action: "refund_failed",
           payment_id: payment.id,
-          details: { error: String(refundErr) },
+          details: { error: String(refundErr), note: "Registration already cancelled — reconcile will retry the refund" },
         })
         refund = { initiated: false, reason: "failed" }
       }
     }
-
-    // Cancel + release capacity in ONE transaction: the RPC only decrements
-    // events.booked_count when this registration actually transitioned
-    // confirmed -> cancelled, so concurrent cancels can never double-release.
-    await supabase.rpc("cancel_registration_and_decrement", {
-      p_registration_id: registration.id,
-      p_deleted_at: new Date().toISOString(),
-    })
 
     return new Response(JSON.stringify({ success: true, refund }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {

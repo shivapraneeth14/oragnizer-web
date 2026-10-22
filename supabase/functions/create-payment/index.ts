@@ -9,6 +9,8 @@ import {
   restoreRegistrationIfCancelled,
   revertRegistrationToCancelled,
 } from "../_shared/payments.ts"
+import { attemptRefund, customerOwedAmount } from "../_shared/refunds.ts"
+import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -117,6 +119,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Please accept the Privacy Policy and Terms of Service to continue." }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
+
     const { event_id, coupon_code } = await req.json()
     if (!event_id) return new Response(JSON.stringify({ error: "event_id is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
@@ -151,7 +155,7 @@ Deno.serve(async (req) => {
     const { data: existingPayment } = existing
       ? await supabase
           .from("payments")
-          .select("id, razorpay_order_id, status, refund_status, refund_claim_state, created_at, attempt_count, amount")
+          .select("id, razorpay_order_id, razorpay_payment_id, status, refund_status, refund_claim_state, refund_amount_due, refund_reason, platform_fee, created_at, attempt_count, amount")
           .eq("registration_id", existing.id)
           .maybeSingle()
       : { data: null }
@@ -160,13 +164,50 @@ Deno.serve(async (req) => {
     // demoted to pending, and a cancelled registration holding one must never
     // be resurrected. Check BEFORE any write.
     if (existingPayment) {
-      const blockReason = paymentNonRequotableReason(existingPayment)
+      let blockReason = paymentNonRequotableReason(existingPayment)
+
+      // P3b recovery: a FAILED customer-cancellation refund must not lock the
+      // customer out of rebooking forever ("already paid" while they hold no
+      // booking and no money). Retry the outstanding refund on the spot at
+      // the PERSISTED owed amount (ticket only — platform fee kept), using
+      // the persisted cancellation type. Only customer-policy rows qualify;
+      // organizer-policy failures are retried by reconcile at full amount.
+      if (
+        blockReason === "already_paid" &&
+        existing?.status === "cancelled" &&
+        existingPayment.refund_status === "failed" &&
+        existingPayment.refund_claim_state !== "claimed" &&
+        existingPayment.razorpay_payment_id &&
+        (!existingPayment.refund_reason || existingPayment.refund_reason === "registration_cancellation")
+      ) {
+        const owed = existingPayment.refund_amount_due != null
+          ? Number(existingPayment.refund_amount_due)
+          : customerOwedAmount(existingPayment)
+        try {
+          // Claim-guarded exactly like every other refund path: if another
+          // flow holds the claim we get a clean conflict, never a double
+          // refund. On success/conflict the gate below re-evaluates on the
+          // fresh row state.
+          await attemptRefund(supabase, existingPayment, owed, existingPayment.refund_reason ?? "registration_cancellation")
+        } catch (retryErr) {
+          console.error("On-demand refund retry failed:", retryErr)
+          // Still blocked — the clear message below tells the customer what
+          // is happening; reconcile keeps retrying in the background.
+        }
+        const { data: refreshed } = await supabase
+          .from("payments")
+          .select("id, status, refund_status, refund_claim_state")
+          .eq("id", existingPayment.id)
+          .maybeSingle()
+        if (refreshed) blockReason = paymentNonRequotableReason(refreshed)
+      }
+
       if (blockReason) {
         const message = blockReason === "already_paid"
           ? "You have already paid for this event."
-          : "A refund for this payment is in progress. You cannot pay again."
+          : "A refund for your previous booking is being processed. You can rebook once it completes — we'll notify you."
         return new Response(JSON.stringify({ error: message, code: blockReason }), {
-          status: blockReason === "already_paid" ? 409 : 409,
+          status: 409,
           headers: { "Content-Type": "application/json", ...corsHeaders },
         })
       }
@@ -230,7 +271,7 @@ Deno.serve(async (req) => {
         }
         // Order usable, not paid yet. Restore a cancelled booking ONLY here —
         // never before this point (the payment row may still be paid/refunding).
-        await restoreRegistrationIfCancelled(supabase, existing!.id, existing!.status)
+        await restoreRegistrationIfCancelled(supabase, existing!.id)
         return new Response(JSON.stringify({ registration_id: existing!.id, razorpay_order_id: existingPayment.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
       }
     }
@@ -267,7 +308,7 @@ Deno.serve(async (req) => {
     // payment row cannot be persisted.
     try {
       const order = await createRazorpayOrder(finalAmount, `${registrationId}_${attemptCount}`)
-      await restoreRegistrationIfCancelled(supabase, registrationId, existing?.status ?? null)
+      await restoreRegistrationIfCancelled(supabase, registrationId)
 
       try {
         if (existingPayment) {

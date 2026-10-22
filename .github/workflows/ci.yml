@@ -19,6 +19,17 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./scripts/check-env-hygiene.sh
 
+  deno-tests:
+    name: Edge-function contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno test --allow-read --allow-env --no-lock --node-modules-dir=none supabase/tests
+
   typecheck-web:
     name: TypeScript type check
     runs-on: ubuntu-latest

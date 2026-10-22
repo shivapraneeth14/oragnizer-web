@@ -182,6 +182,7 @@ export default function DashboardPage() {
   }
 
   const handleEdit = (event: Event) => {
+    if (event.status === "cancelled") return
     setEditingEvent(event)
     setShowForm(true)
   }

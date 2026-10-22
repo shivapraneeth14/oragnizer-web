@@ -1,19 +1,29 @@
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { fetchAdminProfiles, type AdminProfile } from "../lib/admin-profiles"
+import { daysRemaining } from "../lib/deletion"
 
-type UserFilter = "active" | "deleted" | "all"
+type UserFilter = "active" | "scheduled" | "deleted" | "all"
 
 const FILTERS: { key: UserFilter; label: string }[] = [
   { key: "active", label: "Active" },
-  { key: "deleted", label: "Deleted" },
+  { key: "scheduled", label: "Scheduled" },
+  { key: "deleted", label: "Suspended" },
   { key: "all", label: "All" },
 ]
 
 function StatusBadge({ user }: { user: AdminProfile }) {
   if (user.deleted_at) {
     return (
-      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">Deleted</span>
+      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">Suspended</span>
+    )
+  }
+  if (user.deletion_grace_started_at) {
+    const days = daysRemaining(user.deletion_grace_started_at)
+    return (
+      <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-600">
+        Deletion scheduled · {days}d left
+      </span>
     )
   }
   return <span className="text-neutral-400">—</span>
@@ -29,6 +39,7 @@ export default function UsersPage() {
     fetchAdminProfiles(undefined, {
       includeDeleted: f === "all",
       deletedOnly: f === "deleted",
+      scheduledOnly: f === "scheduled",
     }).then((profiles) => {
       setUsers(profiles)
       setLoading(false)
@@ -77,7 +88,7 @@ export default function UsersPage() {
       {users.length === 0 ? (
         <div className="mt-8 rounded-xl border border-neutral-200 bg-white p-8 text-center">
           <p className="text-sm text-neutral-500">
-            {filter === "deleted" ? "No deleted users." : filter === "all" ? "No users yet." : "No active users."}
+            {filter === "scheduled" ? "No users scheduled for deletion." : filter === "deleted" ? "No suspended users." : filter === "all" ? "No users yet." : "No active users."}
           </p>
         </div>
       ) : (
@@ -92,7 +103,12 @@ export default function UsersPage() {
                       <span className="rounded-full bg-cluvo-primary/10 px-2 py-0.5 text-xs font-medium text-cluvo-primary">Admin</span>
                     )}
                     {u.deleted_at && (
-                      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">Deleted</span>
+                      <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">Suspended</span>
+                    )}
+                    {!u.deleted_at && u.deletion_grace_started_at && (
+                      <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-600">
+                        Deletion scheduled · {daysRemaining(u.deletion_grace_started_at)}d left
+                      </span>
                     )}
                   </div>
                 </div>

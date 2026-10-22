@@ -9,6 +9,7 @@ import {
   normalizeEmail,
   NEXT_STEP_MESSAGES,
 } from "../_shared/account-step.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -79,7 +80,7 @@ Deno.serve(async (req) => {
     const next = decideNextStep({ userExists: Boolean(user), hasPassword })
     return jsonResponse({ next, message: NEXT_STEP_MESSAGES[next] })
   } catch (err) {
-    console.error(err)
+    logError("check-account", err)
     // Never guess a route on failure — the client shows a retry.
     return jsonResponse({ error: "Something went wrong. Please try again." }, 500)
   }

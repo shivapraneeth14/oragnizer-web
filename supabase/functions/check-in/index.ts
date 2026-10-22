@@ -1,6 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -11,6 +12,16 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
   "Access-Control-Max-Age": "86400",
+}
+
+type CheckInResult = {
+  success: boolean
+  message: string
+  attendee_name: string | null
+  event_title: string | null
+  event_id: string | null
+  registration_id: string | null
+  already_checked_in: boolean
 }
 
 Deno.serve(async (req) => {
@@ -82,16 +93,24 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({ error: "Not authorized to check in" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
+    } else {
+      // F-7 fix: an unknown or deleted QR no longer falls through to the
+      // RPC unauthenticated. The old code let any authenticated user reach
+      // the RPC with an arbitrary QR string — the RPC returned a canonical
+      // message, but the endpoint also confirmed the QR existed, leaking
+      // a subtle existence oracle.
+      return new Response(JSON.stringify({ error: "Invalid QR code" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
     // Authorized (or QR unknown -> let the RPC return the canonical message):
     // now validate and mark attendance.
-    const { data: result, error: rpcErr } = await supabase
+    const { data: rawResult, error: rpcErr } = await supabase
       .rpc("check_in_registration", { p_qr_code: qr_code })
       .single()
+    const result = rawResult as CheckInResult | null
 
     if (rpcErr) {
-      console.error("check_in_registration RPC error:", rpcErr)
+      logError("check-in rpc", rpcErr)
       return new Response(JSON.stringify({ error: "Check-in failed" }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
@@ -112,7 +131,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })
   } catch (err) {
-    console.error("check-in error:", err)
+    logError("check-in", err)
     return new Response(JSON.stringify({ error: "Check-in failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },

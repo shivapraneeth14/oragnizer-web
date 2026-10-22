@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { findUserByEmail } from "../_shared/users.ts"
 import { generateResetToken, otpMatches, sha256Hex } from "../_shared/otp.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -128,7 +129,7 @@ Deno.serve(async (req) => {
 
     return jsonResponse({ token, expiresIn: RESET_TOKEN_TTL_SECONDS })
   } catch (err) {
-    console.error(err)
+    logError("verify-otp", err)
     return jsonResponse({ error: "Something went wrong. Try again." }, 500)
   }
 })

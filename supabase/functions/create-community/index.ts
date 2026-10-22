@@ -1,6 +1,8 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -59,6 +61,8 @@ Deno.serve(async (req) => {
       })
     }
 
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
+
     const {
       community_name, category, description,
       city, state, country,
@@ -70,6 +74,7 @@ Deno.serve(async (req) => {
     const required: Array<[unknown, string]> = [
       [community_name, "Please enter a community name."],
       [category, "Please select a category."],
+      [description, "Please enter a community description."],
       [country, "Please select a country."],
       [state, "Please select a state."],
       [city, "Please select a city."],
@@ -144,7 +149,7 @@ Deno.serve(async (req) => {
       .from("communities")
       .insert({
         name: community_name.trim(),
-        description: description?.trim() || null,
+        description: description.trim(),
         category: category?.trim() || null,
         city: city?.trim() || null,
         state: state?.trim() || null,
@@ -161,7 +166,7 @@ Deno.serve(async (req) => {
       .single()
 
     if (communityError) {
-      console.error("Community creation failed:", communityError)
+      logError("create-community insert", communityError)
 
       // Race condition: another request created a community for this owner
       // (or name/email uniqueness via DB constraints)
@@ -199,7 +204,7 @@ Deno.serve(async (req) => {
 
     if (memberError) {
       await supabase.from("communities").delete().eq("id", community.id)
-      console.error("Member creation failed:", memberError)
+      logError("create-community member insert", memberError)
       return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
         status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
@@ -221,7 +226,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })
   } catch (err) {
-    console.error(err)
+    logError("create-community", err)
     return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },

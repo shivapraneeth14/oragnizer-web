@@ -4,6 +4,7 @@ import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { platformFeeForTicket } from "../_shared/fees.ts"
 import { clearRefundFieldsForRequote, paymentNonRequotableReason } from "../_shared/payments.ts"
 import { hasConsentRecord } from "../_shared/consent.ts"
+import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -69,6 +70,8 @@ Deno.serve(async (req) => {
     if (!(await hasConsentRecord(supabase, user.id))) {
       return new Response(JSON.stringify({ error: "Please accept the Privacy Policy and Terms of Service to continue." }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
+
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
 
     const { registration_id, coupon_code } = await req.json()
     if (!registration_id) return new Response(JSON.stringify({ error: "registration_id is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
@@ -148,14 +151,14 @@ Deno.serve(async (req) => {
     // Check for existing payment — reuse valid order, avoid duplicate
     const { data: existingPayment } = await supabase
       .from("payments")
-      .select("id, razorpay_order_id, status, refund_status, refund_claim_state, created_at, attempt_count, amount")
+      .select("id, razorpay_order_id, razorpay_payment_id, status, refund_status, refund_claim_state, created_at, attempt_count, amount")
       .eq("registration_id", registration_id)
       .maybeSingle()
 
     if (existingPayment) {
       const blockReason = paymentNonRequotableReason(existingPayment)
-      if (blockReason === "already_paid") return new Response(JSON.stringify({ error: "Already paid", code: "already_paid" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
-      if (blockReason) return new Response(JSON.stringify({ error: "A refund for this payment is in progress.", code: blockReason }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      if (blockReason === "already_paid") return new Response(JSON.stringify({ error: "You have already paid for this event.", code: "already_paid" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      if (blockReason) return new Response(JSON.stringify({ error: "A refund for your previous booking is being processed. You can rebook once it completes — we'll notify you.", code: blockReason }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
       if (existingPayment.status === "pending" && existingPayment.razorpay_order_id) {
         const orderAge = Date.now() - new Date(existingPayment.created_at).getTime()

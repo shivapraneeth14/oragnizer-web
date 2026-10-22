@@ -2,6 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { CONSENT_VERSION, isValidConsentSource } from "../_shared/consent.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -166,7 +167,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })
   } catch (err) {
-    console.error(err)
+    logError("register", err)
     return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...corsHeaders },

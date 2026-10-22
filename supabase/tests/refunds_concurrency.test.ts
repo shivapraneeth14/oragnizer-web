@@ -14,18 +14,18 @@ Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "svc_key")
 
 // --- mock Razorpay provider ------------------------------------------------
 function makeProvider() {
-  let calls = 0
+  const state = { calls: 0 }
   const refunds: Array<{ id: string; status: string; amount: number }> = []
-  globalThis.fetch = async (url: string, init?: RequestInit) => {
+  globalThis.fetch = (async (url: URL | RequestInfo | string, init?: RequestInit) => {
     const u = String(url)
     const method = (init?.method ?? "GET").toUpperCase()
     if (method === "POST" && u.endsWith("/refund")) {
-      calls++
+      state.calls++
       // Simulate provider processing: two identical refund calls would both
       // succeed against a naive mock, but a real provider (or the claim) must
       // only observe one.
       const body = JSON.parse(String(init?.body))
-      const refund = { id: `ref_${calls}`, status: "processed", amount: body.amount }
+      const refund = { id: `ref_${state.calls}`, status: "processed", amount: body.amount }
       refunds.push(refund)
       return new Response(JSON.stringify(refund), { status: 200 })
     }
@@ -33,13 +33,24 @@ function makeProvider() {
       return new Response(JSON.stringify({ items: refunds }), { status: 200 })
     }
     throw new Error(`unexpected fetch: ${method} ${u}`)
-  }
-  return { calls, refunds }
+  }) as typeof fetch
+  return { get calls() { return state.calls }, refunds }
 }
 
 // --- in-memory payments mimicking the DB + RPC claim state machine --------
 function makeDb() {
-  const row = {
+  const row: {
+    id: string
+    razorpay_payment_id: string
+    status: string
+    refund_claim_state: string
+    refund_claim_at: number | null
+    refund_status: string | null
+    refund_attempt_count: number
+    razorpay_refund_id: string | null
+    amount: number
+    walletDebits: number
+  } = {
     id: "pay_1",
     razorpay_payment_id: "payid_1",
     status: "success",
@@ -49,6 +60,7 @@ function makeDb() {
     refund_attempt_count: 0,
     razorpay_refund_id: null,
     amount: 1000,
+    walletDebits: 0,
   }
   const db = {
     row,
@@ -57,7 +69,7 @@ function makeDb() {
       if (name === "claim_payment_refund") {
         // emulate SELECT ... FOR UPDATE serialization
         if (this.row.refund_claim_state === "claimed") {
-          const fresh = this.row.refund_claim_at > Date.now() - 15 * 60 * 1000
+          const fresh = (this.row.refund_claim_at ?? 0) > Date.now() - 15 * 60 * 1000
           if (fresh) return { data: { conflict: true }, error: null }
         }
         this.row.refund_claim_state = "claimed"

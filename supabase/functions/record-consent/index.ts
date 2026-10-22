@@ -1,6 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { CONSENT_VERSION, isValidConsentSource } from "../_shared/consent.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -89,7 +90,7 @@ Deno.serve(async (req) => {
       // A concurrent request may have inserted the same version first —
       // treat unique-violation as success (idempotent write).
       if (!insertError.message?.includes("duplicate key")) {
-        console.error(insertError)
+        logError("record-consent insert", insertError)
         return json({ error: "Could not record consent." }, 500)
       }
     }

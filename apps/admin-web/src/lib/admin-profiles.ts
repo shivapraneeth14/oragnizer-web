@@ -7,13 +7,15 @@ import { supabase } from "../supabase"
 export type AdminProfile = Pick<
   Profile,
   "id" | "email" | "first_name" | "last_name" | "username" | "avatar_url" | "is_admin" | "created_at"
-> & { deleted_at: string | null }
+> & { deleted_at: string | null; deletion_grace_started_at: string | null }
 
 export interface AdminProfileFilter {
   /** Return deleted users too (single-id fetches always do). */
   includeDeleted?: boolean
-  /** Return ONLY deleted users. */
+  /** Return ONLY suspended users. */
   deletedOnly?: boolean
+  /** Return ONLY users scheduled for deletion (grace period). */
+  scheduledOnly?: boolean
 }
 
 export async function fetchAdminProfiles(id?: string, filter?: AdminProfileFilter): Promise<AdminProfile[]> {
@@ -24,6 +26,7 @@ export async function fetchAdminProfiles(id?: string, filter?: AdminProfileFilte
   if (id) body.id = id
   if (filter?.includeDeleted) body.include_deleted = true
   if (filter?.deletedOnly) body.deleted_only = true
+  if (filter?.scheduledOnly) body.scheduled_only = true
   const res = await supabaseFetch(
     "/functions/v1/admin-list-profiles",
     session.access_token,

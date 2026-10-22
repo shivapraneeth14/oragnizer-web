@@ -39,6 +39,7 @@ export function missingCommunityFields(data: CommunityData): { step1: string[]; 
   const step1: string[] = []
   if (!data.community_name.trim()) step1.push("Community name")
   if (!data.category.trim()) step1.push("Category")
+  if (!data.description.trim()) step1.push("Description")
   if (!data.country) step1.push("Country")
   if (!data.state) step1.push("State")
   if (!data.city) step1.push("City")
@@ -171,12 +172,12 @@ export default function CommunityDetailsForm({ data, onChange, checkName, checkE
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-neutral-600">Description</label>
+        <label className="mb-1 block text-xs font-medium text-neutral-600">Description *</label>
         <textarea
           value={data.description}
           onChange={(e) => update("description", e.target.value)}
           placeholder="Tell people what your community is about..."
-          rows={2}
+          rows={3}
           className="w-full resize-none rounded-lg border border-neutral-300 px-3.5 py-2 text-sm outline-none transition focus:border-cluvo-primary focus:ring-1 focus:ring-cluvo-primary/20"
         />
       </div>

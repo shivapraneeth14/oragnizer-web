@@ -40,7 +40,22 @@ Deno.serve(async (req) => {
       .single()
 
     if (!community) return new Response(JSON.stringify({ error: "Community not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
-    if (community.owner_id !== user.id) return new Response(JSON.stringify({ error: "Only the community owner can view the statement" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+
+    // Allow owner or team (ORGANIZER/MODERATOR/OWNER)
+    const isOwner = community.owner_id === user.id
+    if (!isOwner) {
+      const { data: membership } = await supabase
+        .from("community_members")
+        .select("role")
+        .eq("community_id", communityId)
+        .eq("user_id", user.id)
+        .maybeSingle()
+
+      const role = membership?.role
+      if (!role || !["OWNER", "ORGANIZER", "MODERATOR"].includes(role)) {
+        return new Response(JSON.stringify({ error: "Only the community owner or team can view the statement" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+    }
 
     const { data: rows, error: queryErr } = await supabase.rpc("get_wallet_statement", {
       p_community_id: communityId,

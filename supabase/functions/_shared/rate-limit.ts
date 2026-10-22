@@ -1,9 +1,28 @@
-import { requiredEnv } from "./env.ts"
+import { optionalEnv, requiredEnv } from "./env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+// HMAC-pepper the rate-limit identifier before it is written to the
+// rate_limits table. Raw client IPs and user UUIDs are personal data;
+// hashing them with a server-side pepper means a database dump of
+// rate_limits reveals nothing about who was rate-limited. The pepper
+// is optional for local dev — without it the identifier is stored raw
+// (matching previous behavior) so tests and `supabase start` keep working.
+const RATE_LIMIT_PEPPER = optionalEnv("RATE_LIMIT_PEPPER")
+
+async function pepperIdentifier(identifier: string): Promise<string> {
+  if (!RATE_LIMIT_PEPPER) return identifier
+  const enc = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    "raw", enc.encode(RATE_LIMIT_PEPPER),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  )
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(identifier))
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("")
+}
 
 export interface RateLimitConfig {
   maxRequests: number
@@ -58,7 +77,7 @@ export async function checkRateLimit(
   if (!cfg) return { allowed: true, remaining: 999, retryAfter: 0 }
 
   const { data } = await supabase.rpc("check_rate_limit", {
-    p_identifier: identifier,
+    p_identifier: await pepperIdentifier(identifier),
     p_action: cfg.action,
     p_max_requests: cfg.maxRequests,
     p_window_seconds: cfg.windowSeconds,

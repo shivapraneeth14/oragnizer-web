@@ -167,8 +167,22 @@ Deno.serve(async (req) => {
       .eq("id", payout.community_id)
       .single()
 
-    if (!community || community.owner_id !== user.id) {
-      return new Response(JSON.stringify({ error: "Only the community owner can check this payout" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    if (!community) {
+      return new Response(JSON.stringify({ error: "Community not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    const isOwner = community.owner_id === user.id
+    if (!isOwner) {
+      const { data: membership } = await supabase
+        .from("community_members")
+        .select("role")
+        .eq("community_id", payout.community_id)
+        .eq("user_id", user.id)
+        .maybeSingle()
+      const role = membership?.role
+      if (!role || !["OWNER", "ORGANIZER", "MODERATOR"].includes(role)) {
+        return new Response(JSON.stringify({ error: "Only the community owner or team can check this payout" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
     }
 
     results.push(await checkTransfer(payoutId, payout.cashfree_payout_id))

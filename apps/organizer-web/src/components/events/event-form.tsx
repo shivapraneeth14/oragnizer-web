@@ -3,11 +3,11 @@ import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-lea
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import type { LatLngLiteral } from "leaflet"
-import { uploadToCloudinary } from "../../lib/cloudinary"
+import { uploadToCloudinary, uploadVideoToCloudinary, videoPosterUrl, UPLOAD_CANCELLED } from "../../lib/cloudinary"
 import { reverseGeocode, searchPlaces } from "../../lib/geocode"
 import type { PlaceResult } from "../../lib/geocode"
 import type { EventFormData, DescriptionFields } from "../../hooks/use-events"
-import { emptyForm, composeDescription, parseDescription, emptyDescriptionFields } from "../../hooks/use-events"
+import { emptyForm, composeDescription, parseDescription, emptyDescriptionFields, toDatetimeLocal } from "../../hooks/use-events"
 import DropdownSelect from "../dropdown-select"
 
 interface Props {
@@ -65,12 +65,18 @@ function parseCoord(value: string): number | null {
 export default function EventForm({ initial, saving, onSave, onClose }: Props) {
   const [form, setForm] = useState<EventFormData>(initial || emptyForm)
   const [uploading, setUploading] = useState(false)
+  const [videoUploading, setVideoUploading] = useState(false)
+  const [videoProgress, setVideoProgress] = useState<number | null>(null)
+  const [videoProcessing, setVideoProcessing] = useState(false)
+  const [videoError, setVideoError] = useState<string | null>(null)
   const [locating, setLocating] = useState(false)
   const [errors, setErrors] = useState<{ start?: string; end?: string; location?: string; category?: string }>({})
   const [descFields, setDescFields] = useState<DescriptionFields>(() =>
     initial?.description ? parseDescription(initial.description) : emptyDescriptionFields
   )
   const inputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
+  const videoAbortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
   const [placeQuery, setPlaceQuery] = useState("")
   const [placeResults, setPlaceResults] = useState<PlaceResult[]>([])
@@ -94,7 +100,10 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
 
   useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+      videoAbortRef.current?.abort()
+    }
   }, [])
 
   useEffect(() => {
@@ -171,6 +180,51 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
     }
   }
 
+  const abortVideoUpload = () => {
+    videoAbortRef.current?.abort()
+    videoAbortRef.current = null
+  }
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const controller = new AbortController()
+    videoAbortRef.current = controller
+    setVideoError(null)
+    setVideoProgress(0)
+    setVideoProcessing(false)
+    setVideoUploading(true)
+    try {
+      const url = await uploadVideoToCloudinary(file, {
+        onProgress: (p) => { if (mountedRef.current) setVideoProgress(p) },
+        onProcessing: () => { if (mountedRef.current) setVideoProcessing(true) },
+        signal: controller.signal,
+      })
+      if (mountedRef.current) update("video_url", url)
+    } catch (err) {
+      if (err instanceof Error && err.message !== UPLOAD_CANCELLED && mountedRef.current) {
+        setVideoError(err.message)
+      }
+    } finally {
+      videoAbortRef.current = null
+      if (mountedRef.current) {
+        setVideoUploading(false)
+        setVideoProgress(null)
+        setVideoProcessing(false)
+      }
+      e.target.value = ""
+    }
+  }
+
+  const removeVideo = () => {
+    abortVideoUpload()
+    setVideoError(null)
+    setVideoProgress(null)
+    setVideoProcessing(false)
+    setVideoUploading(false)
+    update("video_url", "")
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title.trim()) return
@@ -213,7 +267,7 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
           <h3 className="text-lg font-semibold text-neutral-900">
             {isEditing ? "Edit Event" : "Create Event"}
           </h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">
+          <button onClick={() => { abortVideoUpload(); onClose() }} className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -248,6 +302,71 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Video (optional) */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-neutral-500">Event Video (optional)</label>
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/mp4,video/webm,video/quicktime,video/x-m4v,video/ogg"
+              onChange={handleVideoUpload}
+              className="hidden"
+            />
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-20 w-32 items-center justify-center overflow-hidden rounded-lg border border-neutral-200 bg-neutral-900">
+                {form.video_url ? (
+                  <>
+                    <img src={videoPosterUrl(form.video_url)} alt="" className="h-full w-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }} />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <svg className="h-7 w-7 text-white/80" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-xs text-neutral-400">No video</span>
+                )}
+                {videoUploading && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60">
+                    <svg className="h-6 w-6 animate-spin text-white" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span className="text-[10px] font-medium text-white">
+                      {videoProcessing ? "Processing…" : `${videoProgress ?? 0}%`}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <button type="button" onClick={() => videoInputRef.current?.click()} disabled={videoUploading}
+                  className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:bg-neutral-50 disabled:opacity-50"
+                >
+                  {videoUploading
+                    ? (videoProcessing ? "Processing…" : `Uploading… ${videoProgress ?? 0}%`)
+                    : form.video_url ? "Change" : "Upload"}
+                </button>
+                {form.video_url && !videoUploading && (
+                  <button type="button" onClick={removeVideo}
+                    className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50"
+                  >
+                    Remove
+                  </button>
+                )}
+                {videoUploading && (
+                  <button type="button" onClick={removeVideo}
+                    className="rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-500 hover:bg-neutral-50"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+            {videoError && <p className="mt-1.5 text-xs text-red-500">{videoError}</p>}
+            <p className="mt-1 text-[11px] text-neutral-400">MP4, WebM, MOV, M4V or OGG · up to 100 MB · 4K max</p>
           </div>
 
           {/* Title */}
@@ -310,7 +429,7 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
               <label className="mb-1 block text-xs font-medium text-neutral-500">Start *</label>
               <input type="datetime-local" value={form.start_date}
                 onChange={(e) => { setErrors((p) => ({ ...p, start: undefined })); update("start_date", e.target.value) }}
-                min={new Date().toISOString().slice(0, 16)}
+                min={initial ? undefined : toDatetimeLocal(new Date().toISOString())}
                 className={`w-full rounded-lg border px-3.5 py-2 text-sm outline-none transition focus:ring-1 focus:ring-cluvo-primary/20 ${
                   errors.start ? "border-red-400 focus:border-red-500" : "border-neutral-300 focus:border-cluvo-primary"
                 }`}
@@ -504,12 +623,12 @@ export default function EventForm({ initial, saving, onSave, onClose }: Props) {
 
           {/* Actions */}
           <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-            <button type="button" onClick={onClose}
+            <button type="button" onClick={() => { abortVideoUpload(); onClose() }}
               className="w-full rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50 sm:w-auto"
             >
               Cancel
             </button>
-            <button type="submit" disabled={saving || locating || !form.title.trim() || !form.category}
+            <button type="submit" disabled={saving || locating || videoUploading || !form.title.trim() || !form.category}
               className="w-full rounded-lg bg-cluvo-primary px-4 py-2 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50 sm:w-auto"
             >
               {saving ? "Saving..." : locating ? "Locating..." : isEditing ? "Save changes" : "Create event"}

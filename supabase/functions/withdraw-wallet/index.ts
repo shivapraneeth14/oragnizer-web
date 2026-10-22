@@ -2,6 +2,8 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { cashfreePost, cashfreeGet } from "../_shared/cashfree.ts"
+import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -29,6 +31,8 @@ Deno.serve(async (req) => {
 
     const rl = await checkRateLimit(user.id, "withdraw-wallet")
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
+
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
 
     const { community_id, amount } = await req.json()
     if (!community_id || !amount || amount <= 0 || !Number.isInteger(amount)) {
@@ -130,7 +134,7 @@ Deno.serve(async (req) => {
       }
 
       const { error: refundErr } = await supabase.rpc("refund_wallet", { p_payout_id: payoutId })
-      if (refundErr) console.error("refund_wallet failed after Cashfree error:", refundErr)
+      if (refundErr) logError("withdraw-wallet refund", refundErr)
       throw cfErr
     }
 
@@ -150,7 +154,9 @@ Deno.serve(async (req) => {
         payout_id: payoutId,
         community_id,
         amount,
-        cashfree_response: cashfreeResponse,
+        // Store only the transfer reference — never the raw Cashfree
+        // response, which can contain bank account numbers and IFSCs.
+        cashfree_transfer_id: cashfreeResponse?.cf_transfer_id || transferId,
       },
     })
 
@@ -161,7 +167,7 @@ Deno.serve(async (req) => {
       cashfree_reference: cashfreeResponse?.cf_transfer_id,
     }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
-    console.error("withdraw-wallet error:", err)
+    logError("withdraw-wallet", err)
     return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

@@ -4,6 +4,8 @@ import { createHmac } from "node:crypto"
 import { safeEqual } from "../_shared/crypto.ts"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { attemptRefund } from "../_shared/refunds.ts"
+import { refundSyncRowTrustworthy } from "../_shared/payments.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -28,8 +30,8 @@ const REFUND_STATUS_MAP: Record<string, string> = {
   cancelled: "failed",
 }
 
-async function processRefund(paymentId: string, amount: number) {
-  const { data: payment } = await supabase.from("payments").select("id, amount, registration_id, platform_fee, organizer_share").eq("id", paymentId).single()
+async function processRefund(paymentId: string, amount: number, reason: string = "capacity_full") {
+  const { data: payment } = await supabase.from("payments").select("id, amount, registration_id, platform_fee, organizer_share, razorpay_payment_id").eq("id", paymentId).single()
   if (!payment?.razorpay_payment_id) return
 
   const { data: registration } = await supabase.from("registrations").select("event_id, user_id").eq("id", payment.registration_id).single()
@@ -42,7 +44,7 @@ async function processRefund(paymentId: string, amount: number) {
 
   // Claim-guarded: concurrent deliveries (or a retry racing reconcile) cannot
   // issue two provider refunds — exactly one wins, the loser backs off.
-  const outcome = await attemptRefund(supabase, payment, amount, "capacity_full")
+  const outcome = await attemptRefund(supabase, payment, amount, reason)
 
   if (outcome.status === "issued") {
     // Full refund to the customer — the claim RPC already clawed the
@@ -55,13 +57,13 @@ async function processRefund(paymentId: string, amount: number) {
         payment_id: paymentId,
         details: {
           commission_amount: platformFee,
-          reason: "capacity_full",
+          reason,
           note: `Platform commission zeroed — customer refunded the full ₹${(Number(payment.amount) / 100).toFixed(0)} including our fee`,
         },
       })
     }
 
-    // Tell the customer their refund is on the way (capacity-full case).
+    // Tell the customer their refund is on the way.
     if (registration?.user_id) {
       await supabase.from("notifications").insert({
         user_id: registration.user_id,
@@ -79,7 +81,7 @@ async function processRefund(paymentId: string, amount: number) {
   await supabase.from("payment_audit_log").insert({
     action: "refund_already_processed",
     payment_id: paymentId,
-    details: { outcome: outcome.status, reason: "capacity_full" },
+    details: { outcome: outcome.status, reason },
   })
 }
 
@@ -91,17 +93,22 @@ async function syncRefundState(entity: any, _eventType: string): Promise<void> {
 
   let { data: paymentRow } = await supabase
     .from("payments")
-    .select("id, refund_attempt_count")
+    .select("id, refund_attempt_count, refund_claim_state, refund_status, status")
     .eq("razorpay_refund_id", entity.id)
     .maybeSingle()
 
   if (!paymentRow?.id && entity.payment_id) {
     const { data: byPayment } = await supabase
       .from("payments")
-      .select("id, refund_attempt_count")
+      .select("id, refund_attempt_count, refund_claim_state, refund_status, status")
       .eq("razorpay_payment_id", entity.payment_id)
       .maybeSingle()
-    paymentRow = byPayment
+    // Matching by capture id alone is ambiguous (ghost-refund bug): only
+    // trust the fallback when the row is actually inside the refund claim
+    // machine — see refundSyncRowTrustworthy.
+    if (byPayment && refundSyncRowTrustworthy(byPayment)) {
+      paymentRow = byPayment
+    }
   }
 
   if (!paymentRow?.id) return
@@ -116,6 +123,7 @@ async function syncRefundState(entity: any, _eventType: string): Promise<void> {
   if (refundStatus === "processed") {
     updates.status = "refunded"
     updates.refunded_amount = entity.amount
+    updates.refund_amount_due = null
   } else if (refundStatus === "failed") {
     updates.refund_attempt_count = (paymentRow.refund_attempt_count ?? 0) + 1
   }
@@ -128,23 +136,35 @@ async function syncRefundState(entity: any, _eventType: string): Promise<void> {
     details: { razorpay_refund_id: entity.id, razorpay_status: entity.status, refund_status: refundStatus },
   })
 
-  // Money is back at the bank — tell the customer.
+  // Money is back at the bank — tell the customer (with a rebook nudge when
+  // the refund came from a cancellation: the gate will now let them rebook).
   if (refundStatus === "processed") {
     const { data: regRow } = await supabase
       .from("payments")
-      .select("registration_id")
+      .select("registration_id, refund_reason")
       .eq("id", paymentRow.id)
       .maybeSingle()
     const { data: reg } = regRow?.registration_id
       ? await supabase.from("registrations").select("user_id, event_id").eq("id", regRow.registration_id).maybeSingle()
       : { data: null }
+    let eventTitle: string | null = null
+    if (reg?.event_id) {
+      const { data: ev } = await supabase.from("events").select("title").eq("id", reg.event_id).maybeSingle()
+      eventTitle = ev?.title ?? null
+    }
     if (reg?.user_id) {
+      const amountText = `₹${(Number(entity.amount ?? 0) / 100).toFixed(0)}`
+      const titleText = eventTitle ? `"${eventTitle}"` : "your booking"
+      const cancelledRefund = regRow?.refund_reason === "registration_cancellation" ||
+        regRow?.refund_reason === "event_cancellation"
       await supabase.from("notifications").insert({
         user_id: reg.user_id,
         type: "refund_completed",
         title: "Refund Completed",
-        body: `Refund of ₹${(Number(entity.amount ?? 0) / 100).toFixed(0)} has been credited back to your account.`,
-        payload: { payment_id: paymentRow.id, event_id: reg.event_id ?? null, amount: entity.amount ?? null, refund_id: entity.id },
+        body: cancelledRefund
+          ? `Refund of ${amountText} for ${titleText} is complete — you can rebook your spot now.`
+          : `Refund of ${amountText} has been credited back to your account.`,
+        payload: { payment_id: paymentRow.id, event_id: reg.event_id ?? null, amount: entity.amount ?? null, refund_id: entity.id, rebookable: cancelledRefund },
       })
     }
   }
@@ -242,11 +262,12 @@ Deno.serve(async (req) => {
     if (confirmErr) throw confirmErr
 
     if (confirmResult?.action === "refund_required") {
+      const reason = confirmResult?.reason || "capacity_full"
       try {
-        await processRefund(paymentRow.id, payment.amount)
+        await processRefund(paymentRow.id, payment.amount, reason)
         return new Response("Refund issued", { status: 200 })
       } catch (refundErr) {
-        console.error("Auto-refund failed:", refundErr)
+        logError("verify-payment-webhook refund", refundErr)
         return new Response("Refund failed, manual intervention required", { status: 200 })
       }
     }
@@ -257,7 +278,7 @@ Deno.serve(async (req) => {
 
     return new Response("OK", { status: 200 })
   } catch (err) {
-    console.error("verify-payment-webhook error:", err)
+    logError("verify-payment-webhook", err)
     return new Response("Internal error", { status: 500 })
   }
 })

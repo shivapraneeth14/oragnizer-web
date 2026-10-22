@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { recordAlert } from "../_shared/alerts.ts"
 import { safeEqual } from "../_shared/crypto.ts"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { attemptRefund } from "../_shared/refunds.ts"
+import { attemptRefund, refundRetryPlan } from "../_shared/refunds.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -72,7 +72,7 @@ async function processRefund(paymentId: string, amount: number, reason: string):
 async function retryPendingRefunds(): Promise<number> {
   const { data: dueRefunds, error: dueErr } = await supabase
     .from("payments")
-    .select("id, refund_status, refund_attempt_count, razorpay_refund_id, amount, refunded_amount")
+    .select("id, refund_status, refund_attempt_count, razorpay_refund_id, amount, refunded_amount, refund_amount_due, refund_reason")
     // 'refunded': cancellation refund failed. 'failed': money captured but
     // never confirmed (event cancelled) - owed back to the customer.
     // 'success': money captured AND refund attempt already failed - the
@@ -104,6 +104,7 @@ async function retryPendingRefunds(): Promise<number> {
             refund_status: "processed",
             status: "refunded",
             refunded_amount: refund.amount ?? pay.refunded_amount ?? pay.amount,
+            refund_amount_due: null,
             refund_claim_state: "issued",
           }).eq("id", pay.id)
           handled++
@@ -121,11 +122,13 @@ async function retryPendingRefunds(): Promise<number> {
         continue
       }
 
-      // No provider refund yet, or the last one failed: issue/retry one. Use
-      // the amount we already owe the customer (a self-cancel refunds the
-      // ticket only, keeping the platform fee), falling back to the full amount.
-      const retryAmount = Number(pay.refunded_amount ?? pay.amount ?? 0)
-      await processRefund(pay.id, retryAmount, "reconcile_refund_retry")
+      // No provider refund yet, or the last one failed: issue/retry one.
+      // POLICY INTEGRITY: refundRetryPlan uses the persisted owed amount and
+      // cancellation type — never re-derives. A failed customer-cancellation
+      // refund retries exactly the owed ticket (platform fee excluded); an
+      // organizer-cancellation refund retries the full amount.
+      const { amount: retryAmount, reason: retryReason } = refundRetryPlan(pay)
+      await processRefund(pay.id, retryAmount, retryReason)
       handled++
     } catch (err) {
       console.error(`Refund retry failed for ${pay.id}:`, err)
@@ -223,6 +226,12 @@ Deno.serve(async (req) => {
         action: "payment_reconcile_gave_up",
         payment_id: pay.id,
         details: { note: "Pending >2h — registration cancelled; manual review required" },
+      })
+      await recordAlert(supabase, {
+        severity: "warning",
+        category: "payment",
+        title: "Reconcile gave up on stale pending payment",
+        details: { payment_id: pay.id },
       })
       totalActions++
     }

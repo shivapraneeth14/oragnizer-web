@@ -2,6 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { isOrganizerAccount, NOT_ORGANIZER_MESSAGE } from "../_shared/organizer.ts"
+import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -64,7 +65,7 @@ Deno.serve(async (req) => {
       password,
     })
     if (error) {
-      console.error("login failed:", error.message)
+      logError("login", error.message)
       return jsonResponse({ error: safeLoginMessage(error.message) }, 400)
     }
 
@@ -92,7 +93,7 @@ Deno.serve(async (req) => {
       token_type: "bearer",
     })
   } catch (err) {
-    console.error(err)
+    logError("login", err)
     return jsonResponse({ error: "Something went wrong. Try again." }, 500)
   }
 })
