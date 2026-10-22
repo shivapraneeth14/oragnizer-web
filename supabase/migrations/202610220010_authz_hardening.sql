@@ -164,12 +164,12 @@ CREATE POLICY "reviews_public_read" ON public.reviews
 -- F-8: search_path hardening on two SECURITY DEFINER functions
 -- ============================================================================
 
-CREATE OR REPLACE FUNCTION public.is_community_member(p_community_id uuid)
+CREATE OR REPLACE FUNCTION public.is_community_member(community_id uuid)
 RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS
 $$ SELECT EXISTS (
-     SELECT 1 FROM public.community_members
-     WHERE community_id = p_community_id AND user_id = auth.uid()
+     SELECT 1 FROM public.community_members cm
+     WHERE cm.community_id = community_id AND cm.user_id = auth.uid()
    ) $$;
 
 CREATE OR REPLACE FUNCTION public.update_community_member_count()
