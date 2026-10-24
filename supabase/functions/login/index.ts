@@ -26,6 +26,11 @@ const jsonResponse = (body: Record<string, unknown>, status = 200) =>
 // GoTrue messages are internal; surface only curated, non-enumerating text.
 // The raw message stays in the console log for support.
 const safeLoginMessage = (raw: string | undefined): string => {
+  if (!raw) return "Unable to sign in. Check your details and try again."
+  const lower = raw.toLowerCase()
+  if (lower.includes("banned") || lower.includes("user_banned")) {
+    return "This account has been suspended. Please contact customer support."
+  }
   switch (raw) {
     case "Invalid login credentials":
       return "Incorrect email or password."
