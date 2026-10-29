@@ -39,7 +39,10 @@ GRANT SELECT (
   contact_email,
   contact_phone,
   commission_percent,
-  commission_on
+  commission_on,
+  deletion_grace_started_at,
+  is_hidden_before_deletion,
+  closed_at
 ) ON public.communities TO authenticated;
 
 -- 3. Owner/team/admin-only read path for the withheld columns
