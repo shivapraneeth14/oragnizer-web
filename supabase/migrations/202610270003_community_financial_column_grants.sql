@@ -77,8 +77,8 @@ AS $$
   SELECT
     c.wallet_balance,
     c.cashfree_beneficiary_id,
-    c.razorpay_account_id,
-    c.razorpay_account_status,
+    NULL::text AS razorpay_account_id,
+    NULL::text AS razorpay_account_status,
     c.platform_fee_amount
   FROM public.communities c
   WHERE c.id = p_community_id
