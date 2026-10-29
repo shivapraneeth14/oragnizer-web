@@ -17,6 +17,7 @@ import { useEvents, eventToForm } from "../hooks/use-events"
 import CommunityDetailsForm, { initialCommunityData, missingCommunityFields, type CommunityData } from "../components/community-details-form"
 import TermsCheckbox from "../components/terms-checkbox"
 import { useIsDesktop } from "../hooks/use-is-desktop"
+import { canEditEvent, canCancelEvent } from "../lib/event-lifecycle"
 import type { Event } from "shared"
 import type { EventFormData } from "../hooks/use-events"
 
@@ -189,14 +190,14 @@ export default function DashboardPage() {
   }
 
   const handleEdit = (event: Event) => {
-    if (event.status === "cancelled") return
+    if (!canEditEvent(event)) return
     setEditingEvent(event)
     setShowForm(true)
   }
 
   const handleCancelEvent = (id: string) => {
     const target = events.find((e) => e.id === id)
-    if (target) setCancelTarget(target)
+    if (target && canCancelEvent(target)) setCancelTarget(target)
   }
 
   const handleViewDetail = (event: Event) => {
@@ -204,14 +205,14 @@ export default function DashboardPage() {
   }
 
   const handleDetailEdit = () => {
-    if (!viewingEvent) return
+    if (!viewingEvent || !canEditEvent(viewingEvent)) return
     setEditingEvent(viewingEvent)
     setViewingEvent(null)
     setShowForm(true)
   }
 
   const handleDetailCancel = () => {
-    if (viewingEvent) setCancelTarget(viewingEvent)
+    if (viewingEvent && canCancelEvent(viewingEvent)) setCancelTarget(viewingEvent)
   }
 
   const handleCreateCommunity = async () => {

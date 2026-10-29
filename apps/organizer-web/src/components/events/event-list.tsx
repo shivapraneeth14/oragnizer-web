@@ -1,6 +1,13 @@
 import { useState } from "react"
 import { copyText } from "../../lib/clipboard"
 import { shareBase } from "../../lib/share"
+import {
+  canEditEvent,
+  canCancelEvent,
+  getEventDisplayStatus,
+  getEventStatusLabel,
+  eventStatusColors,
+} from "../../lib/event-lifecycle"
 import type { Event } from "shared"
 
 interface Props {
@@ -172,9 +179,14 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
                       <h4 className="text-sm font-semibold text-neutral-900">{event.title}</h4>
                       <p className="mt-0.5 text-xs text-neutral-400">{formatDate(event.start_date)}</p>
                     </div>
-                    <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColors[event.status]}`}>
-                      {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
-                    </span>
+                    {(() => {
+                      const displayStatus = getEventDisplayStatus(event)
+                      return (
+                        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${eventStatusColors[displayStatus]}`}>
+                          {getEventStatusLabel(displayStatus)}
+                        </span>
+                      )
+                    })()}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-500">
                     {event.location && (
@@ -221,7 +233,7 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
                     </svg>
                   )}
                 </button>
-                {event.status !== "cancelled" && (
+                {canEditEvent(event) && (
                   <button onClick={(e) => { e.stopPropagation(); onEdit(event) }}
                     className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-cluvo-primary"
                     title="Edit"
@@ -231,7 +243,7 @@ export default function EventList({ events, loading, loadingMore, hasMore, error
                     </svg>
                   </button>
                 )}
-                {event.status !== "cancelled" && (
+                {canCancelEvent(event) && (
                   <button onClick={(e) => { e.stopPropagation(); onCancel(event.id) }}
                     className="rounded-lg p-1.5 text-neutral-400 hover:bg-red-50 hover:text-red-500"
                     title="Cancel event"

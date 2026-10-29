@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "../supabase"
+import { canEditEvent, canCancelEvent, isEventClosed } from "../lib/event-lifecycle"
 import type { Event } from "shared"
 
 export type EventFormData = {
@@ -188,14 +189,16 @@ export function useEvents(communityId: string | undefined) {
     }
     if (!data.category) return "Category is required"
 
-    // Prevent editing cancelled events
+    // Prevent editing cancelled or closed events
     const { data: currentEvent } = await supabase
       .from("events")
-      .select("status")
+      .select("status, start_date, end_date")
       .eq("id", id)
       .maybeSingle()
-    if (currentEvent?.status === "cancelled") {
-      return "Cannot edit a cancelled event"
+    if (currentEvent && !canEditEvent(currentEvent)) {
+      return isEventClosed(currentEvent)
+        ? "Cannot edit an event that has already ended (closed)"
+        : "Cannot edit a cancelled event"
     }
 
     const { error } = await supabase.from("events").update({
@@ -221,6 +224,18 @@ export function useEvents(communityId: string | undefined) {
   }, [fetch])
 
   const cancelEvent = useCallback(async (id: string): Promise<string | null> => {
+    // Prevent cancelling closed events
+    const { data: currentEvent } = await supabase
+      .from("events")
+      .select("status, start_date, end_date")
+      .eq("id", id)
+      .maybeSingle()
+    if (currentEvent && !canCancelEvent(currentEvent)) {
+      return isEventClosed(currentEvent)
+        ? "Cannot cancel an event that has already ended (closed)"
+        : "Cannot cancel this event"
+    }
+
     const { data, error } = await supabase.functions.invoke("cancel-event", {
       body: { event_id: id },
     })
