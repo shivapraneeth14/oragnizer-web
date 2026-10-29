@@ -2,7 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { findUserByEmail } from "../_shared/users.ts"
-import { generateResetToken, otpMatches, sha256Hex } from "../_shared/otp.ts"
+import { generateResetToken, otpHash, otpMatches } from "../_shared/otp.ts"
 import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
       .from("password_reset_otps")
       .update({
         otp_hash: null,
-        reset_token_hash: await sha256Hex(token),
+        reset_token_hash: await otpHash(token),
         reset_token_expires_at: expiresAt,
         updated_at: new Date().toISOString(),
       })

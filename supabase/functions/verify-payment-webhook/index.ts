@@ -212,10 +212,11 @@ Deno.serve(async (req) => {
     const eventEntity = isCaptured
       ? payload.payload?.payment?.entity
       : (payload.payload?.refund?.entity ?? payload.payload?.payment?.entity)
-    const eventIdFallback = eventEntity
-      ? `${eventEntity.id}_${eventType}`.replaceAll("_", "")
-      : `${Date.now()}_${eventType}`
-    const razorpayEventId = req.headers.get("x-razorpay-event-id") || eventIdFallback
+    const razorpayHeaderId = req.headers.get("x-razorpay-event-id")
+    if (!razorpayHeaderId && !eventEntity?.id) {
+      return new Response("Missing event identifier", { status: 400 })
+    }
+    const razorpayEventId = razorpayHeaderId || `${eventEntity.id}_${eventType}`.replaceAll("_", "")
     const { data: dedupResult } = await supabase
       .rpc("try_process_webhook", {
         p_webhook_id: razorpayEventId,

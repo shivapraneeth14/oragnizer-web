@@ -3,19 +3,15 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { CONSENT_VERSION, isValidConsentSource } from "../_shared/consent.ts"
 import { logError } from "../_shared/logger.ts"
+import { getCorsHeaders } from "../_shared/cors.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-client-info",
-  "Access-Control-Max-Age": "86400",
-}
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req)
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
   }
@@ -69,6 +65,12 @@ Deno.serve(async (req) => {
 
     if (password.length < 8) {
       return new Response(JSON.stringify({ error: "Password must be at least 8 characters." }), {
+        status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    if (password.length > 128) {
+      return new Response(JSON.stringify({ error: "Password must not exceed 128 characters." }), {
         status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }

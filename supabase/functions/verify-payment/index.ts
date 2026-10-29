@@ -31,8 +31,20 @@ async function razorpayGet(path: string): Promise<any> {
 }
 
 // Adopt a captured Razorpay order into a confirmed booking. Guarded by
-// confirm_payment (terminal-state + event/capacity checks). Never issues a
-// refund here — money-out stays server-side (reconcile) on purpose.
+// confirm_payment (terminal-state + event/capacity checks).
+import { attemptRefund, refundRetryPlan } from "../_shared/refunds.ts"
+
+async function processRefundLocally(paymentId: string, amount: number, reason: string) {
+  const { data: payment } = await supabase
+    .from("payments")
+    .select("id, razorpay_payment_id, refund_attempt_count, registration_id, amount, platform_fee, organizer_share, refund_amount_due, refund_reason")
+    .eq("id", paymentId)
+    .single()
+  if (!payment) return
+  const { amount: retryAmount, reason: retryReason } = refundRetryPlan({ ...payment, amount, refund_amount_due: payment.refund_amount_due ?? amount, refund_reason: payment.refund_reason ?? reason })
+  await attemptRefund(supabase, payment, retryAmount, retryReason)
+}
+
 async function confirmCapturedOrder(paymentId: string, orderId: string): Promise<string> {
   const order = await razorpayGet(`orders/${orderId}`)
   if (order.status !== "paid" || (order.amount_paid || 0) <= 0) return "awaiting"
@@ -46,7 +58,22 @@ async function confirmCapturedOrder(paymentId: string, orderId: string): Promise
     .rpc("confirm_payment", { p_payment_id: paymentId })
   if (confirmErr) throw confirmErr
   if (confirmResult?.error) return "needs_repair"
-  if (confirmResult?.action === "refund_required") return "refund_pending"
+  if (confirmResult?.action === "refund_required") {
+    const reason = confirmResult?.reason || "capacity_full"
+    try {
+      // G-02: ensure refund is actually started (webhook may not deliver).
+      // Money-out goes through the claim-guarded refund flow.
+      const { data: paymentRow } = await supabase
+        .from("payments")
+        .select("amount")
+        .eq("id", paymentId)
+        .single()
+      await processRefundLocally(paymentId, paymentRow?.amount ?? captured.amount ?? order.amount_paid, reason)
+    } catch (err) {
+      console.error(`verify-payment refund failed for ${paymentId}:`, err)
+    }
+    return "refund_pending"
+  }
   return "confirmed"
 }
 

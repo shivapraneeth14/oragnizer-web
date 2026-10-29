@@ -1,25 +1,14 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { sha256Hex } from "../_shared/otp.ts"
+import { otpHash } from "../_shared/otp.ts"
 import { sendCluvoEmail } from "../_shared/send-email.ts"
+import { getCorsHeaders } from "../_shared/cors.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-client-info",
-  "Access-Control-Max-Age": "86400",
-}
-
-const jsonResponse = (body: Record<string, unknown>, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
-  })
 
 const INVALID_RESET_MESSAGE = "This reset request is invalid or has expired. Please request a new code."
 
@@ -27,11 +16,19 @@ const INVALID_RESET_MESSAGE = "This reset request is invalid or has expired. Ple
 // hand-crafted request cannot set a weak password.
 function validatePasswordServer(password: string): string | null {
   if (password.length < 8) return "Password must be at least 8 characters."
+  if (password.length > 128) return "Password must not exceed 128 characters."
   if (!/[A-Z]/.test(password)) return "Password needs at least one capital letter."
   return null
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req)
+  const jsonResponse = (body: Record<string, unknown>, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    })
+
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
   }
@@ -56,7 +53,7 @@ Deno.serve(async (req) => {
     const policyError = validatePasswordServer(password)
     if (policyError) return jsonResponse({ error: policyError }, 400)
 
-    const tokenHash = await sha256Hex(token)
+    const tokenHash = await otpHash(token)
     const { data: row } = await supabase
       .from("password_reset_otps")
       .select("user_id, reset_token_hash, reset_token_expires_at")

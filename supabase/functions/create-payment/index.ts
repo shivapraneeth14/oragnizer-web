@@ -155,7 +155,7 @@ Deno.serve(async (req) => {
     const { data: existingPayment } = existing
       ? await supabase
           .from("payments")
-          .select("id, razorpay_order_id, razorpay_payment_id, status, refund_status, refund_claim_state, refund_amount_due, refund_reason, platform_fee, created_at, attempt_count, amount")
+          .select("id, razorpay_order_id, razorpay_payment_id, status, refund_status, refund_claim_state, refund_amount_due, refund_reason, refund_attempt_count, platform_fee, created_at, attempt_count, amount")
           .eq("registration_id", existing.id)
           .maybeSingle()
       : { data: null }

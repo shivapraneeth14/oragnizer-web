@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
     // Check for existing payment — reuse valid order, avoid duplicate
     const { data: existingPayment } = await supabase
       .from("payments")
-      .select("id, razorpay_order_id, razorpay_payment_id, status, refund_status, refund_claim_state, created_at, attempt_count, amount")
+      .select("id, razorpay_order_id, razorpay_payment_id, status, refund_status, refund_claim_state, refund_reason, refund_amount_due, refund_attempt_count, created_at, attempt_count, amount")
       .eq("registration_id", registration_id)
       .maybeSingle()
 

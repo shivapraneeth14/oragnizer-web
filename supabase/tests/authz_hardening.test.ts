@@ -43,9 +43,15 @@ Deno.test("sensitive financial/contact columns are excluded from the anon whitel
   }
 })
 
-Deno.test("authenticated keeps table-wide SELECT (organizer/admin use select(*))", () => {
-  assert(!/REVOKE SELECT ON public\.communities FROM[^;]*authenticated/.test(sql))
-  assert(!/REVOKE SELECT \([\s\S]*?\) ON public\.communities FROM[^;]*authenticated/.test(sql))
+Deno.test("authenticated table-wide SELECT is superseded by the E-01 fix", async () => {
+  // 202610220010 granted `authenticated` the whole table so select("*") kept
+  // working. That is exactly the exposure E-01 closes; this test now pins the
+  // supersession rather than the insecure shape.
+  const fix = await Deno.readTextFile(
+    new URL("../migrations/202610270003_community_financial_column_grants.sql", import.meta.url),
+  )
+  assert(fix.includes("REVOKE SELECT ON public.communities FROM authenticated, PUBLIC;"))
+  assert(/GRANT SELECT \([\s\S]*?\) ON public\.communities TO authenticated;/.test(fix))
 })
 
 Deno.test("F-3: waitlist team delete is dropped and reads require the team role", () => {

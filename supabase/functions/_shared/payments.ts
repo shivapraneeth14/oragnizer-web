@@ -8,16 +8,32 @@ export interface PaymentRowSummary {
   razorpay_refund_id?: string | null
   refunded_amount?: number | null
   razorpay_payment_id?: string | null
+  refund_reason?: string | null
+  refund_amount_due?: number | null
+  refund_attempt_count?: number | null
 }
 
 // A payment row that is paid, or has a refund in flight at the provider, must
 // NEVER be demoted to `pending`: re-quoting it would resurrect a cancelled
 // booking and hand the user a Pay screen for money that already moved.
 // Returns null when re-quote / reuse is allowed.
+// A recorded refund debt means money must go back to the customer; re-quoting
+// the same payments row would overwrite/lose that debt and could strand it.
+export function hasRecordedRefundDebt(p: PaymentRowSummary): boolean {
+  if (p.refund_amount_due != null && Number(p.refund_amount_due) > 0) return true
+  if (p.refund_reason) return true
+  return false
+}
+
 export function paymentNonRequotableReason(p: PaymentRowSummary): string | null {
   if (p.status === "success") return "already_paid"
   if (p.refund_claim_state === "claimed") return "refund_in_progress"
   if (p.refund_status && ["requested", "pending", "queued"].includes(p.refund_status)) {
+    return "refund_in_progress"
+  }
+  // A failed payment that still carries a recorded refund debt must be settled
+  // before a new checkout can reuse that row (G-02).
+  if (p.status === "failed" && hasRecordedRefundDebt(p)) {
     return "refund_in_progress"
   }
   return null
@@ -28,7 +44,10 @@ export function refundFieldsPresent(p: PaymentRowSummary): boolean {
     p.refund_status ||
     p.razorpay_refund_id ||
     p.refunded_amount ||
-    (p.refund_claim_state && p.refund_claim_state !== "none")
+    (p.refund_claim_state && p.refund_claim_state !== "none") ||
+    p.refund_reason ||
+    (p.refund_amount_due != null && Number(p.refund_amount_due) > 0) ||
+    (p.refund_attempt_count != null && Number(p.refund_attempt_count) > 0)
   )
 }
 
@@ -79,6 +98,9 @@ export async function clearRefundFieldsForRequote(
       prior_razorpay_refund_id: payment.razorpay_refund_id ?? null,
       prior_refunded_amount: payment.refunded_amount ?? null,
       prior_refund_claim_state: payment.refund_claim_state ?? null,
+      prior_refund_reason: payment.refund_reason ?? null,
+      prior_refund_amount_due: payment.refund_amount_due ?? null,
+      prior_refund_attempt_count: payment.refund_attempt_count ?? null,
     },
   })
   await supabase.from("payments").update({
@@ -88,6 +110,9 @@ export async function clearRefundFieldsForRequote(
     refunded_amount: null,
     refund_claim_state: "none",
     refund_claim_at: null,
+    refund_reason: null,
+    refund_amount_due: null,
+    refund_attempt_count: 0,
   }).eq("id", payment.id)
 }
 

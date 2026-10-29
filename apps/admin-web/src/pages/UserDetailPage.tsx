@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom"
 import { supabase } from "../supabase"
 import { fetchAdminProfiles, type AdminProfile } from "../lib/admin-profiles"
 import { daysRemaining, deletionDueAt } from "../lib/deletion"
-import type { Community, CommunityMember, Registration, Event } from "shared"
+import { COMMUNITY_CLIENT_COLUMNS_SELECT, type Community, type CommunityMember, type Registration, type Event } from "shared"
 
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -29,12 +29,12 @@ export default function UserDetailPage() {
     if (!id) return
     Promise.all([
       fetchAdminProfiles(id),
-      supabase.from("communities").select("*").eq("owner_id", id).order("created_at", { ascending: false }),
+      supabase.from("communities").select(COMMUNITY_CLIENT_COLUMNS_SELECT).eq("owner_id", id).order("created_at", { ascending: false }),
       supabase.from("community_members").select("*, communities!inner(name)").eq("user_id", id).order("joined_at", { ascending: false }),
       supabase.from("registrations").select("*, events!inner(title)").eq("user_id", id).order("registered_at", { ascending: false }),
     ]).then(([adminProfiles, oRes, mRes, rRes]) => {
       setProfile(adminProfiles[0] ?? null)
-      setOwnedCommunities((oRes.data as Community[]) || [])
+      setOwnedCommunities((oRes.data as unknown as Community[]) || [])
       setMemberships((mRes.data as any[] || []).map((m) => ({ ...m, community_name: m.communities?.name })))
       setRegistrations((rRes.data as any[] || []).map((r) => ({ ...r, event_title: r.events?.title })))
       setLoading(false)

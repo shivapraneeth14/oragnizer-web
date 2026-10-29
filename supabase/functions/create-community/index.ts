@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
       community_name, category, description,
       city, state, country,
       contact_email, contact_phone,
-      tags, visibility, rules, agree18, agreeContent,
+      tags, rules, agree18, agreeContent,
     } = await req.json()
 
     const errors: string[] = []
@@ -157,7 +157,9 @@ Deno.serve(async (req) => {
         contact_email: contact_email?.trim() || null,
         contact_phone: contact_phone?.trim() || null,
         tags: Array.isArray(tags) ? tags : null,
-        visibility: visibility || "public",
+        // Private communities are retired: always public, regardless of what
+        // the caller sends. A DB trigger enforces the same rule.
+        visibility: "public",
         rules: rules?.trim() || null,
         owner_id: user.id,
         verification_status: "unverified",

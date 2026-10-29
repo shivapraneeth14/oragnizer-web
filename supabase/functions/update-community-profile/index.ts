@@ -126,8 +126,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (visibility !== undefined && !["public", "private"].includes(visibility)) {
-      return new Response(JSON.stringify({ error: "Visibility must be public or private." }), {
+    if (visibility !== undefined && visibility !== "public") {
+      return new Response(JSON.stringify({ error: "Private communities are not supported." }), {
         status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }

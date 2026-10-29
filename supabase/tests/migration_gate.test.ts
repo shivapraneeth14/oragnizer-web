@@ -20,6 +20,7 @@ const audit = await read("202610220013_payment_audit_scrub_support.sql")
 const outbox = await read("202610220014_media_cleanup_outbox.sql")
 const purgeCron = await read("202610220015_schedule_deletion_purge.sql")
 const reportsRetention = await read("202610220016_content_reports_retain_on_delete.sql")
+const refundStatus = await read("202610290003_confirm_payment_refund_status.sql")
 
 Deno.test("migration version prefixes are unique and ordered", async () => {
   const names = (await Array.fromAsync(Deno.readDir(dir)))
@@ -44,6 +45,17 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610220014_media_cleanup_outbox.sql",
     "202610220015_schedule_deletion_purge.sql",
     "202610220016_content_reports_retain_on_delete.sql",
+    "202610270001_profile_guard_deletion_columns.sql",
+    "202610270002_revoke_user_sessions.sql",
+    "202610270003_community_financial_column_grants.sql",
+    "202610270004_retire_private_communities.sql",
+    "202610280001_fix_cancelled_event_cleanup.sql",
+    "202610280002_community_deletion_grace.sql",
+    "202610280003_community_closure.sql",
+    "202610280004_block_activity_on_closure_grace.sql",
+    "202610290001_block_members_of_closure_communities.sql",
+    "202610290002_revoke_on_admin_demotion.sql",
+    "202610290003_confirm_payment_refund_status.sql",
   ])
 })
 
@@ -104,3 +116,12 @@ Deno.test("014 outbox is deny-all for clients and service_role-writable", () => 
   assert(outbox.includes("idx_media_cleanup_pending"))
   assert(outbox.includes("FOR EACH ROW EXECUTE FUNCTION public.set_media_cleanup_updated_at()"))
 })
+
+Deno.test("202610290003 confirm_payment sets refund_reason without blocking refund_status", () => {
+  assert(refundStatus.includes("CREATE OR REPLACE FUNCTION confirm_payment"))
+  assert(!refundStatus.includes("refund_status = COALESCE(refund_status, 'requested')"))
+  assert(refundStatus.includes("refund_reason = COALESCE(refund_reason, 'registration_cancellation')"))
+  assert(refundStatus.includes("refund_reason = COALESCE(refund_reason, 'event_cancellation')"))
+  assert(refundStatus.includes("refund_reason = COALESCE(refund_reason, 'capacity_full')"))
+})
+

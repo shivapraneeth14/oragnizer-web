@@ -1,11 +1,157 @@
 name: Deploy to prod Supabase
 
+# ==============================================================================
+# Production Deployment Workflow — Cluvo Platform
+#
+# Safeguards:
+# 1. Manual Dispatch Only: Never triggers automatically on push/merge to main.
+# 2. Confirmation Input: Requires typing "deploy-prod" to initiate.
+# 3. Branch Enforcement: Strictly runnable only on refs/heads/main.
+# 4. Commit-Specific CI Gate: Validates that all 6 jobs in ci.yml (env-hygiene,
+#    deno-tests, typecheck-web, build-web, supabase-migrations, detect-secrets)
+#    have completed with status=success for this EXACT commit SHA before deploying.
+# 5. Local Pre-Flight Check: Executes environment hygiene and contract tests.
+# 6. Protected Environment Gate: Bound to GitHub 'production' environment.
+#    NOTE FOR REPOSITORY OWNER: To enforce human manual approval in the GitHub UI,
+#    configure "Required reviewers" under Repository Settings -> Environments -> production.
+# ==============================================================================
+
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy-prod" to confirm production deployment'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
+  verify-ci:
+    name: Verify Release CI & Contract Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate confirmation input
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "deploy-prod" ]; then
+            echo "Error: Deployment confirmation string 'deploy-prod' was not provided."
+            exit 1
+          fi
+
+      - name: Enforce main branch
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "Error: Production deployment can only be executed from refs/heads/main (current: ${{ github.ref }})."
+            exit 1
+          fi
+
+      - name: Verify commit-specific CI completion (all 6 jobs)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Verifying CI workflow (ci.yml) status for commit ${{ github.sha }} on main..."
+          RUN_JSON=$(gh run list --workflow=ci.yml --branch=main --commit="${{ github.sha }}" --json databaseId,status,conclusion,url,event,headBranch,headSha,workflowName --limit 1 --jq '.[0]')
+
+          if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "null" ]; then
+            echo "Error: No CI workflow run found for commit ${{ github.sha }} on main."
+            echo "All required CI jobs (env-hygiene, deno-tests, typecheck-web, build-web, supabase-migrations, detect-secrets) must run and pass on main before deploying."
+            exit 1
+          fi
+
+          RUN_ID=$(echo "$RUN_JSON" | jq -r .databaseId)
+          STATUS=$(echo "$RUN_JSON" | jq -r .status)
+          CONCLUSION=$(echo "$RUN_JSON" | jq -r .conclusion)
+          URL=$(echo "$RUN_JSON" | jq -r .url)
+          BRANCH=$(echo "$RUN_JSON" | jq -r .headBranch)
+          HEAD_SHA=$(echo "$RUN_JSON" | jq -r .headSha)
+          WORKFLOW_NAME=$(echo "$RUN_JSON" | jq -r .workflowName)
+
+          echo "Found CI Run ID: $RUN_ID"
+          echo "URL: $URL"
+          echo "Workflow: $WORKFLOW_NAME | Branch: $BRANCH | Head SHA: $HEAD_SHA"
+          echo "Status: $STATUS | Conclusion: $CONCLUSION"
+
+          # 1. Enforce workflow is 'CI'
+          if [ "$WORKFLOW_NAME" != "CI" ]; then
+            echo "Error: CI run workflow '$WORKFLOW_NAME' does not match expected 'CI'."
+            exit 1
+          fi
+
+          # 2. Enforce branch is explicitly 'main'
+          if [ "$BRANCH" != "main" ]; then
+            echo "Error: CI run was executed for branch '$BRANCH', expected 'main'."
+            exit 1
+          fi
+
+          # 3. Enforce head SHA matches target commit
+          if [ "$HEAD_SHA" != "${{ github.sha }}" ]; then
+            echo "Error: CI run head SHA '$HEAD_SHA' does not match deployment target '${{ github.sha }}'."
+            exit 1
+          fi
+
+          # 4. Enforce overall run completed with success
+          if [ "$STATUS" != "completed" ] || [ "$CONCLUSION" != "success" ]; then
+            echo "Error: CI run for commit ${{ github.sha }} has not completed successfully (status: $STATUS, conclusion: $CONCLUSION)."
+            echo "Deployment blocked. Please ensure all CI checks pass on main before deploying to production."
+            exit 1
+          fi
+
+          # 5. Verify all 6 individual required CI jobs are represented and successful
+          echo "Verifying all 6 required jobs in CI run $RUN_ID..."
+          JOBS_JSON=$(gh run view "$RUN_ID" --json jobs --jq '.jobs')
+
+          REQUIRED_JOBS=(
+            "Environment hygiene"
+            "Edge-function contract tests"
+            "TypeScript type check"
+            "Vite build"
+            "Supabase migration lint"
+            "Secret detection"
+          )
+
+          for job in "${REQUIRED_JOBS[@]}"; do
+            JOB_CONCLUSION=$(echo "$JOBS_JSON" | jq -r --arg n "$job" '.[] | select(.name == $n) | .conclusion')
+            if [ -z "$JOB_CONCLUSION" ] || [ "$JOB_CONCLUSION" = "null" ]; then
+              echo "Error: Required CI job '$job' was not found in CI run $RUN_ID."
+              exit 1
+            fi
+            if [ "$JOB_CONCLUSION" != "success" ]; then
+              echo "Error: Required CI job '$job' did not succeed (conclusion: '$JOB_CONCLUSION')."
+              exit 1
+            fi
+            echo "  [OK] $job: $JOB_CONCLUSION"
+          done
+
+          echo "Commit-specific CI verification passed successfully: all 6 jobs verified."
+
+      - name: Pre-flight environment hygiene
+        run: ./scripts/check-env-hygiene.sh
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Pre-flight contract tests & migration gate
+        run: deno test --allow-read --allow-env --no-lock --node-modules-dir=none supabase/tests
+
+  production-gate:
+    name: Production Environment Protection Gate
+    needs: [verify-ci]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Confirm production environment gate
+        run: echo "Production environment approval and protection rules cleared."
+
   deploy:
+    name: Deploy to Production Supabase
+    needs: [production-gate]
     uses: ./.github/workflows/deploy-supabase.yml
     with:
       project-ref: vdxspyumkvwawmqwfkzr

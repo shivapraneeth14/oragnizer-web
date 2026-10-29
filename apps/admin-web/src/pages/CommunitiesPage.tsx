@@ -2,21 +2,37 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { supabase } from "../supabase"
 import { fetchAdminProfiles } from "../lib/admin-profiles"
-import type { Community } from "shared"
+import { COMMUNITY_CLIENT_COLUMNS_SELECT, type Community } from "shared"
+
+const GRACE_DAYS = 30
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function daysRemaining(startedAt: string) {
+  const due = new Date(new Date(startedAt).getTime() + GRACE_DAYS * DAY_MS).getTime()
+  return Math.max(0, Math.ceil((due - Date.now()) / DAY_MS))
+}
+
+const FILTERS = [
+  { key: "active", label: "Active" },
+  { key: "scheduled", label: "Scheduled for closure" },
+  { key: "all", label: "All" },
+] as const
 
 export default function CommunitiesPage() {
-  const [communities, setCommunities] = useState<(Community & { owner_email?: string })[]>([])
+  const [communities, setCommunities] = useState<(Community & { owner_email?: string; deletion_grace_started_at?: string | null })[]>([])
   const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<"active" | "scheduled" | "all">("all")
 
   useEffect(() => {
+    setLoading(true)
     Promise.all([
-      supabase.from("communities").select("*").order("created_at", { ascending: false }),
+      supabase.from("communities").select(COMMUNITY_CLIENT_COLUMNS_SELECT).order("created_at", { ascending: false }),
       fetchAdminProfiles(),
     ]).then(([cRes, profiles]) => {
       const emailById = new Map(profiles.map((p) => [p.id, p.email]))
       if (cRes.data) {
         setCommunities(
-          (cRes.data as Community[]).map((c) => ({
+          (cRes.data as unknown as any[]).map((c) => ({
             ...c,
             owner_email: emailById.get(c.owner_id),
           }))
@@ -25,6 +41,13 @@ export default function CommunitiesPage() {
       setLoading(false)
     }, () => setLoading(false))
   }, [])
+
+  const filtered = communities.filter((c: any) => {
+    const scheduled = c.deletion_grace_started_at && !c.deleted_at
+    if (filter === "scheduled") return scheduled
+    if (filter === "active") return !scheduled && !c.deleted_at
+    return true
+  })
 
   if (loading) {
     return (
@@ -42,14 +65,30 @@ export default function CommunitiesPage() {
       <h3 className="text-xl font-semibold text-neutral-900">All Communities</h3>
       <p className="mt-2 text-sm text-neutral-500">Manage and review all communities on the platform.</p>
 
-      {communities.length === 0 ? (
+      <div className="mt-4 flex flex-wrap gap-2">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className={`rounded-lg px-3 py-1.5 text-sm ${
+              filter === f.key
+                ? "bg-cluvo-primary text-white"
+                : "border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="mt-8 rounded-xl border border-neutral-200 bg-white p-8 text-center">
-          <p className="text-sm text-neutral-500">No communities yet.</p>
+          <p className="text-sm text-neutral-500">{filter === "scheduled" ? "No communities scheduled for closure." : filter === "active" ? "No active communities." : "No communities yet."}</p>
         </div>
       ) : (
         <>
           <div className="mt-6 space-y-3 md:hidden">
-            {communities.map((c) => (
+            {filtered.map((c: any) => (
               <Link key={c.id} to={`/communities/${c.id}`} className="block rounded-xl border border-neutral-200 bg-white p-4">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-cluvo-primary">{c.name}</span>
@@ -92,26 +131,32 @@ export default function CommunitiesPage() {
                 </tr>
               </thead>
               <tbody>
-                {communities.map((c) => (
+                {filtered.map((c: any) => {
+                  const scheduled = c.deletion_grace_started_at && !c.deleted_at
+                  return (
                   <tr key={c.id} className="border-b border-neutral-100 transition-colors hover:bg-neutral-50">
                     <td className="px-4 py-3">
                       <Link to={`/communities/${c.id}`} className="font-medium text-cluvo-primary hover:text-cluvo-primary-dark">
                         {c.name}
                       </Link>
+                      {c.is_hidden && !scheduled && <span className="ml-2 text-xs text-amber-600">(Hidden)</span>}
                     </td>
                     <td className="px-4 py-3 text-neutral-600">{c.owner_email || "—"}</td>
                     <td className="px-4 py-3 text-neutral-600">{c.member_count}</td>
                     <td className="px-4 py-3 text-neutral-600">{c.event_count}</td>
                     <td className="px-4 py-3 text-neutral-600">{new Date(c.created_at).toLocaleDateString()}</td>
                     <td className="px-4 py-3">
-                      {c.is_hidden ? (
+                      {scheduled ? (
+                        <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-600">Closure scheduled · {daysRemaining(c.deletion_grace_started_at)}d left</span>
+                      ) : c.is_hidden ? (
                         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Hidden</span>
                       ) : (
                         <span className="text-neutral-400">—</span>
                       )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

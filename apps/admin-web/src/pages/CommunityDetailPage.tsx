@@ -2,7 +2,19 @@ import { useEffect, useState } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { supabase } from "../supabase"
 import { fetchAdminProfiles, type AdminProfile } from "../lib/admin-profiles"
-import type { Community, CommunityMember, Event } from "shared"
+import { COMMUNITY_CLIENT_COLUMNS_SELECT, type Community, type CommunityMember, type Event } from "shared"
+
+const GRACE_DAYS = 30
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function daysRemaining(startedAt: string) {
+  const due = new Date(new Date(startedAt).getTime() + GRACE_DAYS * DAY_MS).getTime()
+  return Math.max(0, Math.ceil((due - Date.now()) / DAY_MS))
+}
+
+function deletionDueAt(startedAt: string) {
+  return new Date(new Date(startedAt).getTime() + GRACE_DAYS * DAY_MS)
+}
 
 export default function CommunityDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -15,15 +27,17 @@ export default function CommunityDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [togglingHidden, setTogglingHidden] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [error, setError] = useState("")
 
   useEffect(() => {
     if (!id) return
     Promise.all([
-      supabase.from("communities").select("*").eq("id", id).single(),
+      supabase.from("communities").select(COMMUNITY_CLIENT_COLUMNS_SELECT).eq("id", id).single(),
       supabase.from("community_members").select("*").eq("community_id", id).order("joined_at"),
       fetchAdminProfiles(),
     ]).then(([cRes, mRes, profiles]) => {
-      const comm = cRes.data as Community | null
+      const comm = cRes.data as unknown as Community | null
       setCommunity(comm)
       const byId = new Map(profiles.map((p) => [p.id, p]))
       if (comm) {
@@ -51,13 +65,34 @@ export default function CommunityDetailPage() {
   const handleDelete = async () => {
     if (!id) return
     setDeleting(true)
+    setError("")
     const { data: { session } } = await supabase.auth.getSession()
     const { supabaseFetch } = await import("../supabase-fetch")
     const res = await supabaseFetch("/functions/v1/admin-delete-community", session?.access_token, { community_id: id })
     const result = await res.json()
     setDeleting(false)
     setConfirmDelete(false)
-    if (result.success) navigate("/communities", { replace: true })
+    if (result.success) {
+      window.location.reload()
+    } else {
+      setError(result.error || "Something went wrong.")
+    }
+  }
+
+  const handleCancelDeletion = async () => {
+    if (!id) return
+    setCancelling(true)
+    setError("")
+    const { data: { session } } = await supabase.auth.getSession()
+    const { supabaseFetch } = await import("../supabase-fetch")
+    const res = await supabaseFetch("/functions/v1/admin-cancel-community-deletion", session?.access_token, { community_id: id })
+    const result = await res.json()
+    setCancelling(false)
+    if (result.success) {
+      window.location.reload()
+    } else {
+      setError(result.error || "Something went wrong.")
+    }
   }
 
   if (loading) {
@@ -80,6 +115,8 @@ export default function CommunityDetailPage() {
     )
   }
 
+  const isScheduledForDeletion = (community as any).deletion_grace_started_at && !(community as any).deleted_at
+
   return (
     <div className="space-y-6">
       <Link to="/communities" className="text-sm text-neutral-500 hover:text-cluvo-primary">&larr; Back to Communities</Link>
@@ -91,24 +128,42 @@ export default function CommunityDetailPage() {
             <p className="mt-1 text-sm text-neutral-500">{community.description || "No description"}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            {community.is_hidden && (
+            {isScheduledForDeletion && (
+              <span className="rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-600">
+                Closure scheduled · {daysRemaining((community as any).deletion_grace_started_at)}d left
+              </span>
+            )}
+            {community.is_hidden && !isScheduledForDeletion && (
               <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
                 Hidden from app
               </span>
             )}
-            <button
-              onClick={handleToggleHidden}
-              disabled={togglingHidden}
-              className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-            >
-              {togglingHidden ? "Saving..." : community.is_hidden ? "Make visible" : "Hide from app"}
-            </button>
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
-            >
-              Delete
-            </button>
+            {!isScheduledForDeletion && (
+              <>
+                <button
+                  onClick={handleToggleHidden}
+                  disabled={togglingHidden}
+                  className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                >
+                  {togglingHidden ? "Saving..." : community.is_hidden ? "Make visible" : "Hide from app"}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100"
+                >
+                  Schedule closure
+                </button>
+              </>
+            )}
+            {isScheduledForDeletion && (
+              <button
+                onClick={handleCancelDeletion}
+                disabled={cancelling}
+                className="rounded-lg bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
+              >
+                {cancelling ? "Cancelling..." : "Cancel closure"}
+              </button>
+            )}
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
@@ -135,6 +190,12 @@ export default function CommunityDetailPage() {
             <p className="mt-1 text-sm text-neutral-500 whitespace-pre-wrap">{community.rules}</p>
           </div>
         )}
+        {isScheduledForDeletion && (
+          <p className="mt-3 text-xs text-orange-600">
+            Closure scheduled {(community as any).deletion_grace_started_at && new Date((community as any).deletion_grace_started_at).toLocaleDateString()} · {daysRemaining((community as any).deletion_grace_started_at)} days left (closes {deletionDueAt((community as any).deletion_grace_started_at).toLocaleDateString()})
+          </p>
+        )}
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
       </div>
 
       {owner && (
@@ -222,9 +283,11 @@ export default function CommunityDetailPage() {
       </div>
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-xl bg-white p-5 shadow-strong sm:p-6">
-            <h4 className="text-sm font-semibold text-neutral-900">Delete Community</h4>
-            <p className="mt-2 text-sm text-neutral-500">Permanently delete {community.name}? All events, memberships, and data will be removed.</p>
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-strong sm:p-6">
+            <h4 className="text-sm font-semibold text-neutral-900">Schedule closure</h4>
+            <p className="mt-2 text-sm text-neutral-500">
+              Schedule {community.name} for permanent deletion. It will have a {GRACE_DAYS}-day grace period. All paid attendees will be refunded and events/registrations cancelled immediately. After {GRACE_DAYS} days the community and remaining data will be permanently deleted. This can be cancelled before the grace period expires.
+            </p>
             <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 onClick={() => setConfirmDelete(false)}
@@ -244,7 +307,7 @@ export default function CommunityDetailPage() {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
                 )}
-                {deleting ? "Deleting..." : "Delete"}
+                {deleting ? "Scheduling..." : "Schedule closure"}
               </button>
             </div>
           </div>

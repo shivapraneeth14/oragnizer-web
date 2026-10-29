@@ -3,7 +3,19 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { recordAlert } from "../_shared/alerts.ts"
 import { safeEqual } from "../_shared/crypto.ts"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { attemptRefund, refundRetryPlan } from "../_shared/refunds.ts"
+import { attemptRefund, refundRetryPlan, RefundNotPossibleError } from "../_shared/refunds.ts"
+import {
+  flagRefundExhausted,
+  isProviderRefundDead,
+  nextRefundAttempt,
+  REFUND_ATTEMPT_CAP,
+  refundPendingTooLong,
+  shouldFlagExhausted,
+} from "../_shared/refund-retry.ts"
+import {
+  resolvePendingPayment,
+  type PendingDeps,
+} from "../_shared/reconcile-pending.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -33,24 +45,82 @@ async function razorpayGet(path: string): Promise<any> {
   return res.json()
 }
 
+// Everything the pending-payment resolver needs from the real world. Kept as
+// an explicit dependency object so the decision/ordering can be unit-tested
+// without booting Deno.serve or reaching a live database.
+const pendingDeps: PendingDeps = {
+  getOrder: async (orderId) => await razorpayGet(`orders/${orderId}`),
+  listOrderPayments: async (orderId) => {
+    const body = await razorpayGet(`orders/${orderId}/payments`)
+    return body?.items ?? []
+  },
+  setCapturedPaymentId: async (paymentId, capturedPaymentId) => {
+    await supabase
+      .from("payments")
+      .update({ razorpay_payment_id: capturedPaymentId })
+      .eq("id", paymentId)
+  },
+  confirmPayment: async (paymentId) => {
+    const { data, error } = await supabase.rpc("confirm_payment", { p_payment_id: paymentId })
+    if (error) return { error: error.message }
+    return data as { action?: string; error?: string; skipped?: boolean } | null
+  },
+  // Guarded on the row still being 'pending': a payment confirmed by a webhook
+  // between our read and this write must win, never be clobbered.
+  markExpired: async (paymentId) => {
+    const { data, error } = await supabase
+      .from("payments")
+      .update({ status: "failed", updated_at: new Date().toISOString() })
+      .eq("id", paymentId)
+      .eq("status", "pending")
+      .select("id")
+    if (error) {
+      console.error(`Failed to expire payment ${paymentId}:`, error)
+      return false
+    }
+    return Boolean(data?.length)
+  },
+  cancelRegistration: async (registrationId) => {
+    await supabase
+      .from("registrations")
+      .update({ status: "cancelled", updated_at: new Date().toISOString() })
+      .eq("id", registrationId)
+      .eq("status", "pending")
+  },
+  releaseCoupon: async (couponId) => {
+    try {
+      await supabase.rpc("release_coupon", { p_coupon_id: couponId })
+    } catch {
+      // Best-effort coupon release on a give-up.
+    }
+  },
+  audit: async (action, paymentId, details) => {
+    await supabase.from("payment_audit_log").insert({
+      action,
+      payment_id: paymentId,
+      details,
+    })
+  },
+}
+
 // Attempts a Razorpay refund for a payment that must go back to the customer.
 // Claim-guarded by _shared/refunds.attemptRefund: concurrent callers (cancel
 // flows, this job) serialize on the payment and exactly one issues the refund;
 // the wallet clawback runs once inside complete_payment_refund.
-async function processRefund(paymentId: string, amount: number, reason: string): Promise<void> {
+async function processRefund(paymentId: string, amount: number, reason: string): Promise<boolean> {
   const { data: payment } = await supabase
     .from("payments")
     .select("id, razorpay_payment_id, refund_attempt_count, registration_id, amount, platform_fee, organizer_share")
     .eq("id", paymentId)
     .single()
 
-  if (!payment) return
+  if (!payment) return false
 
   // attemptRefund throws when the payment is not refundable or the provider
   // refused after a provider re-check; conflict/already_refunded are clean
   // no-ops so concurrent refunders never double-refund.
   const outcome = await attemptRefund(supabase, payment, amount, reason)
-  if (outcome.status === "conflict" || outcome.status === "already_refunded") return
+  if (outcome.status === "conflict" || outcome.status === "already_refunded") return false
 
   if (Number(payment.platform_fee ?? 0) > 0) {
     await supabase.from("payment_audit_log").insert({
@@ -63,6 +133,78 @@ async function processRefund(paymentId: string, amount: number, reason: string):
       },
     })
   }
+  return true
+}
+
+// Records the terminal "out of retries" state exactly once per payment. The
+// audit row is the dedupe gate; the alert is per-payment so one customer's
+// failure does not hide another's (recordAlert used to dedupe by title only).
+async function flagExhausted(
+  paymentId: string,
+  attempts: number,
+  note?: string,
+): Promise<boolean> {
+  return await flagRefundExhausted(
+    { paymentId, attempts, note },
+    {
+      hasAudit: async (id) => {
+        const { data } = await supabase
+          .from("payment_audit_log")
+          .select("id")
+          .eq("payment_id", id)
+          .eq("action", "refund_retry_exhausted")
+          .maybeSingle()
+        return Boolean(data)
+      },
+      insertAudit: async (id, attempts, note) => {
+        const { error } = await supabase.from("payment_audit_log").insert({
+          action: "refund_retry_exhausted",
+          payment_id: id,
+          details: { note, attempts },
+        })
+        if (error) {
+          console.error(`Failed to record refund_retry_exhausted for ${id}:`, error)
+          return false
+        }
+        return true
+      },
+      alert: async (id, attempts, note) => {
+        await recordAlert(supabase, {
+          severity: "critical",
+          category: "payment",
+          title: "Refund retries exhausted for payment",
+          dedupeKey: `refund_retry_exhausted:${id}`,
+          details: { payment_id: id, attempts, note },
+        })
+      },
+    },
+  )
+}
+
+// Rows already at the cap are excluded by the retry query below, so without
+// this sweep a row pushed to 5 by the provider-sync branch or the webhook would
+// sit there forever with no refund_retry_exhausted record and no alert.
+async function flagExhaustedRefunds(): Promise<number> {
+  const { data: rows, error } = await supabase
+    .from("payments")
+    .select("id, refund_status, razorpay_refund_id, refund_attempt_count, updated_at")
+    .in("status", ["refunded", "failed", "success"])
+    .or("refund_status.in.(requested,pending,failed,queued),and(refund_status.is.null,refund_reason.not.is.null)")
+    .gte("refund_attempt_count", REFUND_ATTEMPT_CAP)
+
+  if (error) {
+    console.error("Refund exhaustion sweep failed:", error)
+    return 0
+  }
+
+  let flagged = 0
+  for (const row of rows ?? []) {
+    if (!shouldFlagExhausted(row)) continue
+    if (await flagExhausted(row.id, Number(row.refund_attempt_count ?? REFUND_ATTEMPT_CAP))) {
+      flagged++
+    }
+  }
+  return flagged
 }
 
 // Refunds owed to customers whose payment reached us but could never be
@@ -70,23 +212,25 @@ async function processRefund(paymentId: string, amount: number, reason: string):
 // webhook keeps the real refund state in sync; 5 failed attempts flag the
 // payment for manual follow-up via the refund_retry_exhausted audit action.
 async function retryPendingRefunds(): Promise<number> {
+  // Surface rows that already reached the cap before this cycle.
+  let handled = await flagExhaustedRefunds()
+
   const { data: dueRefunds, error: dueErr } = await supabase
     .from("payments")
-    .select("id, refund_status, refund_attempt_count, razorpay_refund_id, amount, refunded_amount, refund_amount_due, refund_reason")
+    .select("id, refund_status, refund_attempt_count, razorpay_refund_id, amount, refunded_amount, refund_amount_due, refund_reason, updated_at, status")
     // 'refunded': cancellation refund failed. 'failed': money captured but
     // never confirmed (event cancelled) - owed back to the customer.
     // 'success': money captured AND refund attempt already failed - the
     // retry must NOT skip these, or the customer is stranded forever.
     .in("status", ["refunded", "failed", "success"])
-    .in("refund_status", ["requested", "pending", "failed", "queued"])
-    .lt("refund_attempt_count", 5)
+    .or("refund_status.in.(requested,pending,failed,queued),and(refund_status.is.null,refund_reason.not.is.null)")
+    .lt("refund_attempt_count", REFUND_ATTEMPT_CAP)
     // Recooldown: skip rows being re-ordered by create-payment (it bumps
     // updated_at) so we never refund a freshly-captured payment twice.
     .lt("updated_at", new Date(Date.now() - 15 * 60 * 1000).toISOString())
 
   if (dueErr) throw dueErr
 
-  let handled = 0
   for (const pay of dueRefunds || []) {
     try {
       // A refund already accepted by Razorpay (we hold its id) is synced from
@@ -110,15 +254,35 @@ async function retryPendingRefunds(): Promise<number> {
           handled++
           continue
         }
-        if (refund?.status === "failed" || refund?.status === "cancelled") {
+        if (isProviderRefundDead(refund?.status)) {
+          const attempts = nextRefundAttempt(pay.refund_attempt_count)
           await supabase.from("payments").update({
             refund_status: "failed",
-            refund_attempt_count: (pay.refund_attempt_count ?? 0) + 1,
+            refund_attempt_count: attempts,
           }).eq("id", pay.id)
+          // This path can reach the cap too; record it here, not only in the
+          // catch block below.
+          if (attempts >= REFUND_ATTEMPT_CAP) {
+            await flagExhausted(pay.id, attempts)
+          }
           handled++
           continue
         }
-        // Still pending/initiated at Razorpay - leave it, retry next cycle.
+        // Still in flight at the provider (or the lookup failed). A refund that
+        // never settles must not disappear quietly.
+        if (refundPendingTooLong(pay.updated_at)) {
+          await recordAlert(supabase, {
+            severity: "warning",
+            category: "payment",
+            title: "Refund still pending at Razorpay after 24h",
+            dedupeKey: `refund_pending_24h:${pay.id}`,
+            details: {
+              payment_id: pay.id,
+              razorpay_refund_id: pay.razorpay_refund_id,
+              refund_status: pay.refund_status,
+            },
+          })
+        }
         continue
       }
 
@@ -128,14 +292,26 @@ async function retryPendingRefunds(): Promise<number> {
       // refund retries exactly the owed ticket (platform fee excluded); an
       // organizer-cancellation refund retries the full amount.
       const { amount: retryAmount, reason: retryReason } = refundRetryPlan(pay)
-      await processRefund(pay.id, retryAmount, retryReason)
-      handled++
+      if (await processRefund(pay.id, retryAmount, retryReason)) handled++
     } catch (err) {
       console.error(`Refund retry failed for ${pay.id}:`, err)
+
+      if (err instanceof RefundNotPossibleError) {
+        // A permanent precondition: retrying will never succeed. Flag it once
+        // instead of alerting every cycle forever.
+        await flagExhausted(
+          pay.id,
+          Number(pay.refund_attempt_count ?? 0),
+          `Unable to start a refund: ${err.message}`,
+        )
+        continue
+      }
+
       await recordAlert(supabase, {
         severity: "warning",
         category: "payment",
         title: "Refund retry failed for payment",
+        dedupeKey: `refund_retry_failed:${pay.id}`,
         details: { payment_id: pay.id, error: err instanceof Error ? err.message : String(err) },
       })
       const { data: after } = await supabase
@@ -143,13 +319,9 @@ async function retryPendingRefunds(): Promise<number> {
         .select("refund_attempt_count")
         .eq("id", pay.id)
         .single()
-      const attempts = after?.refund_attempt_count ?? 1
-      if (attempts >= 5) {
-        await supabase.from("payment_audit_log").insert({
-          action: "refund_retry_exhausted",
-          payment_id: pay.id,
-          details: { note: "5 refund attempts failed - manual follow-up required" },
-        })
+      const attempts = after?.refund_attempt_count ?? Number(pay.refund_attempt_count ?? 0)
+      if (attempts >= REFUND_ATTEMPT_CAP) {
+        await flagExhausted(pay.id, attempts)
       }
     }
   }
@@ -184,69 +356,18 @@ Deno.serve(async (req) => {
   try {
     let totalActions = 0
 
-    // --- Step 1: Check stale pending payments against Razorpay ---
-    // Give up on payments pending >2h — log for manual review.
-    const { data: gaveUpPayments } = await supabase
-      .from("payments")
-      .select("id")
-      .eq("status", "pending")
-      .not("razorpay_order_id", "is", null)
-      .is("deleted_at", null)
-      .lt("created_at", new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
-
-    for (const pay of gaveUpPayments || []) {
-      const { data: alreadyLogged } = await supabase
-        .from("payment_audit_log")
-        .select("id")
-        .eq("payment_id", pay.id)
-        .eq("action", "payment_reconcile_gave_up")
-        .maybeSingle()
-      if (alreadyLogged) continue
-
-      const { data: gaveUp } = await supabase
-        .from("payments")
-        .select("registration_id, coupon_id")
-        .eq("id", pay.id)
-        .single()
-      await supabase.from("payments").update({ status: "failed" }).eq("id", pay.id)
-      if (gaveUp?.registration_id) {
-        await supabase.from("registrations").update({
-          status: "cancelled",
-          updated_at: new Date().toISOString(),
-        }).eq("id", gaveUp.registration_id)
-      }
-      if (gaveUp?.coupon_id) {
-        try {
-          await supabase.rpc("release_coupon", { p_coupon_id: gaveUp.coupon_id })
-        } catch {
-          // Best-effort coupon release on a give-up.
-        }
-      }
-      await supabase.from("payment_audit_log").insert({
-        action: "payment_reconcile_gave_up",
-        payment_id: pay.id,
-        details: { note: "Pending >2h — registration cancelled; manual review required" },
-      })
-      await recordAlert(supabase, {
-        severity: "warning",
-        category: "payment",
-        title: "Reconcile gave up on stale pending payment",
-        details: { payment_id: pay.id },
-      })
-      totalActions++
-    }
-
-    // Check payments 2 min–2h old against Razorpay. 2 minutes is the floor so
-    // a payment.captured webhook that never delivered is caught long before
-    // the old 10-minute window — the user sees a confirmed booking, not a
-    // stuck "Confirming…" spinner.
+    // --- Step 1: Resolve pending payments (>2 minutes old) against Razorpay ---
+    // G-01: ask Razorpay first, always. A payment is given up on only when the
+    // provider proves no money was captured — never merely because it is old.
+    // Captured payments are confirmed (or refunded when the event is gone),
+    // even when they are hours old. The 2-minute floor catches a lost
+    // payment.captured webhook long before the user gives up on the spinner.
     const { data: stalePayments, error: queryErr } = await supabase
       .from("payments")
       .select("id, razorpay_order_id, registration_id, coupon_id, created_at")
       .eq("status", "pending")
       .not("razorpay_order_id", "is", null)
       .is("deleted_at", null)
-      .gt("created_at", new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
       .lt("created_at", new Date(Date.now() - 2 * 60 * 1000).toISOString())
 
     if (queryErr) throw queryErr
@@ -262,106 +383,99 @@ Deno.serve(async (req) => {
       if (alreadyConfirmed) continue
 
       try {
-        const order = await razorpayGet(`orders/${pay.razorpay_order_id}`)
+        const outcome = await resolvePendingPayment(pay, pendingDeps)
 
-        const orderStatus: string = order.status
-        const amountPaid: number = order.amount_paid || 0
+        switch (outcome.action) {
+          case "confirmed":
+            // Reconcile confirmed it from Razorpay — this payment.captured
+            // webhook never reached us. That is exactly the failure we want
+            // to SEE (the Oct 12 outage class), not silently repair.
+            await recordAlert(supabase, {
+              severity: "warning",
+              category: "payment",
+              title: "Payment confirmed by reconcile — webhook delivery missed",
+              dedupeKey: `payment_confirmed_missed_webhook:${pay.id}`,
+              details: {
+                payment_id: pay.id,
+                razorpay_order_id: pay.razorpay_order_id,
+                note: "payment.captured webhook was not delivered; order resolved via Razorpay query. Check the Razorpay webhook configuration.",
+              },
+            })
+            console.log(`Reconciled payment ${pay.id} — captured via Razorpay, confirmed`)
+            totalActions++
+            break
 
-        if (orderStatus === "paid" && amountPaid > 0) {
-          const { data: paymentEntity } = await razorpayGet(`orders/${pay.razorpay_order_id}/payments`)
-          const capturedPayment = paymentEntity?.items?.find((p: any) => p.status === "captured")
-          if (capturedPayment) {
-            await supabase.from("payments").update({
-              razorpay_payment_id: capturedPayment.id,
-            }).eq("id", pay.id)
-
-            const { data: confirmResult, error: confirmErr } = await supabase
-              .rpc("confirm_payment", { p_payment_id: pay.id })
-
-            if (confirmErr) {
-              console.error(`confirm_payment failed for ${pay.id}:`, confirmErr)
-            } else if (confirmResult?.error) {
-              console.error(`confirm_payment error for ${pay.id}:`, confirmResult.error)
-            } else if (confirmResult?.action === "refund_required") {
-              // Money was captured but the event was cancelled (or capacity
-              // vanished). Refund now — the customer keeps nothing.
-              try {
-                await processRefund(pay.id, capturedPayment.amount, "reconcile_event_cancelled")
+          case "refund_required":
+            // Money was captured but the event was cancelled (or capacity
+            // vanished). Refund now — the customer keeps nothing.
+            try {
+              if (await processRefund(pay.id, outcome.amount, "reconcile_event_cancelled")) {
                 totalActions++
-              } catch (refundErr) {
-                console.error(`Auto-refund failed for ${pay.id}:`, refundErr)
-                await recordAlert(supabase, {
-                  severity: "warning",
-                  category: "payment",
-                  title: "Auto-refund failed for payment",
-                  details: { payment_id: pay.id, error: refundErr instanceof Error ? refundErr.message : String(refundErr) },
-                })
               }
-            } else {
-              // Reconcile confirmed it from Razorpay — this payment.captured
-              // webhook never reached us. That is exactly the failure we want
-              // to SEE (the Oct 12 outage class), not silently repair.
+            } catch (refundErr) {
+              console.error(`Auto-refund failed for ${pay.id}:`, refundErr)
               await recordAlert(supabase, {
                 severity: "warning",
                 category: "payment",
-                title: "Payment confirmed by reconcile — webhook delivery missed",
+                title: "Auto-refund failed for payment",
+                dedupeKey: `auto_refund_failed:${pay.id}`,
                 details: {
                   payment_id: pay.id,
-                  razorpay_order_id: pay.razorpay_order_id,
-                  note: "payment.captured webhook was not delivered; order resolved via Razorpay query. Check the Razorpay webhook configuration.",
+                  error: refundErr instanceof Error ? refundErr.message : String(refundErr),
                 },
               })
-              console.log(`Reconciled payment ${pay.id} — captured via Razorpay, confirmed`)
-              totalActions++
             }
-          } else {
-            await supabase.from("payments").update({
-              status: "failed",
-              updated_at: new Date().toISOString(),
-            }).eq("id", pay.id)
+            break
 
-            await supabase.from("registrations").update({
-              status: "cancelled",
-              updated_at: new Date().toISOString(),
-            }).eq("id", pay.registration_id)
-
-            await supabase.from("payment_audit_log").insert({
-              action: "payment_expired",
-              payment_id: pay.id,
-              details: { razorpay_order_id: pay.razorpay_order_id, reconciled: true },
+          case "expired":
+            await recordAlert(supabase, {
+              severity: "warning",
+              category: "payment",
+              title: "Reconcile gave up on stale pending payment",
+              dedupeKey: `reconcile_gave_up:${pay.id}`,
+              details: {
+                payment_id: pay.id,
+                razorpay_order_id: pay.razorpay_order_id,
+                note: "Pending >2h and Razorpay confirms no payment was captured — registration cancelled; manual review required",
+              },
             })
-
-            if (pay.coupon_id) {
-              await supabase.rpc("release_coupon", { p_coupon_id: pay.coupon_id })
-            }
-
             totalActions++
-          }
-        } else {
-          await supabase.from("payments").update({
-            status: "failed",
-            updated_at: new Date().toISOString(),
-          }).eq("id", pay.id)
+            break
 
-          await supabase.from("registrations").update({
-            status: "cancelled",
-            updated_at: new Date().toISOString(),
-          }).eq("id", pay.registration_id)
+          case "manual":
+            await recordAlert(supabase, {
+              severity: "warning",
+              category: "payment",
+              title: "Reconcile needs manual review for a pending payment",
+              dedupeKey: `reconcile_manual:${pay.id}`,
+              details: {
+                payment_id: pay.id,
+                razorpay_order_id: pay.razorpay_order_id,
+                reason: outcome.reason,
+                error: outcome.error,
+              },
+            })
+            break
 
-          await supabase.from("payment_audit_log").insert({
-            action: "payment_expired",
-            payment_id: pay.id,
-            details: { razorpay_order_id: pay.razorpay_order_id, razorpay_status: orderStatus, reconciled: true },
-          })
-
-          if (pay.coupon_id) {
-            await supabase.rpc("release_coupon", { p_coupon_id: pay.coupon_id })
-          }
-
-          totalActions++
+          case "already_confirmed":
+          case "wait":
+            if (outcome.action === "wait" && outcome.reason && outcome.reason !== "race_lost") {
+              console.error(`Reconcile could not resolve payment ${pay.id}: ${outcome.reason}`)
+            }
+            break
         }
       } catch (err) {
-        console.error(`Razorpay check failed for payment ${pay.id} — skipping, will retry next cycle:`, err)
+        console.error(`Reconcile failed for payment ${pay.id} — skipping, will retry next cycle:`, err)
+        await recordAlert(supabase, {
+          severity: "warning",
+          category: "payment",
+          title: "Reconcile failed to resolve a pending payment",
+          dedupeKey: `reconcile_error:${pay.id}`,
+          details: {
+            payment_id: pay.id,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        })
       }
     }
 

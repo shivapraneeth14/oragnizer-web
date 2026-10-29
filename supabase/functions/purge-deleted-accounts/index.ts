@@ -198,16 +198,166 @@ Deno.serve(async (req) => {
     if (claimErr) throw claimErr
     const userIds: string[] = claimed ?? []
 
-    if (userIds.length === 0) {
+    // Also claim communities due for deletion.
+    const { data: claimedCommunities, error: claimCommErr } = await supabase
+      .rpc("claim_due_community_deletions", { p_limit: BATCH_LIMIT })
+    if (claimCommErr) throw claimCommErr
+    const communityIds: string[] = claimedCommunities ?? []
+
+    if (userIds.length === 0 && communityIds.length === 0) {
       // Still retry any pending media-cleanup jobs.
       await retryMediaCleanup()
-      return new Response(JSON.stringify({ purged: 0, media_retried: true }), {
+      return new Response(JSON.stringify({ purged: 0, communities_purged: 0, media_retried: true }), {
         status: 200, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 
     let purged = 0
+    let communitiesPurged = 0
     const skipped: Array<{ userId: string; reason: string }> = []
+    const communitiesSkipped: Array<{ communityId: string; reason: string }> = []
+
+    // Close communities after grace period (preserve row for financial integrity)
+    for (const communityId of communityIds) {
+      try {
+        const { data: community } = await supabase
+          .from("communities")
+          .select("id, name, deletion_grace_started_at, closed_at")
+          .eq("id", communityId)
+          .single()
+        if (!community?.deletion_grace_started_at) {
+          await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+          communitiesSkipped.push({ communityId, reason: "grace_cleared" })
+          continue
+        }
+        if (community.closed_at) {
+          await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+          communitiesSkipped.push({ communityId, reason: "already_closed" })
+          continue
+        }
+        const started = new Date(community.deletion_grace_started_at).getTime()
+        if (Date.now() - started < GRACE_DAYS * 24 * 60 * 60 * 1000) {
+          await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+          communitiesSkipped.push({ communityId, reason: "grace_not_expired" })
+          continue
+        }
+
+        // Recheck before closure - postpone if any unresolved financial activity
+        const { data: c2 } = await supabase.from("communities").select("wallet_balance").eq("id", communityId).single()
+        if ((c2?.wallet_balance || 0) > 0) {
+          await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+          communitiesSkipped.push({ communityId, reason: "wallet_balance_outstanding" })
+          continue
+        }
+        const { data: subs2 } = await supabase.from("community_subscriptions").select("id, status").eq("community_id", communityId)
+        if ((subs2 || []).some((s: any) => s.status === "active")) {
+          await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+          communitiesSkipped.push({ communityId, reason: "active_subscription" })
+          continue
+        }
+        const { data: evs2 } = await supabase.from("events").select("id, status, start_date, end_date").eq("community_id", communityId).is("deleted_at", null)
+        let hasBlockingEvent = false
+        const now2 = new Date()
+        for (const e of evs2 || []) {
+          if (e.start_date && new Date(e.start_date) > now2 && e.status !== "cancelled" && e.status !== "completed") { hasBlockingEvent = true; break }
+          if (e.start_date && new Date(e.start_date) <= now2) {
+            const ended = e.end_date ? new Date(e.end_date) <= now2 : false
+            if (!ended && e.status !== "cancelled" && e.status !== "completed") { hasBlockingEvent = true; break }
+          }
+          if (e.status === "published" || (e.status !== "completed" && e.status !== "cancelled")) { hasBlockingEvent = true; break }
+        }
+        if (hasBlockingEvent) {
+          await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+          communitiesSkipped.push({ communityId, reason: "events_not_settled" })
+          continue
+        }
+        const eids2 = (evs2 || []).map((e: any) => e.id)
+        if (eids2.length > 0) {
+          const { data: regs2 } = await supabase.from("registrations").select("id, status").in("event_id", eids2).is("deleted_at", null)
+          if ((regs2 || []).some((r: any) => r.status === "pending" || r.status === "confirmed")) {
+            await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+            communitiesSkipped.push({ communityId, reason: "active_registrations" })
+            continue
+          }
+          const regIds2 = (regs2 || []).map((r: any) => r.id)
+          if (regIds2.length > 0) {
+            const { data: pp } = await supabase.from("payments").select("id").in("registration_id", regIds2).eq("status", "pending")
+            if (pp && pp.length > 0) { await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId); communitiesSkipped.push({ communityId, reason: "pending_payments" }); continue }
+            const { data: rc } = await supabase.from("payments").select("id").in("registration_id", regIds2).eq("refund_claim_state", "claimed")
+            if (rc && rc.length > 0) { await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId); communitiesSkipped.push({ communityId, reason: "refunds_processing" }); continue }
+            const { data: rs } = await supabase.from("payments").select("id").in("registration_id", regIds2).in("refund_status", ["requested", "pending", "queued", "processing"])
+            if (rs && rs.length > 0) { await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId); communitiesSkipped.push({ communityId, reason: "refunds_processing" }); continue }
+          }
+        }
+        const { data: po2 } = await supabase.from("payout_items").select("id").eq("community_id", communityId).in("status", ["pending", "processing"])
+        if (po2 && po2.length > 0) {
+          await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+          communitiesSkipped.push({ communityId, reason: "payouts_pending" })
+          continue
+        }
+
+        try { await supabase.rpc("set_config", { setting: "app.allow_cancelled_event_cleanup", value: "true" }) } catch {}
+
+        // Resolve community subscriptions
+        await supabase.from("community_subscriptions").delete().eq("community_id", communityId).catch(() => {})
+        await supabase.from("community_subscriptions").update({ status: "cancelled" }).eq("community_id", communityId).catch(() => {})
+
+        // Anonymize sensitive beneficiary details FIRST (mandatory)
+        try {
+          const { error: anonErr } = await supabase.from("community_beneficiaries").update({
+            account_holder_name: "[redacted]",
+            account_number: "[redacted]",
+            ifsc_code: "[redacted]",
+            upi_id: null,
+          }).eq("community_id", communityId)
+          if (anonErr) {
+            throw anonErr
+          }
+          // Verify redaction (best effort)
+          const { data: benefs } = await supabase.from("community_beneficiaries").select("account_holder_name, account_number, ifsc_code, upi_id").eq("community_id", communityId)
+          for (const b of benefs || []) {
+            if ((b.account_number && b.account_number !== "[redacted]") || (b.ifsc_code && b.ifsc_code !== "[redacted]")) {
+              throw new Error("Beneficiary anonymization verification failed")
+            }
+          }
+        } catch (e) {
+          logError("purge-community-beneficiaries-anonymize-fail", e)
+          await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId)
+          communitiesSkipped.push({ communityId, reason: "beneficiary_anonymization_failed" })
+          continue
+        }
+
+        // Delete personal associations (members). Keep registrations/events for financial integrity
+        await supabase.from("community_members").delete().eq("community_id", communityId).catch(() => {})
+        await supabase.from("join_requests").delete().eq("community_id", communityId).catch(() => {})
+
+        // Close community - preserve row for referential integrity
+        const { error: closeErr } = await supabase
+          .from("communities")
+          .update({ 
+            closed_at: new Date().toISOString(),
+            deletion_grace_started_at: null,
+            deletion_purging_at: null,
+            is_hidden: true,
+            is_hidden_before_deletion: null,
+          })
+          .eq("id", communityId)
+        if (closeErr) throw closeErr
+
+        await supabase.from("audit_log").insert({
+          action: "community_closed",
+          target_type: "community",
+          target_id: communityId,
+          details: { community_name: community.name },
+        })
+
+        communitiesPurged++
+      } catch (e) {
+        logError(`close-community ${communityId}`, e)
+        await supabase.from("communities").update({ deletion_purging_at: null }).eq("id", communityId).catch(() => {})
+        communitiesSkipped.push({ communityId, reason: "error" })
+      }
+    }
 
     for (const userId of userIds) {
       // 2. Safety recheck — the world may have changed during the grace window.
@@ -240,6 +390,20 @@ Deno.serve(async (req) => {
 
       // 5. Scrub free-text and JSONB that reference the user.
       await scrubUserFreeText(userId, email)
+
+      // 5b. Detach financial data from the user (retain for accounting/compliance)
+      try {
+        await supabase.from("payments").update({ user_id: null }).eq("user_id", userId)
+      } catch (e) { logError("purge-detach-payments", e) }
+      try {
+        await supabase.from("payout_items").update({ user_id: null } as any).eq("user_id", userId)
+      } catch (e) { /* ignore if column doesn't exist */ }
+      try {
+        await supabase.from("wallet_transactions").update({ user_id: null } as any).eq("user_id", userId)
+      } catch (e) { /* ignore if column doesn't exist */ }
+      try {
+        await supabase.from("beneficiaries").update({ user_id: null } as any).eq("user_id", userId)
+      } catch (e) { /* ignore if column doesn't exist */ }
 
       // 6. Delete owned content NOT covered by the delete_user_auth_cascade RPC.
       //    - consent_log (has email column, no FK to auth.users)
@@ -300,7 +464,7 @@ Deno.serve(async (req) => {
     // 10. Retry any pending media-cleanup jobs (including ones created above).
     const mediaRetried = await retryMediaCleanup()
 
-    return new Response(JSON.stringify({ purged, skipped, media_retried: mediaRetried }), {
+    return new Response(JSON.stringify({ purged, communities_purged: communitiesPurged, communities_skipped: communitiesSkipped, skipped, media_retried: mediaRetried }), {
       status: 200, headers: { "Content-Type": "application/json", ...corsHeaders },
     })
   } catch (err) {

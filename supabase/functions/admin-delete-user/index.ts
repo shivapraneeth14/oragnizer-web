@@ -3,17 +3,12 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { GRACE_DAYS } from "../_shared/deletion.ts"
 import { logError } from "../_shared/logger.ts"
+import { getCorsHeaders } from "../_shared/cors.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  "Access-Control-Max-Age": "86400",
-}
 
 // Guard blocks — same logic as delete-account for consistency.
 // Blocks if user cannot be safely deleted/scheduled for account deletion.
@@ -118,7 +113,18 @@ async function checkDeletionGuards(userId: string): Promise<{ error: string; own
 //   "grace" — starts the irreversible 30-day deletion grace period. The purge
 //     job will hard-delete the account after 30 days. Used for GDPR erasure
 //     requests and ToS violations requiring full removal.
+
+// Delete the user's GoTrue refresh tokens + sessions. The admin API's
+// signOut() takes the user's JWT, not a user id, so it cannot be used here.
+// Existing access tokens stay valid until jwt_expiry (15 min), which is why
+// this runs *before* mutating profile state: a failure leaves nothing half-done.
+async function revokeSessions(userId: string): Promise<void> {
+  const { error } = await supabase.rpc("admin_revoke_user_sessions", { p_user_id: userId })
+  if (error) throw error
+}
+
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req)
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
   }
@@ -211,6 +217,10 @@ Deno.serve(async (req) => {
         })
       }
 
+      // Revoke all sessions first: if this fails nothing has been scheduled
+      // yet, so the admin can simply retry.
+      await revokeSessions(user_id)
+
       // Start the 30-day grace.
       const now = new Date().toISOString()
       const { error: graceErr } = await supabase
@@ -218,13 +228,6 @@ Deno.serve(async (req) => {
         .update({ deletion_grace_started_at: now })
         .eq("id", user_id)
       if (graceErr) throw graceErr
-
-      // Log them out immediately on all devices (same as self-delete flow).
-      try {
-        await supabase.auth.admin.signOut(user_id, "global" as any)
-      } catch (signOutErr) {
-        logError("admin-delete-user signout", signOutErr)
-      }
 
       // Audit: no email, no PII in details.
       await supabase.from("audit_log").insert({
@@ -245,16 +248,22 @@ Deno.serve(async (req) => {
     }
 
     // suspend mode (default, reversible).
+    // Ban first — GoTrue never reads profiles.deleted_at, so the ban is the
+    // only thing that blocks a fresh sign-in (password AND Google OAuth).
+    // Then revoke live sessions and finally mark the profile. Each step is
+    // idempotent, so a retry after a mid-way failure is safe.
+    // ~10 years: effectively permanent but reversible via admin-undelete-user.
+    const { error: banErr } = await supabase.auth.admin.updateUserById(user_id, { ban_duration: "87600h" })
+    if (banErr) throw banErr
+
+    await revokeSessions(user_id)
+
     const now = new Date().toISOString()
     const { error: suspendErr } = await supabase
       .from("profiles")
       .update({ deleted_at: now })
       .eq("id", user_id)
     if (suspendErr) throw suspendErr
-    // Auth-level ban: blocks fresh sign-ins (password AND Google OAuth) on every
-    // client — the soft-delete timestamp alone is never consulted by GoTrue.
-    // ~10 years: effectively permanent but reversible via admin-undelete-user.
-    await supabase.auth.admin.updateUserById(user_id, { ban_duration: "87600h" })
 
     // Audit: NO email in details (D-fix: previously leaked the user's email
     // into audit_log.details, readable by any admin).

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "../supabase"
 import { useAuth } from "../auth-context"
-import type { Profile, Community } from "shared"
+import { COMMUNITY_CLIENT_COLUMNS_SELECT, type Profile, type Community } from "shared"
 
 export function useProfile() {
   const { user } = useAuth()
@@ -20,7 +20,7 @@ export function useProfile() {
         .select("id, first_name, last_name, username, avatar_url, created_at, updated_at, deleted_at")
         .eq("id", user.id)
         .single(),
-      supabase.from("communities").select("*").eq("owner_id", user.id).maybeSingle(),
+      supabase.from("communities").select(COMMUNITY_CLIENT_COLUMNS_SELECT).eq("owner_id", user.id).maybeSingle(),
     ]).then(([profResult, commResult]) => {
       if (profResult.error) {
         setError(profResult.error.message)
@@ -34,7 +34,7 @@ export function useProfile() {
         })
       }
       if (commResult.data) {
-        setCommunity(commResult.data as Community)
+        setCommunity(commResult.data as unknown as Community)
       }
       setLoading(false)
     })

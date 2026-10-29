@@ -4,20 +4,16 @@ import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { cashfreePost, cashfreeGet } from "../_shared/cashfree.ts"
 import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
 import { logError } from "../_shared/logger.ts"
+import { getCorsHeaders } from "../_shared/cors.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const MIN_WITHDRAWAL = 100
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
-  "Access-Control-Max-Age": "86400",
-}
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req)
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: { "Content-Type": "application/json", ...corsHeaders } })
 

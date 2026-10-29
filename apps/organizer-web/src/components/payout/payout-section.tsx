@@ -113,8 +113,8 @@ export default function PayoutSection({ communityId }: Props) {
 
   async function refreshLive() {
     if (!communityId) return
-    const balanceRes = await supabase.from("communities").select("wallet_balance").eq("id", communityId).single()
-    if (balanceRes.data) setWalletBalance(balanceRes.data.wallet_balance || 0)
+    const { data: financials } = await supabase.rpc("get_community_financials", { p_community_id: communityId })
+    if (financials?.[0]) setWalletBalance(financials[0].wallet_balance || 0)
     loadTransactions(eventFilter === "all" ? undefined : eventFilter)
   }
 
@@ -161,12 +161,12 @@ export default function PayoutSection({ communityId }: Props) {
     if (!communityId) return
 
     const [balanceRes, benRes, eventsRes] = await Promise.all([
-      supabase.from("communities").select("wallet_balance").eq("id", communityId).single(),
+      supabase.rpc("get_community_financials", { p_community_id: communityId }),
       supabase.from("community_beneficiaries").select("*").eq("community_id", communityId).order("created_at", { ascending: false }),
       supabase.from("events").select("id, title").eq("community_id", communityId).order("created_at", { ascending: false }),
     ])
 
-    if (balanceRes.data) setWalletBalance(balanceRes.data.wallet_balance || 0)
+    if (balanceRes.data?.[0]) setWalletBalance(balanceRes.data[0].wallet_balance || 0)
     if (benRes.data) setBeneficiaries(benRes.data as Beneficiary[])
     if (eventsRes.data) setEvents(eventsRes.data as { id: string; title: string }[])
 

@@ -56,14 +56,34 @@ export async function razorpayGet(path: string): Promise<any> {
   return res.json()
 }
 
-// Asks Razorpay directly whether any non-cancelled refund already exists for a
-// payment. A failed local update does NOT mean the provider did not refund, so
-// every re-check path consults the provider before issuing (or re-issuing).
-export async function firstExistingRefund(supabase: any, razorpayPaymentId: string): Promise<any | null> {
+interface ProviderRefund {
+  id: string
+  status?: string
+  amount?: number
+}
+
+// A refund in these states never moved money to the customer, so it must not
+// be mistaken for an already-issued refund; retrying is the correct action.
+const DEAD_REFUND_STATUSES = new Set(["failed", "cancelled", "reversed"])
+
+async function fetchProviderRefunds(razorpayPaymentId: string): Promise<ProviderRefund[]> {
+  const body = await razorpayGet(`payments/${razorpayPaymentId}/refunds`)
+  return body?.items ?? []
+}
+
+function pickLiveRefund(items: ProviderRefund[]): ProviderRefund | null {
+  return items.find((r) => !DEAD_REFUND_STATUSES.has(String(r.status ?? ""))) ?? null
+}
+
+// Best-effort provider lookup used after a failed refund POST, when the
+// original error matters more than the lookup error. Only a refund that may
+// have moved money is returned.
+export async function firstExistingRefund(
+  _supabase: any,
+  razorpayPaymentId: string,
+): Promise<ProviderRefund | null> {
   try {
-    const body = await razorpayGet(`payments/${razorpayPaymentId}/refunds`)
-    const items: any[] = body?.items ?? []
-    return items.find((r: any) => r.status !== "cancelled") ?? null
+    return pickLiveRefund(await fetchProviderRefunds(razorpayPaymentId))
   } catch {
     return null
   }
@@ -75,6 +95,9 @@ export interface RefundOutcome {
   refund_status?: string | null
   amount?: number
   attempt?: number
+  // True when a retry found a refund the provider had already accepted and
+  // recorded it instead of issuing a second one.
+  recovered?: boolean
 }
 
 // --- Refund-amount policy -----------------------------------------------------
@@ -134,22 +157,37 @@ export function refundRetryPlan(row: {
   }
 }
 
+// A refund that can never succeed for this row (no captured payment id, or the
+// claim machine rejects its current state). Callers should stop retrying and
+// flag it for manual follow-up instead of looping forever.
+export class RefundNotPossibleError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "RefundNotPossibleError"
+  }
+}
+
 // Exactly-once refund issuance. All refund entry points (cancel-event,
 // cancel-registration, issue-refund, reconcile retry) must go through this:
 //   1. claim_payment_refund     -> atomic lock; exactly one winner per payment
 //                                  (also persists refund_reason + the owed
 //                                  refund_amount_due exactly once)
-//   2. Razorpay refund          -> the single provider call
-//   3. complete_payment_refund  -> persists 'issued', records wallet clawback
-// On a stale claim or a provider failure it re-checks the provider for an
-// already-created refund before issuing again (or before giving up).
+//   2. Retry pre-check          -> on a stale claim or any retry, ask Razorpay
+//                                  whether a prior attempt already sent money
+//   3. Razorpay refund          -> the single provider call
+//   4. complete_payment_refund  -> persists 'issued', records wallet clawback
+// If the pre-check itself fails, the claim is released and the error is
+// surfaced: never send money unless we proved none was sent. Provider failures
+// after the POST are re-checked the same way before giving up.
 export async function attemptRefund(
   supabase: any,
   payment: { id: string; razorpay_payment_id?: string | null },
   amount: number,
   walletReason: string,
 ): Promise<RefundOutcome> {
-  if (!payment.razorpay_payment_id) throw new Error(`Payment ${payment.id} has no razorpay_payment_id`)
+  if (!payment.razorpay_payment_id) {
+    throw new RefundNotPossibleError(`Payment ${payment.id} has no razorpay_payment_id`)
+  }
 
   const { data: claim, error: claimErr } = await supabase.rpc("claim_payment_refund", {
     p_payment_id: payment.id,
@@ -158,7 +196,7 @@ export async function attemptRefund(
   })
   if (claimErr) throw claimErr
 
-  if (claim?.error) throw new Error(claim.error)
+  if (claim?.error) throw new RefundNotPossibleError(claim.error)
   if (claim?.already_refunded) {
     return {
       status: "already_refunded",
@@ -189,6 +227,46 @@ export async function attemptRefund(
     return refund
   }
 
+  const releaseClaim = async () => {
+    await supabase.rpc("complete_payment_refund", {
+      p_payment_id: payment.id,
+      p_success: false,
+    }).catch(() => {})
+  }
+
+  // The claim is held now, so no other flow can issue a refund while we ask
+  // the provider. A stale claim means the previous attempt may have reached
+  // Razorpay before crashing; attempt > 1 also covers a claim released as
+  // failed after a lost provider response.
+  const isRetry = claim?.stale_reclaimed === true || Number(claim?.attempt ?? 1) > 1
+  if (isRetry) {
+    let existing: ProviderRefund | null
+    try {
+      existing = pickLiveRefund(await fetchProviderRefunds(payment.razorpay_payment_id))
+    } catch (err) {
+      // Fail closed: we cannot prove no refund was sent, so send nothing.
+      await releaseClaim()
+      throw err
+    }
+
+    if (existing) {
+      // The provider already moved the money. Record its truth and return
+      // without issuing a second refund.
+      await completeIssued(existing, existing.amount ?? amount)
+      console.warn(
+        `[refund] recovered existing refund ${existing.id} for payment ${payment.id} (attempt ${claim.attempt})`,
+      )
+      return {
+        status: "issued",
+        refund_id: existing.id,
+        refund_status: mapRefundStatus(existing.status),
+        amount: existing.amount ?? amount,
+        attempt: claim.attempt,
+        recovered: true,
+      }
+    }
+  }
+
   let refund: any
   try {
     refund = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, {
@@ -206,10 +284,7 @@ export async function attemptRefund(
       return { status: "issued", refund_id: existing.id, refund_status: mapRefundStatus(existing.status), amount: existing.amount ?? amount, attempt: claim.attempt }
     }
     // Release the claim as 'failed' so a later retry may claim again.
-    await supabase.rpc("complete_payment_refund", {
-      p_payment_id: payment.id,
-      p_success: false,
-    }).catch(() => {})
+    await releaseClaim()
     throw err
   }
 }

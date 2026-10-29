@@ -72,6 +72,7 @@ export default function DashboardPage() {
   const [showShareOptions, setShowShareOptions] = useState(false)
   const [memberRefreshKey, setMemberRefreshKey] = useState(0)
   const [needsCommunity, setNeedsCommunity] = useState(false)
+  const [communityClosureBlocked, setCommunityClosureBlocked] = useState(false)
   const [communityData, setCommunityData] = useState<CommunityData>(initialCommunityData)
   const [communityStep, setCommunityStep] = useState<1 | 2>(1)
   const [communityCreating, setCommunityCreating] = useState(false)
@@ -102,11 +103,17 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return
     setCommunityError(null)
-    supabase.from("communities").select("id, name, member_count").eq("owner_id", user.id).maybeSingle().then(({ data, error }) => {
+    supabase.from("communities").select("id, name, member_count, deletion_grace_started_at, closed_at").eq("owner_id", user.id).maybeSingle().then(({ data, error }) => {
       if (error) {
         setCommunityError(error.message)
       } else if (data) {
-        setCommunityId(data.id)
+        if ((data as any).deletion_grace_started_at && !(data as any).closed_at) {
+          setCommunityClosureBlocked(true)
+          setCommunityId((data as any).id)
+          setCommunity(data as { id: string; member_count: number; name: string })
+          return
+        }
+        setCommunityId((data as any).id)
         setCommunity(data as { id: string; member_count: number; name: string })
       } else {
         setNeedsCommunity(true)
@@ -237,6 +244,28 @@ export default function DashboardPage() {
       setCommunityStep(1)
     } catch { alert("Something went wrong") }
     setCommunityCreating(false)
+  }
+
+  if (communityClosureBlocked) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-neutral-50 p-6">
+        <div className="w-full max-w-md rounded-xl border border-neutral-200 bg-white p-6 text-center shadow-soft">
+          <h1 className="text-lg font-semibold text-neutral-900">This community is scheduled for closure</h1>
+          <p className="mt-2 text-sm text-neutral-600">
+            Management is disabled while the community is in closure grace. An admin can cancel this from the admin panel.
+          </p>
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() => signOut()}
+              className="w-full rounded-lg border border-neutral-300 px-4 py-2.5 text-sm font-medium text-neutral-600 transition hover:bg-neutral-50"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (needsCommunity) {

@@ -24,7 +24,9 @@ export interface Community {
   is_hidden: boolean
   member_count: number
   event_count: number
-  platform_fee_amount: number
+  // Client-readable only through the get_community_financials RPC (owner/team/
+  // admin), so it is absent from direct selects.
+  platform_fee_amount?: number
   category: string | null
   country: string | null
   state: string | null

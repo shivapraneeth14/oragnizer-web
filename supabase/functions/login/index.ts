@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { isOrganizerAccount, NOT_ORGANIZER_MESSAGE } from "../_shared/organizer.ts"
 import { logError } from "../_shared/logger.ts"
+import { getCorsHeaders } from "../_shared/cors.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -10,18 +11,6 @@ const supabaseAnonKey = requiredEnv("SUPABASE_ANON_KEY")
 const anonClient = createClient(supabaseUrl, supabaseAnonKey)
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-client-info",
-  "Access-Control-Max-Age": "86400",
-}
-
-const jsonResponse = (body: Record<string, unknown>, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
-  })
 
 // GoTrue messages are internal; surface only curated, non-enumerating text.
 // The raw message stays in the console log for support.
@@ -44,6 +33,13 @@ const safeLoginMessage = (raw: string | undefined): string => {
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req)
+  const jsonResponse = (body: Record<string, unknown>, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    })
+
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
   }
@@ -63,6 +59,9 @@ Deno.serve(async (req) => {
     }
     if (typeof password !== "string" || password === "") {
       return jsonResponse({ error: "Please enter your password." }, 400)
+    }
+    if (password.length > 128) {
+      return jsonResponse({ error: "Invalid email or password." }, 400)
     }
 
     const { data, error } = await anonClient.auth.signInWithPassword({

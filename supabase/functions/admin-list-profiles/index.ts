@@ -2,30 +2,24 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { logError } from "../_shared/logger.ts"
+import { getCorsHeaders } from "../_shared/cors.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  "Access-Control-Max-Age": "86400",
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
-  })
-}
 
 // Admin-only directory of profiles including email + is_admin.
 // Client-side profile reads can no longer see these columns
 // (202610120005_profiles_email_is_admin_scope.sql), so the admin portal reads
 // them through this authorization-checked service-role endpoint instead.
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req)
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    })
+
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405)
 

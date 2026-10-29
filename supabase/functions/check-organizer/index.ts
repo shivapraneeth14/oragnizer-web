@@ -51,10 +51,6 @@ Deno.serve(async (req) => {
 
     const user = data.user
 
-    // Soft-deleted (admin-blocked) accounts are rejected here so the portal
-    // shows the suspension message and kills the session. GoTrue's auth ban
-    // (set by admin-delete-user) already blocks fresh sign-ins; this covers
-    // sessions that outlive the deletion.
     const { data: callerProfile } = await supabase
       .from("profiles")
       .select("deleted_at, deletion_grace_started_at")
@@ -71,9 +67,6 @@ Deno.serve(async (req) => {
       }, 403)
     }
 
-    // Organizer access is decided purely by ownership/admin — never by the
-    // sign-in provider. Google is used both for new-organizer onboarding and
-    // for ordinary customer accounts, so provider is not a valid signal.
     const organizer = await isOrganizerAccount(supabase, user.id)
     return organizer
       ? jsonResponse({ organizer: true })

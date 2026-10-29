@@ -14,10 +14,10 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
 const RATE_LIMIT_PEPPER = optionalEnv("RATE_LIMIT_PEPPER")
 
 async function pepperIdentifier(identifier: string): Promise<string> {
-  if (!RATE_LIMIT_PEPPER) return identifier
+  const pepper = RATE_LIMIT_PEPPER || supabaseServiceKey
   const enc = new TextEncoder()
   const key = await crypto.subtle.importKey(
-    "raw", enc.encode(RATE_LIMIT_PEPPER),
+    "raw", enc.encode(pepper),
     { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
   )
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode(identifier))
