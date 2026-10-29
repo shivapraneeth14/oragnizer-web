@@ -53,7 +53,8 @@ async function confirmCapturedOrder(paymentId: string, orderId: string): Promise
   const captured = payBody?.items?.find((p: any) => p.status === "captured")
   if (!captured) return "awaiting"
 
-  await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", paymentId)
+  const { error: updateErr } = await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", paymentId)
+  if (updateErr) throw updateErr
   const { data: confirmResult, error: confirmErr } = await supabase
     .rpc("confirm_payment", { p_payment_id: paymentId })
   if (confirmErr) throw confirmErr

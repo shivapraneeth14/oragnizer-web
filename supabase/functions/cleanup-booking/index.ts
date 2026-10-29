@@ -102,9 +102,10 @@ Deno.serve(async (req) => {
           const payBody = await payRes.json()
           const captured = payBody?.items?.find((p: any) => p.status === "captured")
           if (captured) {
-            await supabase.from("payments").update({
+            const { error: updateErr } = await supabase.from("payments").update({
               razorpay_payment_id: captured.id,
             }).eq("id", payment.id)
+            if (updateErr) throw updateErr
 
             const { data: confirmResult, error: confirmErr } = await supabase
               .rpc("confirm_payment", { p_payment_id: payment.id })

@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
     const rl = await checkRateLimit(user.id, "check-in")
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
-    const { qr_code } = await req.json()
+    const { qr_code, event_id: expectedEventId, community_id: expectedCommunityId } = await req.json()
     if (!qr_code || typeof qr_code !== "string") {
       return new Response(JSON.stringify({ error: "qr_code is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
@@ -56,11 +56,25 @@ Deno.serve(async (req) => {
     if (reg?.event_id) {
       const { data: event } = await supabase
         .from("events")
-        .select("community_id")
+        .select("id, title, community_id")
         .eq("id", reg.event_id)
         .single()
 
       if (event) {
+        // If the scanner specified an event, verify the ticket is for this exact event
+        if (expectedEventId && event.id !== expectedEventId) {
+          return new Response(JSON.stringify({
+            error: `Wrong event: This ticket is for "${event.title}", not this event.`
+          }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+        }
+
+        // If the scanner specified a community, verify the ticket belongs to that community
+        if (expectedCommunityId && event.community_id !== expectedCommunityId) {
+          return new Response(JSON.stringify({
+            error: "This ticket belongs to another community's event."
+          }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+        }
+
         const { data: community } = await supabase
           .from("communities")
           .select("owner_id")
@@ -90,7 +104,7 @@ Deno.serve(async (req) => {
         }
 
         if (!authorized) {
-          return new Response(JSON.stringify({ error: "Not authorized to check in" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          return new Response(JSON.stringify({ error: "This ticket belongs to another organizer's event." }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
     } else {

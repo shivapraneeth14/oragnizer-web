@@ -128,7 +128,8 @@ async function syncRefundState(entity: any, _eventType: string): Promise<void> {
     updates.refund_attempt_count = (paymentRow.refund_attempt_count ?? 0) + 1
   }
 
-  await supabase.from("payments").update(updates).eq("id", paymentRow.id)
+  const { error: updateErr } = await supabase.from("payments").update(updates).eq("id", paymentRow.id)
+  if (updateErr) throw updateErr
 
   await supabase.from("payment_audit_log").insert({
     action: "refund_status_synced",
@@ -252,9 +253,14 @@ Deno.serve(async (req) => {
     }
 
     // Update payment with razorpay_payment_id
-    await supabase.from("payments").update({
+    const { error: updateErr } = await supabase.from("payments").update({
       razorpay_payment_id: payment.id,
     }).eq("id", paymentRow.id)
+
+    if (updateErr) {
+      logError("verify-payment-webhook update razorpay_payment_id", updateErr)
+      return new Response("Failed to record payment id", { status: 500 })
+    }
 
     // Run confirm_payment RPC (atomic transaction)
     const { data: confirmResult, error: confirmErr } = await supabase

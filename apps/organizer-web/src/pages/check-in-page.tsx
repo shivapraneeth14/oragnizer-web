@@ -37,7 +37,11 @@ export default function CheckInPage({ communityId }: { communityId: string | und
           "Authorization": `Bearer ${session?.access_token}`,
           "apikey": import.meta.env.VITE_SUPABASE_ANON_KEY,
         },
-        body: JSON.stringify({ qr_code: qrCode }),
+        body: JSON.stringify({
+          qr_code: qrCode,
+          event_id: selectedEventId || undefined,
+          community_id: communityId || undefined,
+        }),
       })
 
       const data = await res.json()
@@ -58,7 +62,7 @@ export default function CheckInPage({ communityId }: { communityId: string | und
       setScanResult({ success: false, message: "Network error — check connection and try again" })
     }
     setScanning(false)
-  }, [])
+  }, [selectedEventId, communityId])
 
   const handleManualCheckIn = useCallback(async (qrCode: string) => {
     await handleScan(qrCode)

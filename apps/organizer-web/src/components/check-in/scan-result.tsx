@@ -23,6 +23,12 @@ export default function ScanResultOverlay({ result, onDismiss }: Props) {
   if (!result) return null
 
   const isAlreadyScanned = result.already_checked_in
+  const isWrongEvent = !result.success && result.message.toLowerCase().includes("wrong event")
+  const isOtherOrganizer = !result.success && (
+    result.message.toLowerCase().includes("another organizer") ||
+    result.message.toLowerCase().includes("another community")
+  )
+
   const bgColor = result.success && !isAlreadyScanned
     ? "bg-green-500"
     : isAlreadyScanned
@@ -35,6 +41,16 @@ export default function ScanResultOverlay({ result, onDismiss }: Props) {
       ? "⚠️"
       : "❌"
 
+  const title = result.success && !isAlreadyScanned
+    ? "Checked In"
+    : isAlreadyScanned
+      ? "Already Scanned"
+      : isWrongEvent
+        ? "Wrong Event"
+        : isOtherOrganizer
+          ? "Invalid Ticket"
+          : "Failed"
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onDismiss}>
       <div
@@ -43,7 +59,7 @@ export default function ScanResultOverlay({ result, onDismiss }: Props) {
       >
         <div className="text-5xl mb-4">{icon}</div>
         <h3 className="text-xl font-bold mb-2">
-          {result.success && !isAlreadyScanned ? "Checked In" : isAlreadyScanned ? "Already Scanned" : "Failed"}
+          {title}
         </h3>
         <p className="text-sm opacity-90 mb-1">{result.message}</p>
         {result.attendee_name && (

@@ -21,6 +21,7 @@ const outbox = await read("202610220014_media_cleanup_outbox.sql")
 const purgeCron = await read("202610220015_schedule_deletion_purge.sql")
 const reportsRetention = await read("202610220016_content_reports_retain_on_delete.sql")
 const refundStatus = await read("202610290003_confirm_payment_refund_status.sql")
+const atomicCheckIn = await read("202610300002_atomic_check_in.sql")
 
 Deno.test("migration version prefixes are unique and ordered", async () => {
   const names = (await Array.fromAsync(Deno.readDir(dir)))
@@ -60,6 +61,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610290005_deploy_community_financials_rpc.sql",
     "202610290006_grant_community_grace_and_closure_columns.sql",
     "202610300001_reconcile_cron_2min.sql",
+    "202610300002_atomic_check_in.sql",
   ])
 })
 
@@ -127,5 +129,14 @@ Deno.test("202610290003 confirm_payment sets refund_reason without blocking refu
   assert(refundStatus.includes("refund_reason = COALESCE(refund_reason, 'registration_cancellation')"))
   assert(refundStatus.includes("refund_reason = COALESCE(refund_reason, 'event_cancellation')"))
   assert(refundStatus.includes("refund_reason = COALESCE(refund_reason, 'capacity_full')"))
+})
+
+Deno.test("202610300002 check_in_registration has row lock, atomic conditional update, and service_role grant", () => {
+  assert(atomicCheckIn.includes("FOR UPDATE OF r"))
+  assert(atomicCheckIn.includes("SET search_path = ''"))
+  assert(atomicCheckIn.includes("WHERE id = v_reg.id\n    AND checked_in = FALSE"))
+  assert(atomicCheckIn.includes("RETURNING id INTO v_updated_id"))
+  assert(atomicCheckIn.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.check_in_registration(text) FROM PUBLIC, anon, authenticated;"))
+  assert(atomicCheckIn.includes("GRANT EXECUTE ON FUNCTION public.check_in_registration(text) TO service_role;"))
 })
 

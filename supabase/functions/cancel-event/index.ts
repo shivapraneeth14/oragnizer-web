@@ -119,7 +119,8 @@ Deno.serve(async (req) => {
         const captured = payBody?.items?.find((p: any) => p.status === "captured")
         if (!captured) continue
 
-        await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", payment.id)
+        const { error: updateErr } = await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", payment.id)
+        if (updateErr) throw updateErr
 
         // confirm_payment is idempotent and keeps the wallet/transfer ledger
         // correct (books capacity, credits organizer share).

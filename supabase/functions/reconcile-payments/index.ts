@@ -55,10 +55,11 @@ const pendingDeps: PendingDeps = {
     return body?.items ?? []
   },
   setCapturedPaymentId: async (paymentId, capturedPaymentId) => {
-    await supabase
+    const { error } = await supabase
       .from("payments")
       .update({ razorpay_payment_id: capturedPaymentId })
       .eq("id", paymentId)
+    if (error) throw error
   },
   confirmPayment: async (paymentId) => {
     const { data, error } = await supabase.rpc("confirm_payment", { p_payment_id: paymentId })
@@ -244,22 +245,24 @@ async function retryPendingRefunds(): Promise<number> {
       if (inFlight && pay.razorpay_refund_id) {
         const refund = await razorpayGet(`refunds/${pay.razorpay_refund_id}`).catch(() => null)
         if (refund?.status === "processed") {
-          await supabase.from("payments").update({
+          const { error: updateErr } = await supabase.from("payments").update({
             refund_status: "processed",
             status: "refunded",
             refunded_amount: refund.amount ?? pay.refunded_amount ?? pay.amount,
             refund_amount_due: null,
             refund_claim_state: "issued",
           }).eq("id", pay.id)
+          if (updateErr) throw updateErr
           handled++
           continue
         }
         if (isProviderRefundDead(refund?.status)) {
           const attempts = nextRefundAttempt(pay.refund_attempt_count)
-          await supabase.from("payments").update({
+          const { error: updateErr } = await supabase.from("payments").update({
             refund_status: "failed",
             refund_attempt_count: attempts,
           }).eq("id", pay.id)
+          if (updateErr) throw updateErr
           // This path can reach the cap too; record it here, not only in the
           // catch block below.
           if (attempts >= REFUND_ATTEMPT_CAP) {

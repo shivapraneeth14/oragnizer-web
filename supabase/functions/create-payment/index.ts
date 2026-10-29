@@ -84,7 +84,8 @@ async function confirmPaidOrder(paymentId: string, orderId: string): Promise<{ c
     const captured = payBody?.items?.find((p: any) => p.status === "captured")
     if (!captured) return null
 
-    await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", paymentId)
+    const { error: updateErr } = await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", paymentId)
+    if (updateErr) throw updateErr
     const { data: confirmResult, error: confirmErr } = await supabase
       .rpc("confirm_payment", { p_payment_id: paymentId })
     if (confirmErr) throw confirmErr
@@ -315,7 +316,7 @@ Deno.serve(async (req) => {
           // An old refunded/failed sale on this row is being replaced by a new
           // order — archive + clear the stale refund fields first.
           await clearRefundFieldsForRequote(supabase, existingPayment)
-          await supabase
+          const { error: updateError } = await supabase
             .from("payments")
             .update({
               razorpay_order_id: order.id,
@@ -328,6 +329,7 @@ Deno.serve(async (req) => {
               created_at: new Date().toISOString(),
             })
             .eq("id", existingPayment.id)
+          if (updateError) throw updateError
         } else {
           const { data: newPayment, error: insertError } = await supabase
             .from("payments")

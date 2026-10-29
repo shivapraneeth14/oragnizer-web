@@ -103,7 +103,7 @@ export async function clearRefundFieldsForRequote(
       prior_refund_attempt_count: payment.refund_attempt_count ?? null,
     },
   })
-  await supabase.from("payments").update({
+  const { error: clearErr } = await supabase.from("payments").update({
     refund_status: null,
     razorpay_payment_id: null,
     razorpay_refund_id: null,
@@ -114,6 +114,7 @@ export async function clearRefundFieldsForRequote(
     refund_amount_due: null,
     refund_attempt_count: 0,
   }).eq("id", payment.id)
+  if (clearErr) throw clearErr
 }
 
 // Restore a cancelled registration so a new checkout can reuse it. Atomic and
