@@ -80,13 +80,25 @@ export default function LandingPage() {
       history.replaceState({}, "", window.location.pathname)
       // Owning a community is the organizer signal. Check the array (limit 1)
       // rather than maybeSingle(), which errors if an owner ever had 2+ rows.
-      const { data: communityRes } = await supabase
+      const { data: communityRes, error: commError } = await supabase
         .from("communities")
         .select("id")
         .eq("owner_id", userId)
         .limit(1)
       if (runId !== runIdRef.current) return
-      const ownsCommunity = Array.isArray(communityRes) && communityRes.length > 0
+      let ownsCommunity = Array.isArray(communityRes) && communityRes.length > 0
+      if (!ownsCommunity && commError) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession()
+          if (session?.access_token) {
+            const { checkOrganizerSession } = await import("../supabase-fetch")
+            const verdict = await checkOrganizerSession(session.access_token)
+            if (verdict.organizer) ownsCommunity = true
+          }
+        } catch {
+          // ignore fallback error
+        }
+      }
       if (ownsCommunity) {
         // Organizer consent gate: existing organizers must have a consent
         // record for the CURRENT policy version before entering the dashboard

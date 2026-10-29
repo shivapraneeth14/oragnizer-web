@@ -56,6 +56,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610290001_block_members_of_closure_communities.sql",
     "202610290002_revoke_on_admin_demotion.sql",
     "202610290003_confirm_payment_refund_status.sql",
+    "202610290004_fix_community_closure_rls_recursion.sql",
   ])
 })
 
