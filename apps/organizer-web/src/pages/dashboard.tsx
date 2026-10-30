@@ -16,6 +16,7 @@ import MemberRow from "../components/members/member-row"
 import { useEvents, eventToForm } from "../hooks/use-events"
 import CommunityDetailsForm, { initialCommunityData, missingCommunityFields, type CommunityData } from "../components/community-details-form"
 import TermsCheckbox from "../components/terms-checkbox"
+import WaitingForApproval, { type CommunityApplicationData } from "../components/waiting-for-approval"
 import { useIsDesktop } from "../hooks/use-is-desktop"
 import { canEditEvent, canCancelEvent } from "../lib/event-lifecycle"
 import type { Event } from "shared"
@@ -73,6 +74,7 @@ export default function DashboardPage() {
   const [showShareOptions, setShowShareOptions] = useState(false)
   const [memberRefreshKey, setMemberRefreshKey] = useState(0)
   const [needsCommunity, setNeedsCommunity] = useState(false)
+  const [existingApplication, setExistingApplication] = useState<CommunityApplicationData | null>(null)
   const [communityClosureBlocked, setCommunityClosureBlocked] = useState(false)
   const [communityData, setCommunityData] = useState<CommunityData>(initialCommunityData)
   const [communityStep, setCommunityStep] = useState<1 | 2>(1)
@@ -104,7 +106,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return
     setCommunityError(null)
-    supabase.from("communities").select("id, name, member_count, deletion_grace_started_at, closed_at").eq("owner_id", user.id).maybeSingle().then(({ data, error }) => {
+    supabase.from("communities").select("id, name, member_count, deletion_grace_started_at, closed_at").eq("owner_id", user.id).maybeSingle().then(async ({ data, error }) => {
       if (error) {
         setCommunityError(error.message)
       } else if (data) {
@@ -117,7 +119,20 @@ export default function DashboardPage() {
         setCommunityId((data as any).id)
         setCommunity(data as { id: string; member_count: number; name: string })
       } else {
-        setNeedsCommunity(true)
+        // Check if user has an application in community_applications
+        const { data: app } = await supabase
+          .from("community_applications")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (app && (app.status === "pending" || app.status === "rejected")) {
+          setExistingApplication(app as CommunityApplicationData)
+        } else {
+          setNeedsCommunity(true)
+        }
       }
     })
   }, [user])
@@ -237,7 +252,23 @@ export default function DashboardPage() {
       const res = await supabaseFetch("/functions/v1/create-community", token,
         { ...communityData, community_name: communityData.community_name.trim() })
       const result = await res.json()
-      if (!res.ok) { alert(result.error || "Failed to create community"); return }
+      if (!res.ok) { alert(result.error || "Failed to submit community application"); return }
+
+      if (result.pending) {
+        // Fetch application to show WaitingForApproval
+        const { data: app } = await supabase
+          .from("community_applications")
+          .select("*")
+          .eq("user_id", user!.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        setNeedsCommunity(false)
+        if (app) setExistingApplication(app as CommunityApplicationData)
+        return
+      }
+
       setCommunityId(result.community_id)
       setCommunity({ id: result.community_id, name: communityData.community_name, member_count: 1 })
       setNeedsCommunity(false)
@@ -269,6 +300,51 @@ export default function DashboardPage() {
     )
   }
 
+  if (existingApplication && !communityId) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-4 sm:p-8">
+        <div className="w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-6 shadow-soft">
+          <WaitingForApproval
+            application={existingApplication}
+            onSignOut={() => signOut()}
+            onReapply={(app) => {
+              setCommunityData({
+                community_name: app.community_name,
+                category: app.category,
+                description: app.description,
+                city: app.city,
+                state: app.state,
+                country: app.country,
+                contact_email: app.contact_email,
+                contact_phone: app.contact_phone,
+                rules: app.rules,
+                tags: app.tags || [],
+                visibility: "public",
+                agree18: true,
+                agreeContent: true,
+              })
+              setExistingApplication(null)
+              setNeedsCommunity(true)
+            }}
+            onRefresh={async () => {
+              const [commRes, appRes] = await Promise.all([
+                supabase.from("communities").select("id, name, member_count, deletion_grace_started_at, closed_at").eq("owner_id", user!.id).maybeSingle(),
+                supabase.from("community_applications").select("*").eq("user_id", user!.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+              ])
+              if (commRes.data) {
+                setCommunityId((commRes.data as any).id)
+                setCommunity(commRes.data as any)
+                setExistingApplication(null)
+              } else if (appRes.data) {
+                setExistingApplication(appRes.data as CommunityApplicationData)
+              }
+            }}
+          />
+        </div>
+      </div>
+    )
+  }
+
   if (needsCommunity) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-4 sm:p-8">
@@ -284,7 +360,9 @@ export default function DashboardPage() {
                 Sign out
               </button>
             </div>
-            <p className="mt-2 text-sm text-neutral-500">Welcome! Set up your community to get started.</p>
+            <p className="mt-2 text-sm text-neutral-500">
+              Welcome! Submit your community details to get started. Our team will review and verify your community.
+            </p>
             <div className="mt-6">
               <CommunityDetailsForm
                 data={communityData}
@@ -326,7 +404,7 @@ export default function DashboardPage() {
               ) : (
                 <button onClick={handleCreateCommunity} disabled={communityCreating || !communityTermsAccepted || missingCommunityFields(communityData).step2.length > 0}
                   className="rounded-lg bg-cluvo-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-cluvo-primary-dark disabled:opacity-50">
-                  {communityCreating ? "Creating..." : "Create Community"}
+                  {communityCreating ? "Submitting for Review..." : "Submit for Verification"}
                 </button>
               )}
             </div>

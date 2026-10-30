@@ -5,8 +5,10 @@ import { useAuth } from "../auth-context"
 import EmailFirst from "../components/email-first"
 import NewUserFlow from "../components/new-user-flow"
 import OrganizerConsentGate from "../components/organizer-consent-gate"
+import WaitingForApproval, { type CommunityApplicationData } from "../components/waiting-for-approval"
+import type { CommunityData } from "../components/community-details-form"
 
-type Flow = "auth" | "new" | "consent"
+type Flow = "auth" | "new" | "consent" | "waiting_approval"
 
 const features = [
   {
@@ -45,6 +47,8 @@ export default function LandingPage() {
   const { signOut, user, loading } = useAuth()
   const [flow, setFlow] = useState<Flow>("auth")
   const [checkingSession, setCheckingSession] = useState(true)
+  const [existingApplication, setExistingApplication] = useState<CommunityApplicationData | null>(null)
+  const [reapplyData, setReapplyData] = useState<CommunityData | undefined>(undefined)
   const decidedForUserRef = useRef<string | null>(null)
   const runIdRef = useRef(0)
 
@@ -136,8 +140,26 @@ export default function LandingPage() {
         setCheckingSession(false)
         return
       }
-      // Not an organizer yet — send them straight to the community form. There
-      // is no customer-account check and no separate registration step.
+      // Not an organizer yet — check if they have a submitted community application under review
+      const { data: application } = await supabase
+        .from("community_applications")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (runId !== runIdRef.current) return
+
+      if (application) {
+        setExistingApplication(application as CommunityApplicationData)
+        if (application.status === "pending" || application.status === "rejected") {
+          setFlow("waiting_approval")
+          setCheckingSession(false)
+          return
+        }
+      }
+
       setFlow("new")
       setCheckingSession(false)
     })().catch(() => {
@@ -192,7 +214,65 @@ export default function LandingPage() {
                 </div>
 
                 {flow === "auth" && <EmailFirst />}
-                {flow === "new" && <NewUserFlow onBack={() => setFlow("auth")} />}
+                {flow === "new" && (
+                  <NewUserFlow
+                    onBack={() => setFlow("auth")}
+                    initialData={reapplyData}
+                    onSubmitted={async () => {
+                      if (!userId) return
+                      const { data: app } = await supabase
+                        .from("community_applications")
+                        .select("*")
+                        .eq("user_id", userId)
+                        .order("created_at", { ascending: false })
+                        .limit(1)
+                        .maybeSingle()
+                      if (app) {
+                        setExistingApplication(app as CommunityApplicationData)
+                        setFlow("waiting_approval")
+                      }
+                    }}
+                  />
+                )}
+                {flow === "waiting_approval" && existingApplication && (
+                  <WaitingForApproval
+                    application={existingApplication}
+                    onSignOut={() => {
+                      signOut()
+                      setFlow("auth")
+                    }}
+                    onReapply={(app) => {
+                      setReapplyData({
+                        community_name: app.community_name,
+                        category: app.category,
+                        description: app.description,
+                        city: app.city,
+                        state: app.state,
+                        country: app.country,
+                        contact_email: app.contact_email,
+                        contact_phone: app.contact_phone,
+                        rules: app.rules,
+                        tags: app.tags || [],
+                        visibility: "public",
+                        agree18: true,
+                        agreeContent: true,
+                      })
+                      setFlow("new")
+                    }}
+                    onRefresh={async () => {
+                      if (!userId) return
+                      const [commRes, appRes] = await Promise.all([
+                        supabase.from("communities").select("id").eq("owner_id", userId).limit(1),
+                        supabase.from("community_applications").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+                      ])
+                      if (commRes.data && commRes.data.length > 0) {
+                        window.location.href = "/dashboard"
+                      } else if (appRes.data) {
+                        setExistingApplication(appRes.data as CommunityApplicationData)
+                      }
+                    }}
+                  />
+                )}
                 {flow === "consent" && (
                   <OrganizerConsentGate onBack={() => setFlow("auth")} />
                 )}

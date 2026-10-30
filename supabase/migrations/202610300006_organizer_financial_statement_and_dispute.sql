@@ -262,3 +262,4 @@ $$;
 
 REVOKE ALL PRIVILEGES ON FUNCTION public.get_organizer_financial_statement(UUID, UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_organizer_financial_statement(UUID, UUID) TO authenticated, service_role;
+

@@ -5,10 +5,12 @@ import TermsCheckbox from "./terms-checkbox"
 
 interface Props {
   onBack: () => void
+  initialData?: CommunityData
+  onSubmitted?: (applicationId?: string) => void
 }
 
-export default function NewUserFlow({ onBack }: Props) {
-  const [communityData, setCommunityData] = useState<CommunityData>(initialCommunityData)
+export default function NewUserFlow({ onBack, initialData, onSubmitted }: Props) {
+  const [communityData, setCommunityData] = useState<CommunityData>(initialData || initialCommunityData)
   const [communityStep, setCommunityStep] = useState<1 | 2>(1)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState("")
@@ -53,7 +55,7 @@ export default function NewUserFlow({ onBack }: Props) {
       }
       const { supabaseFetch } = await import("../supabase-fetch")
 
-      // Record consent server-side before creating the community. Idempotent.
+      // Record consent server-side before submitting the community. Idempotent.
       const consentRes = await supabaseFetch("/functions/v1/record-consent", token, { source: "web" })
       if (!consentRes.ok) {
         setSubmitError("Could not record your agreement. Check your connection and try again.")
@@ -66,7 +68,12 @@ export default function NewUserFlow({ onBack }: Props) {
         setSubmitError(result.error || "Something went wrong. Try again.")
         return
       }
-      window.location.href = "/dashboard"
+
+      if (onSubmitted) {
+        onSubmitted(result.application_id)
+      } else {
+        window.location.reload()
+      }
     } catch {
       setSubmitError("Connection error. Check your internet and try again.")
     } finally {
@@ -79,7 +86,9 @@ export default function NewUserFlow({ onBack }: Props) {
       <button type="button" onClick={onBack} className="mb-4 text-sm text-cluvo-primary hover:underline">&larr; Back</button>
 
       <h2 className="text-xl font-semibold text-neutral-900">Create Your Community</h2>
-      <p className="mt-1 text-sm text-neutral-500">Fill in the details for your new community.</p>
+      <p className="mt-1 text-sm text-neutral-500">
+        Fill in your community details. Once submitted, our team will review and verify your community.
+      </p>
 
       <div className="mt-6">
         <CommunityDetailsForm
@@ -127,7 +136,7 @@ export default function NewUserFlow({ onBack }: Props) {
             disabled={submitting || !termsAccepted || missingCommunityFields(communityData).step2.length > 0}
             className="rounded-lg bg-cluvo-primary px-6 py-2 text-sm font-medium text-white transition hover:bg-cluvo-primary-dark disabled:opacity-50"
           >
-            {submitting ? "Creating..." : "Create Community"}
+            {submitting ? "Submitting for Review..." : "Submit for Verification"}
           </button>
         )}
         {(() => {

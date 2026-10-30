@@ -2,6 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
+import { sendCluvoEmail } from "../_shared/send-email.ts"
 import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -57,6 +58,20 @@ Deno.serve(async (req) => {
 
     if (existingOwner) {
       return new Response(JSON.stringify({ error: "You already own a community. Each account can only create one." }), {
+        status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    // Check if user already has a pending application under review
+    const { data: pendingApp } = await supabase
+      .from("community_applications")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("status", "pending")
+      .maybeSingle()
+
+    if (pendingApp) {
+      return new Response(JSON.stringify({ error: "You already have a community application under review." }), {
         status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
@@ -130,6 +145,19 @@ Deno.serve(async (req) => {
           status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
         })
       }
+
+      const { data: pendingEmail } = await supabase
+        .from("community_applications")
+        .select("id")
+        .ilike("contact_email", contact_email.trim())
+        .eq("status", "pending")
+        .maybeSingle()
+
+      if (pendingEmail) {
+        return new Response(JSON.stringify({ error: "This contact email is already associated with a pending community application." }), {
+          status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
     }
 
     const { data: existingCommunity } = await supabase
@@ -145,84 +173,129 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { data: community, error: communityError } = await supabase
-      .from("communities")
-      .insert({
-        name: community_name.trim(),
-        description: description.trim(),
-        category: category?.trim() || null,
-        city: city?.trim() || null,
-        state: state?.trim() || null,
-        country: country?.trim() || null,
-        contact_email: contact_email?.trim() || null,
-        contact_phone: contact_phone?.trim() || null,
-        tags: Array.isArray(tags) ? tags : null,
-        // Private communities are retired: always public, regardless of what
-        // the caller sends. A DB trigger enforces the same rule.
-        visibility: "public",
-        rules: rules?.trim() || null,
-        owner_id: user.id,
-        verification_status: "unverified",
-      })
+    const { data: pendingName } = await supabase
+      .from("community_applications")
       .select("id")
-      .single()
+      .ilike("community_name", community_name.trim())
+      .eq("status", "pending")
+      .maybeSingle()
 
-    if (communityError) {
-      logError("create-community insert", communityError)
-
-      // Race condition: another request created a community for this owner
-      // (or name/email uniqueness via DB constraints)
-      if ((communityError as any).code === "23505") {
-        const msg = (communityError as any).message || ""
-        if (msg.includes("communities_owner_id_key") || msg.includes("owner_unique") || msg.includes("owner_id")) {
-          return new Response(JSON.stringify({ error: "You already own a community. Each account can only create one." }), {
-            status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
-          })
-        }
-        if (msg.includes("name") || msg.includes("communities_name")) {
-          return new Response(JSON.stringify({ error: "This community name is already taken. Try another." }), {
-            status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
-          })
-        }
-        if (msg.includes("contact_email") || msg.includes("communities_contact_email")) {
-          return new Response(JSON.stringify({ error: "This contact email is already associated with another community." }), {
-            status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
-          })
-        }
-      }
-
-      return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
-        status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
+    if (pendingName) {
+      return new Response(JSON.stringify({ error: "This community name is already taken. Try another." }), {
+        status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 
-    const { error: memberError } = await supabase
-      .from("community_members")
-      .insert({
-        community_id: community.id,
-        user_id: user.id,
-        role: "OWNER",
-      })
+    // Check if user previously had a rejected application to update, or insert fresh
+    const { data: existingRejected } = await supabase
+      .from("community_applications")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("status", "rejected")
+      .maybeSingle()
 
-    if (memberError) {
-      await supabase.from("communities").delete().eq("id", community.id)
-      logError("create-community member insert", memberError)
-      return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
-        status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
-      })
+    let applicationId: string
+
+    // Private communities are retired: always public, regardless of what the caller sends.
+    const _visibilityEnforce = { visibility: "public" }
+
+    if (existingRejected) {
+      const { data: updatedApp, error: updateErr } = await supabase
+        .from("community_applications")
+        .update({
+          community_name: community_name.trim(),
+          description: description.trim(),
+          category: category?.trim() || null,
+          city: city?.trim() || null,
+          state: state?.trim() || null,
+          country: country?.trim() || null,
+          contact_email: contact_email?.trim() || null,
+          contact_phone: contact_phone?.trim() || null,
+          tags: Array.isArray(tags) ? tags : [],
+          rules: rules?.trim() || null,
+          status: "pending",
+          rejection_reason: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingRejected.id)
+        .select("id")
+        .single()
+
+      if (updateErr) {
+        logError("create-community update rejected app", updateErr)
+        return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
+          status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
+      applicationId = updatedApp.id
+    } else {
+      const { data: newApp, error: appError } = await supabase
+        .from("community_applications")
+        .insert({
+          user_id: user.id,
+          community_name: community_name.trim(),
+          description: description.trim(),
+          category: category?.trim() || null,
+          city: city?.trim() || null,
+          state: state?.trim() || null,
+          country: country?.trim() || null,
+          contact_email: contact_email?.trim() || null,
+          contact_phone: contact_phone?.trim() || null,
+          tags: Array.isArray(tags) ? tags : [],
+          rules: rules?.trim() || null,
+          status: "pending",
+        })
+        .select("id")
+        .single()
+
+      if (appError) {
+        logError("create-community insert application", appError)
+        return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
+          status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
+        })
+      }
+      applicationId = newApp.id
     }
 
     await supabase.from("audit_log").insert({
       actor_id: user.id,
-      action: "community_created",
-      target_type: "community",
-      target_id: community.id,
-      details: { community_name },
+      action: "community_application_submitted",
+      target_type: "community_application",
+      target_id: applicationId,
+      details: { community_name, visibility: _visibilityEnforce.visibility },
     })
+
+    // Asynchronously dispatch confirmation email to applicant if email configured
+    if (user.email) {
+      const subject = `Community Submitted for Review: "${community_name.trim()}"`
+      const body = `Hello,
+
+Thank you for creating "${community_name.trim()}" on Cluvo.
+
+Your community application has been submitted to the admin team for review and verification.
+Once verified and approved, your community will be activated and you will gain full access to your Organizer Dashboard.
+
+Submission Summary:
+- Community: ${community_name.trim()}
+- Location: ${city.trim()}, ${country.trim()}
+- Contact Email: ${contact_email.trim()}
+- Contact Phone: ${contact_phone.trim()}
+
+You can log in to your Cluvo Organizer Portal at any time to check the live status of your application.
+
+Warm regards,
+The Cluvo Team`
+
+      sendCluvoEmail(user.email, subject, body).catch((e) => {
+        logError("create-community confirmation email error", e)
+      })
+    }
 
     return new Response(JSON.stringify({
       success: true,
-      community_id: community.id,
+      pending: true,
+      application_id: applicationId,
+      message: "Your community has been submitted for review. Please wait for verification.",
     }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...corsHeaders },

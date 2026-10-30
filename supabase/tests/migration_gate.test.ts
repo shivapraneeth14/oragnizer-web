@@ -26,6 +26,7 @@ const adminFinancials = await read("202610300003_admin_financial_ledger_and_payo
 const adminCommunities = await read("202610300004_admin_communities_dropdown.sql")
 const adminProfilesAndLedgerFix = await read("202610300005_admin_profiles_rpc_and_fix_ledger.sql")
 const organizerFinancialsAndDispute = await read("202610300006_organizer_financial_statement_and_dispute.sql")
+const communityApplicationsAndApproval = await read("202610300007_community_applications_and_approval_flow.sql")
 
 Deno.test("migration version prefixes are unique and ordered", async () => {
   const names = (await Array.fromAsync(Deno.readDir(dir)))
@@ -70,6 +71,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610300004_admin_communities_dropdown.sql",
     "202610300005_admin_profiles_rpc_and_fix_ledger.sql",
     "202610300006_organizer_financial_statement_and_dispute.sql",
+    "202610300007_community_applications_and_approval_flow.sql",
   ])
 })
 
@@ -177,5 +179,14 @@ Deno.test("202610300006 organizer_financial_statement_and_dispute deploys organi
   assert(organizerFinancialsAndDispute.includes("CREATE OR REPLACE FUNCTION public.get_organizer_financial_statement"))
   assert(organizerFinancialsAndDispute.includes("public.is_community_owner(p_community_id) OR public.is_community_team(p_community_id)"))
 })
+
+Deno.test("202610300007 community_applications_and_approval_flow deploys staging table and approval RPCs", () => {
+  assert(communityApplicationsAndApproval.includes("CREATE TABLE IF NOT EXISTS public.community_applications"))
+  assert(communityApplicationsAndApproval.includes("CREATE OR REPLACE FUNCTION public.admin_approve_community_application"))
+  assert(communityApplicationsAndApproval.includes("CREATE OR REPLACE FUNCTION public.admin_reject_community_application"))
+  assert(communityApplicationsAndApproval.includes("CREATE OR REPLACE FUNCTION public.get_admin_community_applications"))
+  assert(communityApplicationsAndApproval.includes("public.is_admin_user()"))
+})
+
 
 

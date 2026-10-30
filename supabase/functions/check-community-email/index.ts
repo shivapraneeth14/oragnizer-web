@@ -49,11 +49,25 @@ Deno.serve(async (req) => {
       query = query.neq("id", community_id)
     }
 
-    const { data, error } = await query.maybeSingle()
+    const { data: commData, error: commError } = await query.maybeSingle()
+    if (commError) throw commError
 
-    if (error) throw error
+    if (commData) {
+      return new Response(JSON.stringify({ available: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
 
-    return new Response(JSON.stringify({ available: !data }), {
+    // Also check pending applications
+    const { data: pendingApp } = await supabase
+      .from("community_applications")
+      .select("id")
+      .ilike("contact_email", email.trim())
+      .eq("status", "pending")
+      .maybeSingle()
+
+    return new Response(JSON.stringify({ available: !pendingApp }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })
