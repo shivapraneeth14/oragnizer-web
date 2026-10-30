@@ -88,6 +88,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611010010_community_closure_membership_guard.sql",
     "202611010011_atomic_free_event_registration.sql",
     "202611010012_owner_self_delete_guard.sql",
+    "202611010013_owner_self_delete_restrictive_guard.sql",
   ])
 })
 
@@ -97,6 +98,14 @@ Deno.test("202611010012 owner_self_delete_guard prevents owners from orphaning c
   assert(mig.includes("FOR DELETE USING"))
   assert(mig.includes("role != 'OWNER'"))
   assert(mig.includes("c.owner_id = auth.uid()"))
+})
+
+Deno.test("202611010013 owner_self_delete_restrictive_guard enforces restrictive owner protection", async () => {
+  const mig = await read("202611010013_owner_self_delete_restrictive_guard.sql")
+  assert(mig.includes("CREATE POLICY \"community_members_owner_delete\" ON public.community_members"))
+  assert(mig.includes("user_id != auth.uid()"))
+  assert(mig.includes("AS RESTRICTIVE"))
+  assert(mig.includes("block_owner_membership_delete"))
 })
 
 Deno.test("202611010002 fix_webhook_processed_at fixes column name to processed_at", async () => {
