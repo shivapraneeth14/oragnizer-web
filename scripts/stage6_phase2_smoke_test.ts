@@ -62,48 +62,73 @@ const cleanupEventIds: string[] = []
 const cleanupCouponIds: string[] = []
 
 async function createTestUser(emailPrefix: string, isAdmin = false): Promise<{ id: string; email: string; token: string }> {
-  const email = `${emailPrefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}@example.com`
-  const password = "TestPassword123!@#"
-  const { data, error } = await serviceClient.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { first_name: "Smoke", last_name: "Tester" }
+  const ts = Date.now() + "_" + Math.floor(Math.random() * 1000000)
+  const email = `${emailPrefix}_${ts}@example.com`
+  const password = "SmokePassword123!"
+
+  const createResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      email_confirm: true,
+      app_metadata: { cluvo_provisioned: true, provider: "email" },
+      user_metadata: { first_name: "Smoke6", last_name: emailPrefix, username: `smk6_${emailPrefix}_${ts}` }
+    })
   })
-  if (error || !data.user) throw new Error(`Failed to create test user: ${error?.message}`)
-  
+
+  if (!createResp.ok) {
+    throw new Error(`Failed to create test user: ${createResp.status} ${await createResp.text()}`)
+  }
+  const userData = await createResp.json()
+  const uid = userData.id
+  cleanupUserIds.push(uid)
+
   if (isAdmin) {
-    await serviceClient.from("profiles").update({ is_admin: true }).eq("id", data.user.id)
+    await serviceClient.from("profiles").update({ is_admin: true }).eq("id", uid)
   }
 
-  // Record consent
-  await serviceClient.from("consent_log").insert({
-    user_id: data.user.id,
-    version: "2026-10-15-v1",
+  // Record required user consent
+  const { error: cErr } = await serviceClient.from("consent_log").insert({
+    user_id: uid,
+    consent_version: "2026-10-22",
     source: "mobile"
   })
+  if (cErr) throw new Error(`Failed to insert consent: ${cErr.message}`)
 
-  // Sign in to get user JWT
-  const { data: authData, error: signInError } = await anonClient.auth.signInWithPassword({
-    email,
-    password
+  // Login to get access token
+  const signInResp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email, password })
   })
-  if (signInError || !authData.session) throw new Error(`Failed to sign in test user: ${signInError?.message}`)
 
-  cleanupUserIds.push(data.user.id)
-  return { id: data.user.id, email, token: authData.session.access_token }
+  if (!signInResp.ok) {
+    throw new Error(`Failed to sign in test user: ${signInResp.status} ${await signInResp.text()}`)
+  }
+  const signData = await signInResp.json()
+  return { id: uid, email, token: signData.access_token }
 }
 
-async function createTestCommunity(ownerId: string): Promise<string> {
+async function createTestCommunity(ownerId?: string): Promise<string> {
+  const finalOwnerId = ownerId || (await createTestUser("comm_owner")).id
   const ts = Date.now() + "_" + Math.floor(Math.random() * 100000)
   const { data, error } = await serviceClient
     .from("communities")
     .insert({
       name: `Smoke_Comm_${ts}`,
-      owner_id: ownerId,
+      description: "Stage 6 Smoke Test Community",
+      owner_id: finalOwnerId,
       visibility: "public",
-      verification_status: "verified",
-      status: "active"
+      verification_status: "verified"
     })
     .select("id")
     .single()
@@ -111,6 +136,30 @@ async function createTestCommunity(ownerId: string): Promise<string> {
   if (error || !data) throw new Error(`Failed to create test community: ${error?.message}`)
   cleanupCommunityIds.push(data.id)
   return data.id
+}
+
+async function createTestEvent(communityId: string, options: { price: number; capacity: number; title: string }) {
+  const ts = Date.now() + "_" + Math.floor(Math.random() * 100000)
+  const { data, error } = await serviceClient
+    .from("events")
+    .insert({
+      community_id: communityId,
+      title: `${options.title} ${ts}`,
+      description: "Stage 6 Smoke Test Event",
+      price: options.price,
+      capacity: options.capacity,
+      booked_count: 0,
+      status: "published",
+      location: "Online / Staging Test",
+      start_date: new Date(Date.now() + 86400000).toISOString(),
+      end_date: new Date(Date.now() + 86400000 + 7200000).toISOString()
+    })
+    .select("id, booked_count, capacity")
+    .single()
+
+  if (error || !data) throw new Error(`Failed to create test event: ${error?.message}`)
+  cleanupEventIds.push(data.id)
+  return data
 }
 
 async function recordResult(
@@ -152,7 +201,6 @@ async function runSmokeTests() {
   const regularUserA = await createTestUser("smoke_user_a")
   const regularUserB = await createTestUser("smoke_user_b")
   const adminUser = await createTestUser("smoke_admin", true)
-  const ownerUser = await createTestUser("smoke_owner")
 
   const userAClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -174,7 +222,7 @@ async function runSmokeTests() {
   // --------------------------------------------------------------------------
   await recordResult(1, "BUG-004: Community Closure RLS & Role Escalation Defense", async () => {
     // 1. Create active community -> User A can self-join as MEMBER
-    const commId = await createTestCommunity(ownerUser.id)
+    const commId = await createTestCommunity()
     const { error: joinActiveErr } = await userAClient
       .from("community_members")
       .insert({ community_id: commId, user_id: regularUserA.id, role: "MEMBER" })
@@ -222,24 +270,14 @@ async function runSmokeTests() {
   // STEP 2: BUG-005 — Atomic Free-Event Registration & Capacity Invariants
   // --------------------------------------------------------------------------
   await recordResult(2, "BUG-005: Atomic Free-Event Registration & Concurrency Guards", async () => {
-    const commId = await createTestCommunity(ownerUser.id)
+    const commId = await createTestCommunity()
 
     // 1. Create a free event with capacity = 2
-    const { data: event, error: eventErr } = await serviceClient
-      .from("events")
-      .insert({
-        community_id: commId,
-        title: "Free Community Meetup",
-        price: 0,
-        capacity: 2,
-        booked_count: 0,
-        status: "published",
-        start_date: new Date(Date.now() + 86400000).toISOString()
-      })
-      .select("id, booked_count, capacity")
-      .single()
-    if (eventErr || !event) throw new Error(`Failed to create free event: ${eventErr?.message}`)
-    cleanupEventIds.push(event.id)
+    const event = await createTestEvent(commId, {
+      title: "Free Community Meetup",
+      price: 0,
+      capacity: 2
+    })
 
     // 2. Direct authenticated client RPC call must be denied (42501)
     const { error: directRpcErr } = await userAClient.rpc("register_free_event", {
@@ -333,24 +371,14 @@ async function runSmokeTests() {
   // STEP 3: BUG-005 — Active Paid Checkout Holds Block Free Registration
   // --------------------------------------------------------------------------
   await recordResult(3, "BUG-005: Active Paid Checkout Holds Respected by Free Registration", async () => {
-    const commId = await createTestCommunity(ownerUser.id)
+    const commId = await createTestCommunity()
 
     // Event with capacity = 1
-    const { data: event, error: eventErr } = await serviceClient
-      .from("events")
-      .insert({
-        community_id: commId,
-        title: "Contended Free Seat",
-        price: 0,
-        capacity: 1,
-        booked_count: 0,
-        status: "published",
-        start_date: new Date(Date.now() + 86400000).toISOString()
-      })
-      .select("id")
-      .single()
-    if (eventErr || !event) throw new Error(`Failed to create event: ${eventErr?.message}`)
-    cleanupEventIds.push(event.id)
+    const event = await createTestEvent(commId, {
+      title: "Contended Free Seat",
+      price: 0,
+      capacity: 1
+    })
 
     // Simulate an active checkout hold placed by User A
     const holdExpires = new Date(Date.now() + 600000).toISOString()
@@ -407,24 +435,14 @@ async function runSmokeTests() {
   // STEP 4: BUG-010 — Coupon Failure Capacity Hold Release & Counter Preservation
   // --------------------------------------------------------------------------
   await recordResult(4, "BUG-010: Coupon Exhaustion Hold Release & Counter Integrity", async () => {
-    const commId = await createTestCommunity(ownerUser.id)
+    const commId = await createTestCommunity()
 
     // Paid event (price: 500)
-    const { data: event, error: eventErr } = await serviceClient
-      .from("events")
-      .insert({
-        community_id: commId,
-        title: "Exclusive Paid Workshop",
-        price: 500,
-        capacity: 5,
-        booked_count: 0,
-        status: "published",
-        start_date: new Date(Date.now() + 86400000).toISOString()
-      })
-      .select("id")
-      .single()
-    if (eventErr || !event) throw new Error(`Failed to create paid event: ${eventErr?.message}`)
-    cleanupEventIds.push(event.id)
+    const event = await createTestEvent(commId, {
+      title: "Exclusive Paid Workshop",
+      price: 500,
+      capacity: 5
+    })
 
     // Create an exhausted coupon (max_uses = 1, used_count = 1)
     const couponCode = `EXHAUST_${Date.now()}`
@@ -542,19 +560,28 @@ async function runSmokeTests() {
   console.log("============================================================")
 
   for (const cId of cleanupCouponIds) {
-    await serviceClient.from("coupons").delete().eq("id", cId).catch(() => {})
+    try { await serviceClient.from("coupons").delete().eq("id", cId) } catch (_) {}
   }
   for (const eId of cleanupEventIds) {
-    await serviceClient.from("registrations").delete().eq("event_id", eId).catch(() => {})
-    await serviceClient.from("events").delete().eq("id", eId).catch(() => {})
+    try { await serviceClient.from("registrations").delete().eq("event_id", eId) } catch (_) {}
+    try { await serviceClient.from("events").delete().eq("id", eId) } catch (_) {}
   }
   for (const cId of cleanupCommunityIds) {
-    await serviceClient.from("community_members").delete().eq("community_id", cId).catch(() => {})
-    await serviceClient.from("communities").delete().eq("id", cId).catch(() => {})
+    try { await serviceClient.from("community_members").delete().eq("community_id", cId) } catch (_) {}
+    try { await serviceClient.from("communities").delete().eq("id", cId) } catch (_) {}
   }
   for (const uId of cleanupUserIds) {
-    await serviceClient.from("consent_log").delete().eq("user_id", uId).catch(() => {})
-    await serviceClient.auth.admin.deleteUser(uId).catch(() => {})
+    try { await serviceClient.from("consent_log").delete().eq("user_id", uId) } catch (_) {}
+    try { await serviceClient.from("profiles").delete().eq("id", uId) } catch (_) {}
+    try {
+      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${uId}`, {
+        method: "DELETE",
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+        }
+      })
+    } catch (_) {}
   }
   console.log("Cleanup completed successfully.")
 
@@ -569,3 +596,4 @@ runSmokeTests().catch((err) => {
   console.error("================================================================================")
   Deno.exit(1)
 })
+
