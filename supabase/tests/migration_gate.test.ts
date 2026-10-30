@@ -23,6 +23,7 @@ const reportsRetention = await read("202610220016_content_reports_retain_on_dele
 const refundStatus = await read("202610290003_confirm_payment_refund_status.sql")
 const atomicCheckIn = await read("202610300002_atomic_check_in.sql")
 const adminFinancials = await read("202610300003_admin_financial_ledger_and_payouts.sql")
+const adminCommunities = await read("202610300004_admin_communities_dropdown.sql")
 
 Deno.test("migration version prefixes are unique and ordered", async () => {
   const names = (await Array.fromAsync(Deno.readDir(dir)))
@@ -64,6 +65,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610300001_reconcile_cron_2min.sql",
     "202610300002_atomic_check_in.sql",
     "202610300003_admin_financial_ledger_and_payouts.sql",
+    "202610300004_admin_communities_dropdown.sql",
   ])
 })
 
@@ -149,5 +151,11 @@ Deno.test("202610300003 admin_financial_ledger_and_payouts deploys passbook RPC 
   assert(adminFinancials.includes("CREATE OR REPLACE FUNCTION public.admin_record_manual_payout"))
   assert(adminFinancials.includes("CREATE OR REPLACE FUNCTION public.organizer_confirm_manual_payout"))
   assert(adminFinancials.includes("wallet_balance = wallet_balance - v_payout.amount"))
+})
+
+Deno.test("202610300004 admin_communities_dropdown deploys get_admin_communities RPC", () => {
+  assert(adminCommunities.includes("CREATE OR REPLACE FUNCTION public.get_admin_communities"))
+  assert(adminCommunities.includes("public.is_admin_user()"))
+  assert(adminCommunities.includes("GRANT EXECUTE ON FUNCTION public.get_admin_communities() TO authenticated, service_role;"))
 })
 

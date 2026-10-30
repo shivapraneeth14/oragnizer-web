@@ -11,7 +11,9 @@ interface CommunityItem {
   id: string
   name: string
   owner_id: string
-  wallet_balance: number
+  wallet_balance?: number
+  deleted_at?: string | null
+  is_hidden?: boolean | null
 }
 
 interface EventItem {
@@ -37,6 +39,7 @@ type FilterType = "all" | "ticket_sale" | "refund" | "payout"
 export default function FinancialsPage() {
   const [communities, setCommunities] = useState<CommunityItem[]>([])
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("")
+  const [selectedCommunityBalance, setSelectedCommunityBalance] = useState<number>(0)
   const [events, setEvents] = useState<EventItem[]>([])
   const [selectedEventId, setSelectedEventId] = useState<string>("all")
   const [beneficiary, setBeneficiary] = useState<BeneficiaryItem | null>(null)
@@ -55,23 +58,40 @@ export default function FinancialsPage() {
   const [isPayoutModalOpen, setIsPayoutModalOpen] = useState<boolean>(false)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
-  // 1. Initial Load: Fetch all active communities
+  // 1. Initial Load: Fetch all communities (Admin RPC with whitelisted fallback)
   useEffect(() => {
     let isMounted = true
     const loadCommunities = async () => {
       setLoadingCommunities(true)
       try {
+        // Try dedicated admin RPC first
+        const { data: rpcData, error: rpcErr } = await supabase.rpc("get_admin_communities")
+        if (!rpcErr && rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
+          if (isMounted) {
+            setCommunities(rpcData as CommunityItem[])
+            setSelectedCommunityId(rpcData[0].id)
+            setSelectedCommunityBalance(rpcData[0].wallet_balance ?? 0)
+          }
+          return
+        }
+
+        // Fallback: Query allowed columns directly from communities
         const { data, error } = await supabase
           .from("communities")
-          .select("id, name, owner_id, wallet_balance")
-          .is("deleted_at", null)
+          .select("id, name, owner_id")
           .order("name", { ascending: true })
 
         if (error) throw error
 
         if (isMounted && data && data.length > 0) {
-          setCommunities(data as CommunityItem[])
-          setSelectedCommunityId(data[0].id)
+          const commList = (data as any[]).map((c) => ({
+            id: c.id,
+            name: c.name,
+            owner_id: c.owner_id,
+            wallet_balance: 0,
+          }))
+          setCommunities(commList)
+          setSelectedCommunityId(commList[0].id)
         }
       } catch (err: any) {
         if (isMounted) setError(err.message || "Failed to load communities.")
@@ -86,7 +106,7 @@ export default function FinancialsPage() {
     }
   }, [])
 
-  // 2. When selected community changes: Load its events & active beneficiary
+  // 2. When selected community changes: Load its events, active beneficiary, and exact wallet balance
   useEffect(() => {
     if (!selectedCommunityId) {
       setEvents([])
@@ -98,7 +118,7 @@ export default function FinancialsPage() {
 
     const loadCommunityMeta = async () => {
       try {
-        const [eventsRes, benRes] = await Promise.all([
+        const [eventsRes, benRes, finRes] = await Promise.all([
           supabase
             .from("events")
             .select("id, title, start_date, price, status, community_id")
@@ -111,12 +131,21 @@ export default function FinancialsPage() {
             .eq("community_id", selectedCommunityId)
             .eq("is_active", true)
             .maybeSingle(),
+          supabase.rpc("get_community_financials", { p_community_id: selectedCommunityId }),
         ])
 
         if (isMounted) {
           setEvents((eventsRes.data as EventItem[]) || [])
           setSelectedEventId("all")
           setBeneficiary((benRes.data as BeneficiaryItem) || null)
+
+          if (finRes.data?.[0]) {
+            const bal = finRes.data[0].wallet_balance ?? 0
+            setSelectedCommunityBalance(bal)
+            setCommunities((prev) =>
+              prev.map((c) => (c.id === selectedCommunityId ? { ...c, wallet_balance: bal } : c))
+            )
+          }
         }
       } catch (err: any) {
         console.error("Error loading community meta:", err)
@@ -183,7 +212,7 @@ export default function FinancialsPage() {
     }
 
     const activeComm = communities.find((c) => c.id === selectedCommunityId)
-    const walletBalance = activeComm?.wallet_balance ?? 0
+    const walletBalance = selectedCommunityBalance || (activeComm?.wallet_balance ?? 0)
 
     return {
       grossRevenue,
@@ -194,7 +223,7 @@ export default function FinancialsPage() {
       walletBalance,
       netCredited: grossRevenue - platformFees - refundsDeducted,
     }
-  }, [statement, communities, selectedCommunityId])
+  }, [statement, communities, selectedCommunityId, selectedCommunityBalance])
 
   // 5. Client Filtering & Searching
   const filteredStatement = useMemo(() => {
@@ -303,7 +332,10 @@ export default function FinancialsPage() {
     document.body.removeChild(link)
   }
 
-  const selectedCommunity = communities.find((c) => c.id === selectedCommunityId) || null
+  const rawCommunity = communities.find((c) => c.id === selectedCommunityId) || null
+  const selectedCommunity = rawCommunity
+    ? { ...rawCommunity, wallet_balance: selectedCommunityBalance || (rawCommunity.wallet_balance ?? 0) }
+    : null
 
   if (loadingCommunities) {
     return (
@@ -392,9 +424,14 @@ export default function FinancialsPage() {
             >
               {communities.map((comm) => (
                 <option key={comm.id} value={comm.id}>
-                  {comm.name} — Balance: {formatCurrency(comm.wallet_balance)}
+                  {comm.name}
+                  {comm.wallet_balance !== undefined ? ` — Balance: ${formatCurrency(comm.wallet_balance)}` : ""}
+                  {comm.deleted_at ? " (Closed)" : comm.is_hidden ? " (Hidden)" : ""}
                 </option>
               ))}
+              {communities.length === 0 && (
+                <option value="">No communities found</option>
+              )}
             </select>
             {selectedCommunity && (
               <p className="mt-1 text-xs text-neutral-500 flex items-center gap-1">
