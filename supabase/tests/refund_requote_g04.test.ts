@@ -86,11 +86,3 @@ Deno.test("create-payment selects and clears refund debt fields", () => {
   assert(createPaymentSrc.includes("refund_attempt_count"))
   assert(createPaymentSrc.includes("clearRefundFieldsForRequote"))
 })
-
-const createPaymentOrderSrc = await Deno.readTextFile(
-  new URL("../functions/create-payment-order/index.ts", import.meta.url),
-)
-Deno.test("create-payment-order selects and clears refund debt fields", () => {
-  assert(createPaymentOrderSrc.includes("refund_attempt_count"))
-  assert(createPaymentOrderSrc.includes("clearRefundFieldsForRequote"))
-})

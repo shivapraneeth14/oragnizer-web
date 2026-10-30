@@ -83,6 +83,8 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611010005_fix_financial_statement_refund_debits.sql",
     "202611010006_financial_reconciliation_engine.sql",
     "202611010007_fix_admin_financial_statement_phone.sql",
+    "202611010008_decommission_cashfree_cron.sql",
+    "202611010009_event_capacity_and_status_guard.sql",
   ])
 })
 
@@ -280,6 +282,26 @@ Deno.test("202611010007 fix_admin_financial_statement_phone replaces prof.phone 
   assert(!fix7.includes("prof.phone AS attendee_phone"))
   assert(fix7.includes("NULL::TEXT AS attendee_phone"))
 })
+
+Deno.test("202611010008 decommission_cashfree_cron unschedules payout-status-sync", async () => {
+  const fix8 = await read("202611010008_decommission_cashfree_cron.sql")
+  assert(fix8.includes("payout-status-sync"))
+  assert(fix8.includes("cron.unschedule"))
+})
+
+Deno.test("202611010009 event_capacity_and_status_guard enforces checks and trigger without rewriting historical counts", async () => {
+  const fix9 = await read("202611010009_event_capacity_and_status_guard.sql")
+  assert(fix9.includes("chk_event_capacity_non_negative"))
+  assert(fix9.includes("chk_event_capacity_ge_booked"))
+  assert(fix9.includes("CREATE OR REPLACE FUNCTION public.check_event_capacity_and_status"))
+  assert(fix9.includes("capacity_below_booked_count"))
+  assert(fix9.includes("capacity_below_active_holds"))
+  assert(fix9.includes("cannot_revert_published_event"))
+  assert(fix9.includes("trg_events_capacity_and_status_guard"))
+  // Guarantee NO automatic rewriting of historical booked_count
+  assert(!fix9.includes("UPDATE public.events SET booked_count"))
+})
+
 
 
 

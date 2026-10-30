@@ -39,7 +39,6 @@ const DEFAULTS: Record<string, RateLimitConfig> = {
   login: { maxRequests: 10, windowSeconds: 300, action: "login" },
   "complete-google-profile": { maxRequests: 10, windowSeconds: 300, action: "complete_google_profile" },
   "check-organizer": { maxRequests: 60, windowSeconds: 60, action: "check_organizer" },
-  "create-payment-order": { maxRequests: 10, windowSeconds: 300, action: "create_payment_order" },
   "create-payment": { maxRequests: 10, windowSeconds: 300, action: "create_payment" },
   "cleanup-booking": { maxRequests: 10, windowSeconds: 300, action: "cleanup_booking" },
   "cancel-registration": { maxRequests: 10, windowSeconds: 300, action: "cancel_registration" },
@@ -54,8 +53,6 @@ const DEFAULTS: Record<string, RateLimitConfig> = {
   "create-community": { maxRequests: 3, windowSeconds: 600, action: "create_community" },
   "check-community-email": { maxRequests: 30, windowSeconds: 60, action: "check_community_email" },
   "create-beneficiary": { maxRequests: 5, windowSeconds: 600, action: "create_beneficiary" },
-  "withdraw-wallet": { maxRequests: 5, windowSeconds: 300, action: "withdraw_wallet" },
-  "cashfree-webhook": { maxRequests: 30, windowSeconds: 60, action: "cashfree_webhook" },
   "check-in": { maxRequests: 100, windowSeconds: 60, action: "check_in" },
   "forgot-password": { maxRequests: 10, windowSeconds: 300, action: "forgot_password" },
   "verify-otp": { maxRequests: 10, windowSeconds: 300, action: "verify_otp" },
@@ -64,8 +61,8 @@ const DEFAULTS: Record<string, RateLimitConfig> = {
   "issue-refund": { maxRequests: 10, windowSeconds: 300, action: "issue_refund" },
   "remove-beneficiary": { maxRequests: 10, windowSeconds: 600, action: "remove_beneficiary" },
   "switch-active-beneficiary": { maxRequests: 10, windowSeconds: 600, action: "switch_active_beneficiary" },
-  "sync-payout-status": { maxRequests: 30, windowSeconds: 60, action: "sync_payout_status" },
   "get-wallet-statement": { maxRequests: 30, windowSeconds: 60, action: "get_wallet_statement" },
+  "delete-media": { maxRequests: 20, windowSeconds: 300, action: "delete_media" },
 }
 
 export async function checkRateLimit(

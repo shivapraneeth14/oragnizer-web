@@ -1,14 +1,12 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { cashfreePost } from "../_shared/cashfree.ts"
 import { logError } from "../_shared/logger.ts"
 import { getCorsHeaders } from "../_shared/cors.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
 
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req)
@@ -31,9 +29,19 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "community_id, bank_account_number, bank_ifsc, bank_account_holder are required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
-    const ifscUpper = bank_ifsc.toUpperCase()
+    const cleanAccount = String(bank_account_number).trim()
+    if (!/^\d{9,18}$/.test(cleanAccount)) {
+      return new Response(JSON.stringify({ error: "Bank account number must be between 9 and 18 digits" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    const ifscUpper = String(bank_ifsc).trim().toUpperCase()
     if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscUpper)) {
       return new Response(JSON.stringify({ error: "Invalid IFSC code format" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    const cleanHolder = String(bank_account_holder).trim()
+    if (cleanHolder.length === 0 || cleanHolder.length > 100) {
+      return new Response(JSON.stringify({ error: "Account holder name must be between 1 and 100 characters" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
     const { data: community } = await supabase
@@ -45,11 +53,12 @@ Deno.serve(async (req) => {
     if (!community) return new Response(JSON.stringify({ error: "Community not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (community.owner_id !== user.id) return new Response(JSON.stringify({ error: "Only the community owner can set up payouts" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
+    const maskedNumber = "xxxxxx" + cleanAccount.slice(-4)
     const { data: existingBen } = await supabase
       .from("community_beneficiaries")
       .select("id")
       .eq("community_id", community_id)
-      .eq("bank_account_number", "xxxxxx" + bank_account_number.slice(-4))
+      .eq("bank_account_number", maskedNumber)
       .eq("bank_ifsc", ifscUpper)
       .maybeSingle()
 
@@ -57,24 +66,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "This bank account is already added to this community." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
+    // Generate internal beneficiary ID decoupled from external providers
     const beneficiaryId = crypto.randomUUID().replace(/-/g, "")
-    const result = await cashfreePost("/beneficiary", {
-      beneficiary_id: beneficiaryId,
-      beneficiary_name: bank_account_holder,
-      beneficiary_instrument_details: {
-        bank_account_number: bank_account_number,
-        bank_ifsc: ifscUpper,
-      },
-      beneficiary_contact_details: {
-        beneficiary_email: user.email || "organizer@cluvo.com",
-        beneficiary_phone: "9999999999",
-        beneficiary_country_code: "+91",
-        beneficiary_address: "N/A",
-        beneficiary_city: "N/A",
-        beneficiary_state: "N/A",
-        beneficiary_postal_code: "000000",
-      },
-    })
 
     const { error: updateErr } = await supabase
       .from("communities")
@@ -102,12 +95,13 @@ Deno.serve(async (req) => {
       .insert({
         community_id,
         cashfree_beneficiary_id: beneficiaryId,
-        account_holder: bank_account_holder,
-        bank_account_number: "xxxxxx" + bank_account_number.slice(-4),
+        account_holder: cleanHolder,
+        bank_account_number: maskedNumber,
         bank_ifsc: ifscUpper,
-        label: label || "Default Account",
+        label: label ? String(label).trim() : "Default Account",
         is_active: true,
       })
+
     if (benInsertErr) {
       await supabase.from("communities").update({ cashfree_beneficiary_id: null }).eq("id", community_id)
       logError("create-beneficiary insert", benInsertErr)
@@ -118,15 +112,13 @@ Deno.serve(async (req) => {
       action: "beneficiary_created",
       details: {
         community_id,
-        cashfree_beneficiary_id: beneficiaryId,
-        // Store only the beneficiary id — never the raw Cashfree response,
-        // which echoes bank account numbers and IFSCs.
+        beneficiary_id: beneficiaryId,
       },
     })
 
     return new Response(JSON.stringify({ beneficiary_id: beneficiaryId }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
   } catch (err) {
     logError("create-beneficiary", err)
-    return new Response(JSON.stringify({ error: "Something went wrong. Please check the details and try again." }), { status: 502, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    return new Response(JSON.stringify({ error: "Something went wrong. Please check the details and try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
   }
 })

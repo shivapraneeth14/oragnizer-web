@@ -189,16 +189,30 @@ export function useEvents(communityId: string | undefined) {
     }
     if (!data.category) return "Category is required"
 
-    // Prevent editing cancelled or closed events
+    // Prevent editing cancelled or closed events, and enforce capacity/status guards
     const { data: currentEvent } = await supabase
       .from("events")
-      .select("status, start_date, end_date")
+      .select("status, start_date, end_date, booked_count")
       .eq("id", id)
       .maybeSingle()
     if (currentEvent && !canEditEvent(currentEvent)) {
       return isEventClosed(currentEvent)
         ? "Cannot edit an event that has already ended (closed)"
         : "Cannot edit a cancelled event"
+    }
+
+    if (data.capacity) {
+      const parsedCap = parseInt(data.capacity)
+      if (isNaN(parsedCap) || parsedCap <= 0) {
+        return "Event capacity must be greater than zero"
+      }
+      if (currentEvent && parsedCap < (currentEvent.booked_count ?? 0)) {
+        return `Cannot reduce event capacity (${parsedCap}) below currently booked attendees (${currentEvent.booked_count})`
+      }
+    }
+
+    if (data.status === "draft" && currentEvent && (currentEvent.booked_count ?? 0) > 0) {
+      return "Cannot revert event to draft when attendee registrations already exist"
     }
 
     const { error } = await supabase.from("events").update({
