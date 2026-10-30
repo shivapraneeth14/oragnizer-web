@@ -87,7 +87,16 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611010009_event_capacity_and_status_guard.sql",
     "202611010010_community_closure_membership_guard.sql",
     "202611010011_atomic_free_event_registration.sql",
+    "202611010012_owner_self_delete_guard.sql",
   ])
+})
+
+Deno.test("202611010012 owner_self_delete_guard prevents owners from orphaning community", async () => {
+  const mig = await read("202611010012_owner_self_delete_guard.sql")
+  assert(mig.includes("CREATE POLICY community_members_self_delete ON public.community_members"))
+  assert(mig.includes("FOR DELETE USING"))
+  assert(mig.includes("role != 'OWNER'"))
+  assert(mig.includes("c.owner_id = auth.uid()"))
 })
 
 Deno.test("202611010002 fix_webhook_processed_at fixes column name to processed_at", async () => {

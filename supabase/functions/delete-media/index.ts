@@ -66,27 +66,67 @@ Deno.serve(async (req) => {
     const rawPublicId = typeof public_id === "string" ? public_id.trim() : null
 
     const targetPublicId = rawPublicId || cloudinaryPublicId(targetUrl)
-    if (!targetPublicId) {
+    if (!targetPublicId || !/^[a-zA-Z0-9_\-\/]+$/.test(targetPublicId)) {
       return new Response(JSON.stringify({ error: "Valid asset_url or public_id is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
-    // 1. Anti-Destruction Guard: Fetch caller's profile avatar
-    const { data: profile } = await supabase
+    // 1. Anti-Destruction Guard:
+    // Strictly forbid deleting any active profile avatar across the platform
+    const { data: activeProfile } = await supabase
       .from("profiles")
-      .select("avatar_url")
-      .eq("id", user.id)
-      .single()
+      .select("id")
+      .ilike("avatar_url", `%${targetPublicId}%`)
+      .limit(1)
+      .maybeSingle()
 
-    const activeAvatarUrl = profile?.avatar_url ?? null
-    const activeAvatarPublicId = cloudinaryPublicId(activeAvatarUrl)
-
-    // Strictly forbid deleting the caller's active, committed profile avatar
-    if (
-      (activeAvatarUrl && targetUrl && activeAvatarUrl === targetUrl) ||
-      (activeAvatarPublicId && targetPublicId === activeAvatarPublicId)
-    ) {
+    if (activeProfile) {
       return new Response(
         JSON.stringify({ error: "Cannot destroy active profile avatar" }),
+        { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      )
+    }
+
+    // Strictly forbid deleting active community banners or avatars
+    const { data: activeComm } = await supabase
+      .from("communities")
+      .select("id")
+      .or(`banner_url.ilike.%${targetPublicId}%,community_avatar_url.ilike.%${targetPublicId}%`)
+      .limit(1)
+      .maybeSingle()
+
+    if (activeComm) {
+      return new Response(
+        JSON.stringify({ error: "Cannot destroy active community asset" }),
+        { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      )
+    }
+
+    // Strictly forbid deleting active event poster images or promotional videos
+    const { data: activeEvent } = await supabase
+      .from("events")
+      .select("id")
+      .or(`image_url.ilike.%${targetPublicId}%,video_url.ilike.%${targetPublicId}%`)
+      .limit(1)
+      .maybeSingle()
+
+    if (activeEvent) {
+      return new Response(
+        JSON.stringify({ error: "Cannot destroy active event asset" }),
+        { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      )
+    }
+
+    // Strictly forbid deleting active gallery media (images, videos, thumbnails)
+    const { data: activeMedia } = await supabase
+      .from("media")
+      .select("id")
+      .or(`url.ilike.%${targetPublicId}%,thumbnail_url.ilike.%${targetPublicId}%`)
+      .limit(1)
+      .maybeSingle()
+
+    if (activeMedia) {
+      return new Response(
+        JSON.stringify({ error: "Cannot destroy active gallery media asset" }),
         { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
       )
     }

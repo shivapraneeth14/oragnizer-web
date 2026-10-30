@@ -117,6 +117,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
   const [shareCopied, setShareCopied] = useState(false)
   const [isTeam, setIsTeam] = useState(false)
   const regIdsRef = useRef<Set<string>>(new Set())
+  const profileCacheRef = useRef<Map<string, Pick<Profile, "first_name" | "last_name" | "avatar_url">>>(new Map())
 
   useEffect(() => { setDescTabIndex(0) }, [event.id])
 
@@ -236,6 +237,62 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
       .channel(`event-messages-live-${event.id}-${crypto.randomUUID().slice(0, 8)}`)
       .on(
         "postgres_changes",
+        { event: "INSERT", schema: "public", table: "event_messages", filter: `event_id=eq.${event.id}` },
+        (payload: { new: { id: string; event_id: string; user_id: string; content: string; created_at: string; updated_at: string } }) => {
+          const newMsg = payload.new
+          if (!newMsg?.id) return
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === newMsg.id)) return prev
+            const cached = profileCacheRef.current.get(newMsg.user_id) || null
+            const fullMsg: MessageWithProfile = {
+              ...newMsg,
+              profiles: cached,
+            }
+            return [...prev, fullMsg]
+          })
+          if (!profileCacheRef.current.has(newMsg.user_id)) {
+            supabase
+              .from("profiles")
+              .select("first_name, last_name, avatar_url")
+              .eq("id", newMsg.user_id)
+              .maybeSingle()
+              .then(({ data: prof }) => {
+                if (prof) {
+                  profileCacheRef.current.set(newMsg.user_id, prof)
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.user_id === newMsg.user_id && !m.profiles
+                        ? { ...m, profiles: prof }
+                        : m
+                    )
+                  )
+                }
+              })
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "event_messages", filter: `event_id=eq.${event.id}` },
+        (payload: { new: { id?: string; content?: string; updated_at?: string } | null }) => {
+          const updated = payload.new
+          if (updated?.id) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === updated.id
+                  ? {
+                      ...m,
+                      content: updated.content ?? m.content,
+                      updated_at: updated.updated_at ?? m.updated_at,
+                    }
+                  : m
+              )
+            )
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
         { event: "DELETE", schema: "public", table: "event_messages", filter: `event_id=eq.${event.id}` },
         (payload: { old: { id?: string } | null }) => {
           const deletedId = payload.old?.id
@@ -262,7 +319,13 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
       if (error) {
         setMessagesError(error.message)
       } else {
-        setMessages(data as unknown as MessageWithProfile[])
+        const list = data as unknown as MessageWithProfile[]
+        for (const m of list) {
+          if (m.profiles) {
+            profileCacheRef.current.set(m.user_id, m.profiles)
+          }
+        }
+        setMessages(list)
       }
     } catch (err) {
       setMessagesError((err as Error).message)

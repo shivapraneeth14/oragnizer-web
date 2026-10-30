@@ -5,9 +5,99 @@ const uploadPreset = env.cloudinaryUploadPreset
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+const ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
 
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024 // 100 MB
 const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime", "video/x-m4v", "video/ogg"]
+const ALLOWED_VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".ogg"]
+
+export async function validateImageFile(file: File): Promise<void> {
+  const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase()
+  if (!ALLOWED_EXTENSIONS.includes(ext) || !ALLOWED_TYPES.includes(file.type)) {
+    throw new Error("Only JPEG, PNG, WebP, and GIF images are allowed.")
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    throw new Error("File is too large. Maximum size is 10 MB.")
+  }
+
+  const header = new Uint8Array(await file.slice(0, 16).arrayBuffer())
+  if (header.length < 12) {
+    throw new Error("Invalid image file format.")
+  }
+
+  const isJpeg = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff
+  const isPng =
+    header[0] === 0x89 &&
+    header[1] === 0x50 &&
+    header[2] === 0x4e &&
+    header[3] === 0x47 &&
+    header[4] === 0x0d &&
+    header[5] === 0x0a &&
+    header[6] === 0x1a &&
+    header[7] === 0x0a
+  const isWebp =
+    header[0] === 0x52 &&
+    header[1] === 0x49 &&
+    header[2] === 0x46 &&
+    header[3] === 0x46 &&
+    header[8] === 0x57 &&
+    header[9] === 0x45 &&
+    header[10] === 0x42 &&
+    header[11] === 0x50
+  const isGif =
+    header[0] === 0x47 &&
+    header[1] === 0x49 &&
+    header[2] === 0x46 &&
+    header[3] === 0x38
+
+  if (!isJpeg && !isPng && !isWebp && !isGif) {
+    throw new Error("Invalid image file header. Corrupted or unsupported image.")
+  }
+}
+
+export async function validateVideoFile(file: File): Promise<void> {
+  const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase()
+  if (!ALLOWED_VIDEO_EXTENSIONS.includes(ext) || !ALLOWED_VIDEO_TYPES.includes(file.type)) {
+    throw new Error("Only MP4, WebM, MOV, M4V, and OGG videos are allowed.")
+  }
+  if (file.size > MAX_VIDEO_SIZE) {
+    throw new Error("Video is too large. Maximum size is 100 MB.")
+  }
+
+  const header = new Uint8Array(await file.slice(0, 16).arrayBuffer())
+  if (header.length < 8) {
+    throw new Error("Invalid video file format.")
+  }
+
+  // MP4 / MOV: 'ftyp' at offset 4..7
+  const isFtyp =
+    header[4] === 0x66 &&
+    header[5] === 0x74 &&
+    header[6] === 0x79 &&
+    header[7] === 0x70
+  // WebM: 1A 45 DF A3
+  const isWebm =
+    header[0] === 0x1a &&
+    header[1] === 0x45 &&
+    header[2] === 0xdf &&
+    header[3] === 0xa3
+  // OggS: 4F 67 67 53
+  const isOgg =
+    header[0] === 0x4f &&
+    header[1] === 0x67 &&
+    header[2] === 0x67 &&
+    header[3] === 0x53
+  // QuickTime moov: 6D 6F 6F 76
+  const isMoov =
+    header[4] === 0x6d &&
+    header[5] === 0x6f &&
+    header[6] === 0x6f &&
+    header[7] === 0x76
+
+  if (!isFtyp && !isWebm && !isOgg && !isMoov) {
+    throw new Error("Invalid video file header. Corrupted or unsupported video.")
+  }
+}
 
 // NOTE: Cloudinary rejects the `eager` upload parameter on unsigned uploads
 // ("Eager parameter is not allowed when using unsigned upload"), so the
@@ -124,18 +214,12 @@ export interface UploadOptions {
   signal?: AbortSignal
 }
 
-export function uploadToCloudinary(file: File, options: UploadOptions = {}): Promise<string> {
+export async function uploadToCloudinary(file: File, options: UploadOptions = {}): Promise<string> {
   const { onProgress, onProcessing, signal } = options
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return Promise.reject(new Error("Only JPEG, PNG, WebP, and GIF images are allowed."))
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    return Promise.reject(new Error("File is too large. Maximum size is 10 MB."))
-  }
-  return uploadFile(file, "image", 30_000, onProgress, signal).then((r) => {
-    onProcessing?.()
-    return r.secureUrl
-  })
+  await validateImageFile(file)
+  const result = await uploadFile(file, "image", 30_000, onProgress, signal)
+  onProcessing?.()
+  return result.secureUrl
 }
 
 function videoDimensions(file: File): Promise<{ width: number; height: number }> {
@@ -171,12 +255,7 @@ export function cloudinaryPlayableVideoUrl(url: string): string {
 
 export async function uploadVideoToCloudinary(file: File, options: UploadOptions = {}): Promise<string> {
   const { onProgress, onProcessing, signal } = options
-  if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
-    return Promise.reject(new Error("Only MP4, WebM, MOV, M4V, and OGG videos are allowed."))
-  }
-  if (file.size > MAX_VIDEO_SIZE) {
-    return Promise.reject(new Error("Video is too large. Maximum size is 100 MB."))
-  }
+  await validateVideoFile(file)
   try {
     const dims = await videoDimensions(file)
     if (dims.width > 0 && dims.height > 0 && Math.max(dims.width, dims.height) > MAX_VIDEO_LONG_EDGE) {

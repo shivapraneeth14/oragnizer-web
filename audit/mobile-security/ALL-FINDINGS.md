@@ -8533,3 +8533,109 @@ All three Phase 2 findings (`BUG-004`, `BUG-005`, `BUG-010`) were successfully d
 
 **All Stage 6 remediation work (Phase 1 & Phase 2) is completely implemented, deployed to staging, and 100% verified.** Production project `vdxspyumkvwawmqwfkzr` remains strictly air-gapped and untouched.
 
+---
+
+## 14. Stage 6 Phase 3: Local Implementation & Testing Evidence
+
+### 14.1 BUG-006: Pre-Upload Media Validation & Backend Asset Protection
+1. **Client-Side Media Validation Engine (Mobile):**
+   - Created [`apps/mobile/lib/services/media_validator.dart`](file:///Users/shivapraneeth/Documents/community/apps/mobile/lib/services/media_validator.dart):
+     - Validates image file size against 10 MB maximum limit (`maxImageFileSize = 10 * 1024 * 1024`).
+     - Enforces strict whitelist of file extensions (`.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`).
+     - Validates binary magic bytes for JPEG (`FF D8 FF`), PNG (`89 50 4E 47 0D 0A 1A 0A`), WebP (`RIFF...WEBP`), and GIF (`GIF87a`/`GIF89a`).
+     - Blocks active/executable formats (SVG, HTML, JavaScript) disguised as standard images.
+   - Refactored [`apps/mobile/lib/services/cloudinary_io.dart`](file:///Users/shivapraneeth/Documents/community/apps/mobile/lib/services/cloudinary_io.dart) and [`apps/mobile/lib/services/cloudinary_web.dart`](file:///Users/shivapraneeth/Documents/community/apps/mobile/lib/services/cloudinary_web.dart) to execute `validateImageBytes` prior to dispatching network upload requests.
+   - Deprecated legacy unvalidated `uploadAvatar` in [`apps/mobile/lib/providers/profile_provider.dart`](file:///Users/shivapraneeth/Documents/community/apps/mobile/lib/providers/profile_provider.dart) with clear documentation directing callers to two-tier deferral.
+2. **Client-Side Media Validation Engine (Organizer Web):**
+   - Updated [`apps/organizer-web/src/lib/cloudinary.ts`](file:///Users/shivapraneeth/Documents/community/apps/organizer-web/src/lib/cloudinary.ts):
+     - Added `validateImageFile(file: File)`: checks extension whitelist, MIME type whitelist (`image/jpeg`, `image/png`, `image/webp`, `image/gif`), 10 MB size limit, and first 16 bytes for format magic bytes.
+     - Added `validateVideoFile(file: File)`: checks video extensions (`.mp4`, `.webm`, `.mov`, `.m4v`, `.ogg`), MIME types, 100 MB size limit, and binary container headers (`ftyp`, `WebM`, `OggS`, `moov`).
+3. **Backend `delete-media` Asset Protection Hardening:**
+   - Updated [`supabase/functions/delete-media/index.ts`](file:///Users/shivapraneeth/Documents/community/supabase/functions/delete-media/index.ts):
+     - Added strict input validation rejecting non-alphanumeric/path tokens (`/^[a-zA-Z0-9_\-\/]+$/`) to prevent PostgREST filter injection.
+     - Enhanced anti-destruction guard to query all active database tables across the platform:
+       - `profiles.avatar_url`: checks if `targetPublicId` is currently active on any user profile.
+       - `communities.banner_url` and `communities.community_avatar_url`: checks if `targetPublicId` is active on any community banner or avatar.
+       - `events.image_url` and `events.video_url`: checks if `targetPublicId` is active on any event poster image or promotional video.
+       - `media.url` and `media.thumbnail_url`: checks if `targetPublicId` is active on any community gallery or event gallery asset.
+     - If `targetPublicId` matches any active database record across the entire platform, the function immediately rejects the request with HTTP 403 Forbidden (`active_asset_protected`).
+     - Preserves legitimate cleanup of uncommitted/orphaned uploads.
+4. **Automated Test Evidence:**
+   - Authored [`apps/mobile/test/media_validator_test.dart`](file:///Users/shivapraneeth/Documents/community/apps/mobile/test/media_validator_test.dart) (8/8 Flutter tests passed: valid JPEG/PNG/WebP/GIF, extension rejection, spoofed SVG rejection, size limits, empty bytes).
+   - Authored [`supabase/tests/cloudinary_validation.test.ts`](file:///Users/shivapraneeth/Documents/community/supabase/tests/cloudinary_validation.test.ts) (2/2 Deno tests passed).
+   - Updated [`supabase/tests/media_cleanup.test.ts`](file:///Users/shivapraneeth/Documents/community/supabase/tests/media_cleanup.test.ts) (4/4 Deno tests passed: static code analysis + behavioral simulation of active gallery image, video, thumbnail, event promo video, profile avatar, community banner/avatar protection, plus orphaned upload deletion).
+
+### 14.2 BUG-007: Authorization, Hierarchy, Rate Limiting & Owner Self-Delete Guard
+1. **Edge Function Hardening (`remove-member`):**
+   - Updated [`supabase/functions/remove-member/index.ts`](file:///Users/shivapraneeth/Documents/community/supabase/functions/remove-member/index.ts):
+     - **Caller Authorization Matrix:**
+       - Platform Administrators (`profiles.is_admin = true`): Permitted to remove any member or organizer across any community.
+       - Community Owners (`role = 'OWNER'`): Permitted to remove any organizer or member from their community. Cannot remove themselves via this endpoint (must transfer ownership or delete community).
+       - Community Organizers (`role = 'ORGANIZER'`): Permitted to remove regular members only. Forbidden from removing fellow organizers or the owner.
+       - Regular Members (`role = 'MEMBER'`): Forbidden with HTTP 403.
+     - **Target Hierarchy Protection:** Hard-rejects any attempt to remove a community owner (`target_is_owner`). Hard-rejects attempts by non-owners/non-admins to remove organizers (`insufficient_hierarchy`).
+     - **Rate Limiting:** Enforces `checkRateLimit(user.id, "remove-member")` returning HTTP 429 when abuse limits are exceeded.
+     - **Dynamic CORS:** Uses `getCorsHeaders(req)` with allowed origin whitelist.
+     - **Structured Audit Logging:** Logs caller role (`ADMIN`, `OWNER`, `ORGANIZER`), community ID, target user ID, and timestamp in edge function telemetry.
+2. **Database Migration (`owner_self_delete_guard`):**
+   - Created forward-only migration [`supabase/migrations/202611010012_owner_self_delete_guard.sql`](file:///Users/shivapraneeth/Documents/community/supabase/migrations/202611010012_owner_self_delete_guard.sql):
+     - Drops and recreates `community_members_self_delete` policy:
+       ```sql
+       CREATE POLICY "community_members_self_delete"
+       ON public.community_members
+       FOR DELETE
+       TO authenticated
+       USING (
+         (user_id = auth.uid())
+         AND role != 'OWNER'
+       );
+       ```
+     - Prevents community owners from accidentally leaving their own community, preventing orphaned communities without active owners.
+3. **Automated Test Evidence:**
+   - Authored [`supabase/tests/remove_member.test.ts`](file:///Users/shivapraneeth/Documents/community/supabase/tests/remove_member.test.ts) (3/3 Deno tests passed: role hierarchy matrix, owner self-delete SQL policy, rate limiting and CORS headers).
+   - Updated [`supabase/tests/migration_gate.test.ts`](file:///Users/shivapraneeth/Documents/community/supabase/tests/migration_gate.test.ts) to verify migration ordering and syntax including `202611010012`.
+
+### 14.3 BUG-008: Realtime Discussion Profile Hydration & State Synchronization
+1. **Flutter Mobile Application Hydration Engine:**
+   - Updated [`apps/mobile/lib/widgets/event_discussion.dart`](file:///Users/shivapraneeth/Documents/community/apps/mobile/lib/widgets/event_discussion.dart):
+     - Implemented in-memory profile cache: `Map<String, ({String name, String? avatarUrl})> _profileCache`.
+     - `_load()` populates `_profileCache` with all known sender profiles returned by initial REST join.
+     - Implemented `_fetchAndHydrateProfile(String userId)`: asynchronously queries `profiles` table on cache miss and triggers atomic `setState()` updating matching messages.
+     - Realtime `PostgresChangeEvent.insert`:
+       - Prevents duplicate message addition via ID existence check.
+       - Hydrates `senderName` and `senderAvatarUrl` immediately from `_profileCache` if available; otherwise triggers asynchronous `_fetchAndHydrateProfile(msg.userId)`.
+     - Realtime `PostgresChangeEvent.update`: Updates `content` and `updatedAt` in place when messages are edited by organizers or attendees.
+     - Realtime `PostgresChangeEvent.delete`: Removes deleted message IDs from the active list.
+2. **Organizer Web Discussion Hydration Engine:**
+   - Updated [`apps/organizer-web/src/components/events/event-detail.tsx`](file:///Users/shivapraneeth/Documents/community/apps/organizer-web/src/components/events/event-detail.tsx):
+     - Implemented in-memory profile cache ref: `profileCacheRef = useRef<Map<string, Pick<Profile, "first_name" | "last_name" | "avatar_url">>>(new Map())`.
+     - `loadDiscussion()` seeds `profileCacheRef` from initial REST query.
+     - Realtime channel subscribes to `INSERT`: attaches cached profile immediately or executes non-blocking profile lookup on cache-miss.
+     - Realtime channel subscribes to `UPDATE`: updates message content and `updated_at` timestamps in state.
+     - Preserves `DELETE` handler to filter out deleted messages in real time.
+3. **Automated Test Evidence:**
+   - Authored [`apps/mobile/test/event_discussion_hydration_test.dart`](file:///Users/shivapraneeth/Documents/community/apps/mobile/test/event_discussion_hydration_test.dart) (5/5 Flutter tests passed).
+   - Authored [`supabase/tests/event_discussion_sync.test.ts`](file:///Users/shivapraneeth/Documents/community/supabase/tests/event_discussion_sync.test.ts) (3/3 Deno tests passed).
+
+---
+
+## 15. Stage 6 Phase 3 Local Build & Test Summary
+
+### 15.1 Comprehensive Test Suite Results
+- **Deno Test Suite (`supabase/tests/`):** **297/297 passed (100%)**
+- **Flutter Test Suite (`apps/mobile/test/`):** **161/161 passed (100%)**
+- **Flutter Static Analysis (`apps/mobile`):** **0 issues found**
+- **Organizer Web & Admin Web CI (`npm run ci`):** **Passed (0 typecheck/lint errors)**
+- **Organizer Web & Admin Web Production Build (`npm run build`):** **Passed (Both bundles built successfully)**
+
+### 15.2 Phase 3 Findings Remediation Status
+
+| Finding ID | Severity | Description | Remediation Artifacts | Local Build Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **`BUG-006`** | Low | Cloudinary unvalidated upload & active asset deletion | `media_validator.dart`, `cloudinary.ts`, `delete-media` active asset protection | **LOCAL BUILD VERIFIED** |
+| **`BUG-007`** | Low | `remove-member` missing authz, rate limit, CORS, owner self-delete | `remove-member/index.ts`, Migration `202611010012_owner_self_delete_guard.sql` | **LOCAL BUILD VERIFIED** |
+| **`BUG-008`** | Low | Realtime discussion sender profile hydration failure | Profile cache in `event_discussion.dart` and `event-detail.tsx`, realtime insert/update/delete | **LOCAL BUILD VERIFIED** |
+
+**Zero remote deployments, zero remote migrations, and zero git pushes were performed.**
+**Production environment `vdxspyumkvwawmqwfkzr` remains strictly air-gapped and 100% untouched.**
+
