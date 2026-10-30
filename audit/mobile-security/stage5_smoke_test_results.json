@@ -1,0 +1,140 @@
+{
+  "timestamp": "2026-10-30T16:53:12.548Z",
+  "allPassed": true,
+  "results": [
+    {
+      "step": 1,
+      "title": "Razorpay payment.captured webhook returns HTTP 200 and confirms payment",
+      "verdict": "PASS",
+      "details": "HTTP 200 'OK' received. Payment cd0719f8-0a70-4b5f-a614-31c902a7e37b set to 'success', registration db3118bc-9988-4415-a16b-c72bdfba1264 set to 'confirmed' with QR code. processed_webhooks recorded with processed_at=2026-10-30T16:52:47.821324+00:00.",
+      "evidence": {
+        "httpStatus": 200,
+        "responseBody": "OK",
+        "paymentId": "cd0719f8-0a70-4b5f-a614-31c902a7e37b",
+        "razorpayOrderId": "order_smk_1793379165010_5097",
+        "razorpayPaymentId": "pay_smk_1793379165362",
+        "paymentStatus": "success",
+        "registrationStatus": "confirmed",
+        "hasQrCode": true,
+        "processedWebhookRecord": {
+          "id": "paysmk1793379165362payment.captured",
+          "provider": "razorpay",
+          "event_type": "payment.captured",
+          "processed_at": "2026-10-30T16:52:47.821324+00:00"
+        }
+      }
+    },
+    {
+      "step": 2,
+      "title": "Duplicate webhook is safely ignored",
+      "verdict": "PASS",
+      "details": "HTTP 200 'Already processed' received on redelivery. Payment status preserved as 'success', registration preserved as 'confirmed'. Zero side-effects.",
+      "evidence": {
+        "httpStatus": 200,
+        "responseBody": "Already processed",
+        "paymentStatus": "success",
+        "registrationStatus": "confirmed"
+      }
+    },
+    {
+      "step": 3,
+      "title": "Duplicate manual payout for the same community/event/UTR is rejected",
+      "verdict": "PASS",
+      "details": "First payout succeeded (id: 8c6c1590-e549-4c6a-95cb-0461c624b517). Duplicate attempt cleanly rejected with error='duplicate_payout_utr'. Only 1 payout row exists in DB.",
+      "evidence": {
+        "initialPayout": {
+          "ok": true,
+          "amount": 30000,
+          "status": "pending_confirmation",
+          "payout_id": "8c6c1590-e549-4c6a-95cb-0461c624b517"
+        },
+        "duplicateAttemptResult": {
+          "ok": false,
+          "error": "duplicate_payout_utr",
+          "message": "A payout with this UTR / Bank Reference is already recorded for this event or wallet and is currently active."
+        },
+        "databasePayoutRowCount": 1,
+        "storedUtr": "UTR_SMK_1793379174475_ABC"
+      }
+    },
+    {
+      "step": 4,
+      "title": "One UTR across different events is accepted",
+      "verdict": "PASS",
+      "details": "Single UTR 'UTR_SMK_1793379174475_ABC' successfully attributed across Event A (id: 8c6c1590-e549-4c6a-95cb-0461c624b517) and Event B (id: 62c0932c-bd00-4059-bf2d-0380a6d42517). Both active in 'pending_confirmation'.",
+      "evidence": {
+        "utr": "UTR_SMK_1793379174475_ABC",
+        "eventAPayoutId": "8c6c1590-e549-4c6a-95cb-0461c624b517",
+        "eventBPayoutId": "62c0932c-bd00-4059-bf2d-0380a6d42517",
+        "databaseRows": [
+          {
+            "id": "8c6c1590-e549-4c6a-95cb-0461c624b517",
+            "event_id": "9339b9b2-6583-41b4-a534-03c1bbc488cb",
+            "amount": 30000,
+            "status": "pending_confirmation",
+            "utr": "UTR_SMK_1793379174475_ABC"
+          },
+          {
+            "id": "62c0932c-bd00-4059-bf2d-0380a6d42517",
+            "event_id": "fcb92171-ebd8-4832-9d16-f5672039baec",
+            "amount": 20000,
+            "status": "pending_confirmation",
+            "utr": "UTR_SMK_1793379174475_ABC"
+          }
+        ]
+      }
+    },
+    {
+      "step": 5,
+      "title": "Organizer acknowledgement deducts wallet exactly once",
+      "verdict": "PASS",
+      "details": "First acknowledgement deducted ₹300 (wallet: 200,000 -> 170,000 paise). Second acknowledgement was rejected with 'Payout is not in pending confirmation state.', leaving wallet balance intact at 170,000 paise.",
+      "evidence": {
+        "initialWalletBalance": 200000,
+        "afterFirstConfirmWalletBalance": 170000,
+        "afterSecondConfirmWalletBalance": 170000,
+        "firstConfirmResult": {
+          "ok": true,
+          "amount": 30000,
+          "status": "success",
+          "payout_id": "8c6c1590-e549-4c6a-95cb-0461c624b517",
+          "new_balance": 170000
+        },
+        "secondConfirmResult": {
+          "ok": false,
+          "error": "Payout is not in pending confirmation state."
+        },
+        "payoutItemFinalStatus": "success"
+      }
+    },
+    {
+      "step": 6,
+      "title": "Booking hold reuse returns reused_hold: true",
+      "verdict": "PASS",
+      "details": "Initial reservation created registration 37f52b4a-33b4-4bd0-ba41-cf59987d3c40 (reused_hold: false). Sequential tap before payment returned same registration with reused_hold: true. Sequential tap after payment returned same registration with reused_hold: true.",
+      "evidence": {
+        "initialCall": {
+          "ok": true,
+          "price": 45000,
+          "reused_hold": false,
+          "hold_expires_at": "2026-10-30T17:03:02.332207+00:00",
+          "registration_id": "37f52b4a-33b4-4bd0-ba41-cf59987d3c40"
+        },
+        "secondCallBeforePayment": {
+          "ok": true,
+          "price": 45000,
+          "reused_hold": true,
+          "hold_expires_at": "2026-10-30T17:03:02.332207+00:00",
+          "registration_id": "37f52b4a-33b4-4bd0-ba41-cf59987d3c40"
+        },
+        "thirdCallAfterPayment": {
+          "ok": true,
+          "price": 45000,
+          "reused_hold": true,
+          "hold_expires_at": "2026-10-30T17:03:02.332207+00:00",
+          "registration_id": "37f52b4a-33b4-4bd0-ba41-cf59987d3c40"
+        }
+      }
+    }
+  ]
+}
