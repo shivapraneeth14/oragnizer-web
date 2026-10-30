@@ -286,14 +286,66 @@ Deno.serve(async (req) => {
 
     const registrationId: string = holdResult.registration_id
 
-    let couponId: string | null = null
-    if (pendingCouponId) {
-      const { data: claimResult } = await supabase
-        .rpc("claim_coupon", { p_coupon_id: pendingCouponId })
-      if (!claimResult?.claimed) {
-        return new Response(JSON.stringify({ error: "Coupon code has reached its usage limit" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    // Helper: Resilient hold release with exponential backoff and audit trail
+    async function safeReleaseHold(regId: string, evtId: string, reason: string): Promise<boolean> {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const { error } = await supabase.rpc("release_ticket_capacity", { p_registration_id: regId })
+          if (!error) return true
+        } catch {
+          // Retry after brief backoff
+        }
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 100))
       }
+
+      // Record failed release attempt to payment_audit_log for administrative reconciliation
+      try {
+        await supabase.from("payment_audit_log").insert({
+          action: "hold_release_failed",
+          details: {
+            registration_id: regId,
+            event_id: evtId,
+            reason: reason,
+            failed_at: new Date().toISOString(),
+          },
+        })
+      } catch (auditErr) {
+        console.error("Critical: Failed to log hold_release_failed audit entry:", auditErr)
+      }
+      return false
+    }
+
+    let couponId: string | null = null
+    let couponClaimed = false
+
+    if (pendingCouponId) {
+      let claimResult: any = null
+      let claimError: any = null
+      try {
+        const res = await supabase.rpc("claim_coupon", { p_coupon_id: pendingCouponId })
+        claimResult = res.data
+        claimError = res.error
+      } catch (err) {
+        claimError = err
+      }
+
+      // If coupon claiming definitively failed or errored:
+      if (claimError || !claimResult?.claimed) {
+        // Release ticket capacity hold immediately so event inventory is restored
+        await safeReleaseHold(registrationId, event_id, "coupon_claim_exhausted")
+
+        // DO NOT call release_coupon: this request never incremented the counter
+        return new Response(JSON.stringify({
+          error: "Coupon code has reached its usage limit",
+          code: "coupon_exhausted"
+        }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        })
+      }
+
       couponId = pendingCouponId
+      couponClaimed = true
     }
 
     const attemptCount = (existingPayment?.attempt_count ?? 0) + 1
@@ -347,7 +399,7 @@ Deno.serve(async (req) => {
         // Payment row could not be persisted for the freshly-created order —
         // the booking must not stay pending with no live payment behind it.
         await revertRegistrationToCancelled(supabase, registrationId)
-        try { await supabase.rpc("release_ticket_capacity", { p_registration_id: registrationId }) } catch { /* best-effort */ }
+        await safeReleaseHold(registrationId, event_id, "payment_row_insert_failed")
         throw err
       }
 
@@ -357,7 +409,7 @@ Deno.serve(async (req) => {
         // Concurrent double-tap: another request won the payment row. Release
         // THIS call's claim — the winner's claim is the one tied to the row.
         try {
-          if (couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId })
+          if (couponClaimed && couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId })
         } catch { /* best-effort */ }
         const { data: recovered } = await supabase
           .from("payments")
@@ -375,10 +427,11 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({ registration_id: registrationId, razorpay_order_id: recovered.razorpay_order_id, amount: finalAmount, platform_fee: fee.total, platform_fee_gst: fee.gst, ticket_price: ticket }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
-      // Any other failure (provider, insert) → release the claim, then rethrow.
+      // Any other failure (provider, insert) → release the claim if claimed, release hold, then rethrow.
       try {
-        if (couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId })
+        if (couponClaimed && couponId) await supabase.rpc("release_coupon", { p_coupon_id: couponId })
       } catch { /* best-effort */ }
+      await safeReleaseHold(registrationId, event_id, "checkout_order_creation_failed")
       throw err
     }
   } catch (err) {

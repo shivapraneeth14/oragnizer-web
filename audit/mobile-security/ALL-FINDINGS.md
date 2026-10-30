@@ -8386,9 +8386,94 @@ Production Supabase (vdxspyumkvwawmqwfkzr): ZERO TOUCH. NEVER ACCESSED. NEVER DE
 
 ---
 
-## 10. Deployment Readiness & Next Action
+## 10. Stage 6 Phase 1 Deployment & Verification
 
-All three findings (`BUG-002`, `BUG-003`, `BUG-001`) are completely implemented, locally verified, and protected by automated tests.
+All three Phase 1 findings (`BUG-002`, `BUG-003`, `BUG-001`) were deployed to staging project `ofvfasdgdwkehdcjugnf` and verified with 13/13 passing live smoke tests (6 Phase 1 tests + 7 Stage 5 financial regression tests).
+
+---
+
+## 11. Stage 6 Phase 2: Local Implementation & Testing Evidence
+
+### 11.1 BUG-004: Community Closure Membership Guard
+1. **Recursion-Safe Helper Function:**
+   - Created forward-only migration [`supabase/migrations/202611010010_community_closure_membership_guard.sql`](file:///Users/shivapraneeth/Documents/community/supabase/migrations/202611010010_community_closure_membership_guard.sql).
+   - Added `public.is_community_accepting_members(p_community_id uuid)`:
+     - Qualified with `SECURITY DEFINER`, `STABLE`, and `SET search_path = ''`.
+     - Validates that `c.deleted_at IS NULL`, `c.closed_at IS NULL`, and `c.deletion_grace_started_at IS NULL`.
+     - Privileges revoked from `PUBLIC, anon` and granted to `authenticated, service_role`.
+2. **Permissive Policy (`community_members_self_insert`):**
+   - Requires non-admin users to have `user_id = auth.uid()`, `role = 'MEMBER'`, and `is_community_accepting_members(community_id)`.
+   - Prevents unauthorized role escalation (`role` must be `MEMBER`).
+   - Preserves administrative recovery via `OR COALESCE(public.is_admin_user(), false)`.
+3. **Restrictive Policy (`block_closure_community_members_insert`):**
+   - Applies `AS RESTRICTIVE FOR INSERT`.
+   - Hard-rejects any non-admin, non-service-role user attempting to join a community where `public.is_community_in_closure_grace(community_id)` is true.
+4. **Member Self-Delete Preservation:**
+   - Existing members retain unimpeded right to leave closed/grace communities via `community_members_self_delete`.
+5. **Automated Test Evidence:**
+   - Authored [`supabase/tests/community_closure_guard.test.ts`](file:///Users/shivapraneeth/Documents/community/supabase/tests/community_closure_guard.test.ts) (3 test suites, 100% pass).
+
+### 11.2 BUG-005: Atomic Free-Event Registration
+1. **Single-Transaction Database Engine:**
+   - Created forward-only migration [`supabase/migrations/202611010011_atomic_free_event_registration.sql`](file:///Users/shivapraneeth/Documents/community/supabase/migrations/202611010011_atomic_free_event_registration.sql).
+   - Authored `public.register_free_event(p_event_id UUID, p_user_id UUID)`:
+     - Global Lock Hierarchy: Level 1 locks `events` row `FOR UPDATE`; Level 2 locks user registration row `FOR UPDATE`.
+     - Dedicated Boolean Variable: Captures `v_reg_exists := FOUND;` immediately after registration lookup so subsequent SQL queries cannot clobber existence state.
+     - Sequential Double-Tap Idempotency: If `v_reg_exists` and `v_reg.status IN ('confirmed', 'attended')`, immediately returns `already_registered: true` without incrementing `booked_count`.
+     - Active-Hold Concurrency: Evaluates `(v_event.booked_count + v_active_holds + 1) > v_event.capacity`, preventing free registrations from trampling active paid checkout holds.
+     - Atomic Mutation: Increments `events.booked_count` and inserts/restores confirmed registration together in a single atomic transaction.
+     - Free Event Boundary: Rejects `price > 0` with `payment_required`.
+     - Closure Grace Guard: Rejects registration if community closure is scheduled.
+2. **Strict Privilege Isolation:**
+   - Execution revoked from `PUBLIC, anon, authenticated` and granted exclusively to `service_role`.
+   - Assertion guard `IF auth.uid() IS NOT NULL AND auth.uid() != p_user_id AND NOT public.is_admin_user()` blocks identity spoofing.
+3. **Edge Function Refactoring:**
+   - Updated [`supabase/functions/register-for-event/index.ts`](file:///Users/shivapraneeth/Documents/community/supabase/functions/register-for-event/index.ts) to delegate to `register_free_event` RPC.
+   - Removed raw client-side `.insert()`, `.update()`, and separate `increment_event_booked`.
+4. **Automated Test Evidence:**
+   - Authored [`supabase/tests/atomic_free_registration.test.ts`](file:///Users/shivapraneeth/Documents/community/supabase/tests/atomic_free_registration.test.ts) (5 test suites, 100% pass).
+
+### 11.3 BUG-010: Resilient Coupon & Capacity Hold Lifecycle
+1. **Shared Counter Protection:**
+   - Updated [`supabase/functions/create-payment/index.ts`](file:///Users/shivapraneeth/Documents/community/supabase/functions/create-payment/index.ts):
+     - Introduces state flag `couponClaimed = false`.
+     - Invokes `release_coupon` **if and only if** `couponClaimed && couponId` was definitively established by Postgres.
+     - If `claim_coupon` fails or throws, `release_coupon` is **never** called, preventing illegal decrements of other customers' valid coupon claims.
+2. **Immediate Capacity Hold Release on Coupon Failure:**
+   - When coupon claiming returns `!claimResult?.claimed` or encounters an error, `release_ticket_capacity` is invoked immediately.
+   - Prevents 600-second inventory starvation on sold-out events.
+3. **Resilient Hold Release Helper (`safeReleaseHold`):**
+   - Retries up to 3 times with exponential backoff on transient socket/connection errors.
+   - If all retries fail, writes an explicit structured audit record into `public.payment_audit_log` (`action: 'hold_release_failed'`) containing registration ID, event ID, reason, and timestamp.
+4. **Automated Test Evidence:**
+   - Authored [`supabase/tests/coupon_hold_release.test.ts`](file:///Users/shivapraneeth/Documents/community/supabase/tests/coupon_hold_release.test.ts) (3 test suites, 100% pass).
+
+---
+
+## 12. Full Automated Test Suite Results (Phase 2 Local Build)
+
+### 12.1 Supabase & Backend Services (`supabase/tests`)
+- **Backend Contract & Invariance Tests:** `deno test --allow-read --allow-env --no-lock --node-modules-dir=none supabase/tests`
+  - **Result:** **288 passed, 0 failed** (ran in 6.0s across 33 test files).
+  - Includes `community_closure_guard.test.ts`, `atomic_free_registration.test.ts`, `coupon_hold_release.test.ts`, `migration_gate.test.ts`, `event_capacity_guard.test.ts`, `media_cleanup.test.ts`, and all Stage 5 reconciliation suites.
+
+### 12.2 Mobile Application (`apps/mobile`)
+- **Widget & Unit Tests:** `cd apps/mobile && flutter test`
+  - **Result:** **148 passed, 0 failed** (ran in 10.8s).
+- **Static Analysis:** `cd apps/mobile && flutter analyze`
+  - **Result:** **No issues found!** (ran in 4.4s).
+
+### 12.3 Web Applications Build Verification
+- **Organizer Web:** `cd apps/organizer-web && npm run build`
+  - **Result:** **Build successful** (Vite v6.4.3 production build in 4.40s, zero TypeScript errors).
+- **Admin Web:** `cd apps/admin-web && npm run build`
+  - **Result:** **Build successful** (`tsc --noEmit && vite build` in 1.19s, zero TypeScript errors).
+
+---
+
+## 13. Deployment Readiness & Next Action
+
+All three Phase 2 findings (`BUG-004`, `BUG-005`, `BUG-010`) are completely implemented, locally verified, and protected by automated tests.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -8398,4 +8483,5 @@ All three findings (`BUG-002`, `BUG-003`, `BUG-001`) are completely implemented,
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Awaiting user authorization to proceed with Staging Deployment (Commit, Push, Remote Migrations 202611010008/202611010009, Staging Function Deletion & Deployment, and Smoke Verification).**
+**STOPPED at Local Build Mode completion. Awaiting separate user authorization for Staging Deployment (Commit, Push, Remote Migrations 202611010010/202611010011, Edge Functions Deployment, and Live Smoke Verification).**
+

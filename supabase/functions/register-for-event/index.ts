@@ -62,132 +62,39 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { data: event, error: eventError } = await supabase
-      .from("events")
-      .select("id, capacity, booked_count, status, deleted_at, price, start_date")
-      .eq("id", event_id)
-      .single()
+    // Atomic free registration: event lock + capacity check with active holds + registration insertion + count increment
+    const { data: regResult, error: regRpcError } = await supabase.rpc("register_free_event", {
+      p_event_id: event_id,
+      p_user_id: user.id,
+    })
 
-    if (eventError || !event) {
-      return new Response(JSON.stringify({ error: "Event not found." }), {
-        status: 404, headers: { "Content-Type": "application/json", ...corsHeaders },
+    if (regRpcError) {
+      logError("register-for-event rpc", regRpcError)
+      return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
+        status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 
-    if (event.deleted_at) {
-      return new Response(JSON.stringify({ error: "This event has been deleted." }), {
-        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
+    if (!regResult?.ok) {
+      const errCode = regResult?.error
+      const status = (errCode === "event_not_found") ? 404
+        : (errCode === "event_deleted" || errCode === "event_cancelled" || errCode === "event_completed" || errCode === "event_started" || errCode === "event_unavailable") ? 410
+        : (errCode === "payment_required") ? 402
+        : (errCode === "capacity_full") ? 409
+        : (errCode === "community_closing") ? 403
+        : (errCode === "unauthorized") ? 403
+        : 400
+
+      return new Response(JSON.stringify({ error: regResult?.message || "Registration failed.", code: errCode }), {
+        status, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 
-    if (event.status === "cancelled") {
-      return new Response(JSON.stringify({ error: "This event has been cancelled." }), {
-        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
-      })
-    }
-
-    if (event.status === "completed") {
-      return new Response(JSON.stringify({ error: "This event has ended." }), {
-        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
-      })
-    }
-
-    if (event.status !== "published") {
-      return new Response(JSON.stringify({ error: "This event is not available." }), {
-        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
-      })
-    }
-
-    if (event.start_date && new Date(event.start_date) < new Date()) {
-      return new Response(JSON.stringify({ error: "This event has already started." }), {
-        status: 410, headers: { "Content-Type": "application/json", ...corsHeaders },
-      })
-    }
-
-    if (event.price > 0) {
-      return new Response(JSON.stringify({ error: "Please proceed to payment." }), {
-        status: 402, headers: { "Content-Type": "application/json", ...corsHeaders },
-      })
-    }
-
-    const { data: existing } = await supabase
-      .from("registrations")
-      .select("id, status")
-      .eq("event_id", event_id)
-      .eq("user_id", user.id)
-      .maybeSingle()
-
-    if (existing && existing.status === "confirmed") {
-      return new Response(JSON.stringify({ error: "You are already registered for this event." }), {
-        status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
-      })
-    }
-
-    let registrationId: string
-
-    if (existing && existing.status === "cancelled") {
-      const { data: updated, error: updateError } = await supabase
-        .from("registrations")
-        .update({ status: "confirmed", deleted_at: null, registered_at: new Date().toISOString() })
-        .eq("id", existing.id)
-        .select("id")
-        .single()
-
-      if (updateError) {
-        logError("register-for-event update", updateError)
-        return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
-          status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
-        })
-      }
-      registrationId = updated.id
-    } else {
-      const { data: inserted, error: insertError } = await supabase
-        .from("registrations")
-        .insert({
-          event_id,
-          user_id: user.id,
-          status: "confirmed",
-        })
-        .select("id")
-        .single()
-
-      if (insertError) {
-        logError("register-for-event insert", insertError)
-        if (insertError.message?.includes("duplicate key")) {
-          return new Response(JSON.stringify({ error: "You are already registered for this event." }), {
-            status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
-          })
-        }
-        return new Response(JSON.stringify({ error: "Something went wrong. Try again." }), {
-          status: 500, headers: { "Content-Type": "application/json", ...corsHeaders },
-        })
-      }
-      registrationId = inserted.id
-    }
-
-    // Generate QR code for free event registration
-    const qrPayload = new TextEncoder().encode(`free${event_id}${registrationId}`)
-    const qrHash = await crypto.subtle.digest("SHA-256", qrPayload)
-    const qrCode = Array.from(new Uint8Array(qrHash)).map(b => b.toString(16).padStart(2, "0")).join("")
-    await supabase.from("registrations").update({ qr_code: qrCode }).eq("id", registrationId)
-
-    // Atomic capacity check + booked_count increment
-    const { data: bookResult, error: bookError } = await supabase
-      .rpc('increment_event_booked', { p_event_id: event_id })
-
-    if (bookError || bookResult?.error) {
-      // Capacity full — rollback registration
-      await supabase.from("registrations").update({
-        status: "cancelled",
-        deleted_at: new Date().toISOString(),
-      }).eq("id", registrationId)
-
-      return new Response(JSON.stringify({ error: bookResult?.error || "Event is full." }), {
-        status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
-      })
-    }
-
-    return new Response(JSON.stringify({ success: true, registration_id: registrationId }), {
+    return new Response(JSON.stringify({
+      success: true,
+      registration_id: regResult.registration_id,
+      already_registered: regResult.already_registered === true
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...corsHeaders },
     })

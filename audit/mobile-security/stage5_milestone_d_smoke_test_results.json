@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-30T18:27:10.936Z",
+  "timestamp": "2026-10-30T20:09:02.852Z",
   "allPassed": true,
   "results": [
     {
@@ -11,8 +11,8 @@
         "wallet_balance": 94000,
         "expected": 94000,
         "purchase": {
-          "paymentId": "d7902827-988e-4ab0-9934-3c4ba6abb8d2",
-          "registrationId": "3578fc43-343f-48b2-a070-2d4b1e6ff2a2",
+          "paymentId": "a9478429-929e-4e8b-a539-9dbe776e133e",
+          "registrationId": "77991acc-5615-4968-b9a8-8eb901096f2d",
           "organizerShare": 94000,
           "platformFee": 6000
         }

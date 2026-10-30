@@ -85,6 +85,8 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611010007_fix_admin_financial_statement_phone.sql",
     "202611010008_decommission_cashfree_cron.sql",
     "202611010009_event_capacity_and_status_guard.sql",
+    "202611010010_community_closure_membership_guard.sql",
+    "202611010011_atomic_free_event_registration.sql",
   ])
 })
 
