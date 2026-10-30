@@ -35,6 +35,87 @@ interface BeneficiaryItem {
   is_active: boolean
 }
 
+export interface ReconciliationReport {
+  reconciliation_timestamp: string
+  summary: {
+    total_communities_audited: number
+    clean_communities_count: number
+    discrepant_communities_count: number
+    total_payments_audited: number
+    total_refunds_audited: number
+    total_payouts_audited: number
+    total_discrepancies_found: number
+  }
+  settlement_overview: {
+    gross_revenue_paise: number
+    platform_fee_paise: number
+    organizer_share_paise: number
+    customer_refunds_paise: number
+    organizer_refund_debits_paise: number
+    confirmed_payouts_paise: number
+    pending_payouts_paise: number
+    disputed_payouts_paise: number
+    total_stored_wallet_paise: number
+    total_uncommitted_payable_paise: number
+  }
+  three_way_wallet_reconciliation: Array<{
+    community_id: string
+    community_name: string
+    stored_wallet_balance: number
+    audit_ledger_balance: number
+    primary_transaction_balance: number
+    in_flight_pending_payouts: number
+    disputed_payouts: number
+    uncommitted_wallet_balance: number
+    status: "CLEAN" | "DISCREPANCY"
+    stored_vs_ledger_diff: number
+    stored_vs_primary_diff: number
+    ledger_vs_primary_diff: number
+    discrepancy_types: string[]
+    metrics: {
+      gross_sales: number
+      platform_fees: number
+      organizer_sales_earned: number
+      customer_refunds: number
+      organizer_refund_debits: number
+      confirmed_payouts: number
+      payment_count: number
+      refund_count: number
+      payout_count: number
+    }
+  }>
+  payment_discrepancies: Array<{
+    payment_id: string
+    razorpay_payment_id: string | null
+    amount: number
+    status: string
+    discrepancy_type: string
+    discrepancy_details: string
+    community_id: string | null
+    created_at: string
+  }>
+  refund_discrepancies: Array<{
+    refund_history_id: string
+    payment_id: string | null
+    razorpay_refund_id: string | null
+    amount: number
+    discrepancy_type: string
+    discrepancy_details: string
+    created_at: string
+  }>
+  settlement_discrepancies: Array<{
+    settlement_id: string
+    community_id: string
+    event_id: string | null
+    amount: number
+    status: string
+    utr: string | null
+    discrepancy_type: string
+    discrepancy_details: string
+    created_at: string
+  }>
+}
+
 type FilterType = "all" | "ticket_sale" | "refund" | "payout"
 
 export default function FinancialsPage() {
@@ -65,6 +146,29 @@ export default function FinancialsPage() {
   const [unresolvedTasks, setUnresolvedTasks] = useState<RefundTaskItem[]>([])
   const [showUnresolvedPanel, setShowUnresolvedPanel] = useState<boolean>(false)
   const [selectedTaskForReview, setSelectedTaskForReview] = useState<RefundTaskItem | null>(null)
+
+  // Financial Reconciliation Engine State (Stage 5 Milestone D)
+  const [reconReport, setReconReport] = useState<ReconciliationReport | null>(null)
+  const [loadingRecon, setLoadingRecon] = useState<boolean>(false)
+  const [showReconPanel, setShowReconPanel] = useState<boolean>(false)
+  const [reconActiveTab, setReconActiveTab] = useState<"wallets" | "payments" | "refunds" | "settlements">("wallets")
+
+  const runReconciliation = useCallback(async () => {
+    setLoadingRecon(true)
+    try {
+      const { data, error: rpcErr } = await supabase.rpc("run_financial_reconciliation", {
+        p_community_id: null,
+        p_batch_limit: 1000,
+      })
+      if (rpcErr) throw rpcErr
+      setReconReport(data as ReconciliationReport)
+    } catch (err: any) {
+      console.error("Reconciliation run failed:", err)
+      setError(err?.message || "Failed to execute financial reconciliation.")
+    } finally {
+      setLoadingRecon(false)
+    }
+  }, [])
 
   // 1. Initial Load: Fetch all communities (Admin RPC with whitelisted fallback)
   useEffect(() => {
@@ -225,6 +329,7 @@ export default function FinancialsPage() {
     let refundsDeducted = 0
     let payoutsSettled = 0
     let payoutsPending = 0
+    let payoutsDisputed = 0
 
     for (const tx of statement) {
       if (tx.transaction_type === "ticket_sale") {
@@ -235,6 +340,8 @@ export default function FinancialsPage() {
       } else if (tx.transaction_type.startsWith("payout")) {
         if (tx.status === "success" || tx.status === "processed") {
           payoutsSettled += tx.money_out || 0
+        } else if (tx.status === "disputed") {
+          payoutsDisputed += tx.money_out || 0
         } else {
           payoutsPending += tx.money_out || 0
         }
@@ -243,6 +350,7 @@ export default function FinancialsPage() {
 
     const activeComm = communities.find((c) => c.id === selectedCommunityId)
     const walletBalance = selectedCommunityBalance || (activeComm?.wallet_balance ?? 0)
+    const uncommittedPayable = Math.max(0, walletBalance - payoutsPending - payoutsDisputed)
 
     return {
       grossRevenue,
@@ -250,7 +358,9 @@ export default function FinancialsPage() {
       refundsDeducted,
       payoutsSettled,
       payoutsPending,
+      payoutsDisputed,
       walletBalance,
+      uncommittedPayable,
       netCredited: grossRevenue - platformFees - refundsDeducted,
     }
   }, [statement, communities, selectedCommunityId, selectedCommunityBalance])
@@ -275,6 +385,7 @@ export default function FinancialsPage() {
       let refunds = 0
       let settled = 0
       let pending = 0
+      let disputed = 0
 
       for (const tx of eventTxs) {
         if (tx.transaction_type === "ticket_sale") {
@@ -287,12 +398,14 @@ export default function FinancialsPage() {
             settled += tx.money_out || 0
           } else if (tx.status === "pending_confirmation") {
             pending += tx.money_out || 0
+          } else if (tx.status === "disputed") {
+            disputed += tx.money_out || 0
           }
         }
       }
 
       const netOrganizerTotal = Math.max(0, gross - platformFee - refunds)
-      const remainingBalance = Math.max(0, netOrganizerTotal - settled - pending)
+      const remainingBalance = Math.max(0, netOrganizerTotal - settled - pending - disputed)
 
       let settlementStatus: "fully_settled" | "pending_confirmation" | "partially_settled" | "unsettled" | "no_sales" = "unsettled"
       if (gross === 0 && refunds === 0 && settled === 0) {
@@ -319,6 +432,7 @@ export default function FinancialsPage() {
         netOrganizerTotal,
         settled,
         pending,
+        disputed,
         remainingBalance,
         settlementStatus,
         txCount: eventTxs.length,
@@ -343,7 +457,8 @@ export default function FinancialsPage() {
     const netOrganizerTotal = Math.max(0, gross - platformFee - refunds)
     const settled = kpis.payoutsSettled
     const pending = kpis.payoutsPending
-    const remainingBalance = Math.max(0, netOrganizerTotal - settled - pending)
+    const disputed = kpis.payoutsDisputed
+    const remainingBalance = Math.max(0, netOrganizerTotal - settled - pending - disputed)
 
     let settlementStatus: "fully_settled" | "pending_confirmation" | "partially_settled" | "unsettled" | "no_sales" = "unsettled"
     if (gross === 0 && refunds === 0 && settled === 0) {
@@ -550,6 +665,21 @@ export default function FinancialsPage() {
 
           <button
             onClick={() => {
+              const nextShow = !showReconPanel
+              setShowReconPanel(nextShow)
+              if (nextShow && !reconReport) {
+                runReconciliation()
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-purple-300 bg-purple-50 px-3 py-2 text-xs font-semibold text-purple-700 shadow-xs hover:bg-purple-100 transition-colors"
+            title="3-Way Financial Reconciliation Engine"
+          >
+            <span className="text-purple-600">⚖️</span>
+            {showReconPanel ? "Hide Reconciliation" : "Reconciliation Audit"}
+          </button>
+
+          <button
+            onClick={() => {
               setPayoutModalEventId(selectedEventId === "all" ? null : selectedEventId)
               setPayoutModalAmount(selectedEventSummary && selectedEventSummary.remainingBalance > 0 ? (selectedEventSummary.remainingBalance / 100).toFixed(2) : "")
               setIsPayoutModalOpen(true)
@@ -638,6 +768,415 @@ export default function FinancialsPage() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Financial Health & Observability Panel (Stage 5 Milestone D) */}
+      {showReconPanel && (
+        <div className="rounded-2xl border border-purple-200 bg-white p-6 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-purple-100 pb-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-100 text-purple-700 font-bold text-lg">
+                ⚖️
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-neutral-900">
+                    3-Way Financial Reconciliation Engine
+                  </h3>
+                  {reconReport && (
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                        reconReport.summary.total_discrepancies_found === 0
+                          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/20"
+                          : "bg-amber-50 text-amber-700 ring-1 ring-amber-600/20"
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          reconReport.summary.total_discrepancies_found === 0
+                            ? "bg-emerald-600 animate-pulse"
+                            : "bg-amber-600"
+                        }`}
+                      />
+                      {reconReport.summary.total_discrepancies_found === 0
+                        ? "100% CLEAN"
+                        : `${reconReport.summary.total_discrepancies_found} Discrepancies`}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Three-way audit: Stored Community Wallet vs Audit Log Ledger vs Primary Transactions.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={runReconciliation}
+                disabled={loadingRecon}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-purple-700 disabled:opacity-50 transition-colors"
+              >
+                <svg
+                  className={`h-4 w-4 ${loadingRecon ? "animate-spin" : ""}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {loadingRecon ? "Auditing Database..." : "Rerun Reconciliation"}
+              </button>
+            </div>
+          </div>
+
+          {loadingRecon ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex items-center gap-3 text-purple-700 font-semibold text-sm">
+                <svg className="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Running live 3-way balance audit across all communities and transactions...
+              </div>
+            </div>
+          ) : reconReport ? (
+            <>
+              {/* Summary Metrics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                <div className="rounded-xl border border-neutral-100 bg-neutral-50/50 p-3">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                    Gross Revenue
+                  </span>
+                  <div className="mt-1 text-sm font-extrabold text-neutral-900">
+                    {formatCurrency(reconReport.settlement_overview.gross_revenue_paise)}
+                  </div>
+                  <span className="text-[10px] text-neutral-500">Total customer sales</span>
+                </div>
+
+                <div className="rounded-xl border border-neutral-100 bg-neutral-50/50 p-3">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                    Platform Fees (6%)
+                  </span>
+                  <div className="mt-1 text-sm font-extrabold text-cluvo-primary">
+                    {formatCurrency(reconReport.settlement_overview.platform_fee_paise)}
+                  </div>
+                  <span className="text-[10px] text-neutral-500">Platform earnings</span>
+                </div>
+
+                <div className="rounded-xl border border-neutral-100 bg-neutral-50/50 p-3">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                    Customer Refunds
+                  </span>
+                  <div className="mt-1 text-sm font-extrabold text-rose-600">
+                    {formatCurrency(reconReport.settlement_overview.customer_refunds_paise)}
+                  </div>
+                  <span className="text-[10px] text-neutral-500">Gross refunds paid</span>
+                </div>
+
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+                    Confirmed Payouts
+                  </span>
+                  <div className="mt-1 text-sm font-extrabold text-emerald-700">
+                    {formatCurrency(reconReport.settlement_overview.confirmed_payouts_paise)}
+                  </div>
+                  <span className="text-[10px] text-emerald-600">Organizer accepted</span>
+                </div>
+
+                <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-3">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                    Pending Payouts
+                  </span>
+                  <div className="mt-1 text-sm font-extrabold text-amber-700">
+                    {formatCurrency(reconReport.settlement_overview.pending_payouts_paise)}
+                  </div>
+                  <span className="text-[10px] text-amber-600">In-flight transfers</span>
+                </div>
+
+                <div className="rounded-xl border border-rose-100 bg-rose-50/40 p-3">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-rose-800">
+                    Disputed Payouts
+                  </span>
+                  <div className="mt-1 text-sm font-extrabold text-rose-700">
+                    {formatCurrency(reconReport.settlement_overview.disputed_payouts_paise)}
+                  </div>
+                  <span className="text-[10px] text-rose-600">Organizer rejected</span>
+                </div>
+
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 col-span-2 sm:col-span-1">
+                  <span className="block text-[11px] font-bold uppercase tracking-wider text-indigo-800">
+                    Uncommitted Payable
+                  </span>
+                  <div className="mt-1 text-sm font-extrabold text-indigo-700">
+                    {formatCurrency(reconReport.settlement_overview.total_uncommitted_payable_paise)}
+                  </div>
+                  <span className="text-[10px] text-indigo-600">Free wallet liability</span>
+                </div>
+              </div>
+
+              {/* Sub-Tabs for Mismatch Explorer */}
+              <div className="border-b border-neutral-200">
+                <nav className="-mb-px flex space-x-6 text-xs font-semibold">
+                  <button
+                    onClick={() => setReconActiveTab("wallets")}
+                    className={`pb-2.5 border-b-2 transition-colors ${
+                      reconActiveTab === "wallets"
+                        ? "border-purple-600 text-purple-700"
+                        : "border-transparent text-neutral-500 hover:text-neutral-700 hover:border-neutral-300"
+                    }`}
+                  >
+                    Three-Way Wallet Reconciliation ({reconReport.three_way_wallet_reconciliation.length})
+                  </button>
+
+                  <button
+                    onClick={() => setReconActiveTab("payments")}
+                    className={`pb-2.5 border-b-2 transition-colors ${
+                      reconActiveTab === "payments"
+                        ? "border-purple-600 text-purple-700"
+                        : "border-transparent text-neutral-500 hover:text-neutral-700 hover:border-neutral-300"
+                    }`}
+                  >
+                    Payment Discrepancies ({reconReport.payment_discrepancies.length})
+                  </button>
+
+                  <button
+                    onClick={() => setReconActiveTab("refunds")}
+                    className={`pb-2.5 border-b-2 transition-colors ${
+                      reconActiveTab === "refunds"
+                        ? "border-purple-600 text-purple-700"
+                        : "border-transparent text-neutral-500 hover:text-neutral-700 hover:border-neutral-300"
+                    }`}
+                  >
+                    Refund Discrepancies ({reconReport.refund_discrepancies.length})
+                  </button>
+
+                  <button
+                    onClick={() => setReconActiveTab("settlements")}
+                    className={`pb-2.5 border-b-2 transition-colors ${
+                      reconActiveTab === "settlements"
+                        ? "border-purple-600 text-purple-700"
+                        : "border-transparent text-neutral-500 hover:text-neutral-700 hover:border-neutral-300"
+                    }`}
+                  >
+                    Settlement Discrepancies ({reconReport.settlement_discrepancies.length})
+                  </button>
+                </nav>
+              </div>
+
+              {/* Tab 1: Three-Way Wallet Balances */}
+              {reconActiveTab === "wallets" && (
+                <div className="overflow-x-auto rounded-xl border border-neutral-200">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-neutral-50/80 border-b border-neutral-200 font-bold text-neutral-700 uppercase">
+                      <tr>
+                        <th className="px-3 py-2.5">Community</th>
+                        <th className="px-3 py-2.5 text-right">Stored Wallet</th>
+                        <th className="px-3 py-2.5 text-right">Audit Ledger</th>
+                        <th className="px-3 py-2.5 text-right">Primary Transactions</th>
+                        <th className="px-3 py-2.5 text-right">In-Flight Pending</th>
+                        <th className="px-3 py-2.5 text-right">Uncommitted</th>
+                        <th className="px-3 py-2.5 text-center">Status</th>
+                        <th className="px-3 py-2.5">Findings</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100">
+                      {reconReport.three_way_wallet_reconciliation.map((comm) => (
+                        <tr key={comm.community_id} className="hover:bg-neutral-50/50 transition-colors">
+                          <td className="px-3 py-2.5 font-semibold text-neutral-900">
+                            {comm.community_name}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono font-bold text-neutral-900">
+                            {formatCurrency(comm.stored_wallet_balance)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-neutral-700">
+                            {formatCurrency(comm.audit_ledger_balance)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-neutral-700">
+                            {formatCurrency(comm.primary_transaction_balance)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-amber-700">
+                            {formatCurrency(comm.in_flight_pending_payouts)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono font-bold text-emerald-700">
+                            {formatCurrency(comm.uncommitted_wallet_balance)}
+                          </td>
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                comm.status === "CLEAN"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-amber-100 text-amber-800"
+                              }`}
+                            >
+                              {comm.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-neutral-600 text-[11px]">
+                            {comm.discrepancy_types && comm.discrepancy_types.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {comm.discrepancy_types.map((type) => (
+                                  <span key={type} className="rounded bg-amber-50 px-1.5 py-0.5 font-mono text-[10px] text-amber-800 border border-amber-200">
+                                    {type}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-emerald-700 font-semibold">Exact 0 paise diff</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Tab 2: Payment Discrepancies */}
+              {reconActiveTab === "payments" && (
+                <div className="overflow-x-auto rounded-xl border border-neutral-200">
+                  {reconReport.payment_discrepancies.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-neutral-500">
+                      ✓ Zero payment discrepancies found across all transactions.
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-neutral-50/80 border-b border-neutral-200 font-bold text-neutral-700 uppercase">
+                        <tr>
+                          <th className="px-3 py-2.5">Type</th>
+                          <th className="px-3 py-2.5">Payment ID / Ref</th>
+                          <th className="px-3 py-2.5 text-right">Amount</th>
+                          <th className="px-3 py-2.5">Status</th>
+                          <th className="px-3 py-2.5">Details</th>
+                          <th className="px-3 py-2.5">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100">
+                        {reconReport.payment_discrepancies.map((p, idx) => (
+                          <tr key={`${p.payment_id}-${idx}`} className="hover:bg-neutral-50/50 transition-colors">
+                            <td className="px-3 py-2.5 font-mono font-bold text-amber-800">
+                              {p.discrepancy_type}
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-[11px] text-neutral-700">
+                              {p.razorpay_payment_id || p.payment_id.slice(0, 8)}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono font-bold text-neutral-900">
+                              {formatCurrency(p.amount)}
+                            </td>
+                            <td className="px-3 py-2.5 text-neutral-600">
+                              {p.status}
+                            </td>
+                            <td className="px-3 py-2.5 text-neutral-600 text-[11px]">
+                              {p.discrepancy_details}
+                            </td>
+                            <td className="px-3 py-2.5 text-neutral-500 whitespace-nowrap">
+                              {formatDateTime(p.created_at)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 3: Refund Discrepancies */}
+              {reconActiveTab === "refunds" && (
+                <div className="overflow-x-auto rounded-xl border border-neutral-200">
+                  {reconReport.refund_discrepancies.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-neutral-500">
+                      ✓ Zero refund discrepancies found across all refund records and queue tasks.
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-neutral-50/80 border-b border-neutral-200 font-bold text-neutral-700 uppercase">
+                        <tr>
+                          <th className="px-3 py-2.5">Type</th>
+                          <th className="px-3 py-2.5">Refund / Task ID</th>
+                          <th className="px-3 py-2.5 text-right">Amount</th>
+                          <th className="px-3 py-2.5">Details</th>
+                          <th className="px-3 py-2.5">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100">
+                        {reconReport.refund_discrepancies.map((r, idx) => (
+                          <tr key={`${r.refund_history_id}-${idx}`} className="hover:bg-neutral-50/50 transition-colors">
+                            <td className="px-3 py-2.5 font-mono font-bold text-rose-800">
+                              {r.discrepancy_type}
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-[11px] text-neutral-700">
+                              {r.razorpay_refund_id || r.refund_history_id.slice(0, 8)}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono font-bold text-rose-700">
+                              {formatCurrency(r.amount)}
+                            </td>
+                            <td className="px-3 py-2.5 text-neutral-600 text-[11px]">
+                              {r.discrepancy_details}
+                            </td>
+                            <td className="px-3 py-2.5 text-neutral-500 whitespace-nowrap">
+                              {formatDateTime(r.created_at)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+
+              {/* Tab 4: Settlement Discrepancies */}
+              {reconActiveTab === "settlements" && (
+                <div className="overflow-x-auto rounded-xl border border-neutral-200">
+                  {reconReport.settlement_discrepancies.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-neutral-500">
+                      ✓ Zero settlement discrepancies found across payouts and UTR records.
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-neutral-50/80 border-b border-neutral-200 font-bold text-neutral-700 uppercase">
+                        <tr>
+                          <th className="px-3 py-2.5">Type</th>
+                          <th className="px-3 py-2.5">Settlement ID</th>
+                          <th className="px-3 py-2.5">UTR</th>
+                          <th className="px-3 py-2.5 text-right">Amount</th>
+                          <th className="px-3 py-2.5">Status</th>
+                          <th className="px-3 py-2.5">Details</th>
+                          <th className="px-3 py-2.5">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100">
+                        {reconReport.settlement_discrepancies.map((s, idx) => (
+                          <tr key={`${s.settlement_id}-${idx}`} className="hover:bg-neutral-50/50 transition-colors">
+                            <td className="px-3 py-2.5 font-mono font-bold text-amber-800">
+                              {s.discrepancy_type}
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-[11px] text-neutral-700">
+                              {s.settlement_id.slice(0, 8)}
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-[11px] text-neutral-700">
+                              {s.utr || "—"}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono font-bold text-neutral-900">
+                              {formatCurrency(s.amount)}
+                            </td>
+                            <td className="px-3 py-2.5 text-neutral-600">
+                              {s.status}
+                            </td>
+                            <td className="px-3 py-2.5 text-neutral-600 text-[11px]">
+                              {s.discrepancy_details}
+                            </td>
+                            <td className="px-3 py-2.5 text-neutral-500 whitespace-nowrap">
+                              {formatDateTime(s.created_at)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </>
+          ) : null}
         </div>
       )}
 
@@ -940,7 +1479,13 @@ export default function FinancialsPage() {
                 {formatCurrency(kpis.walletBalance)}
               </p>
               <p className="mt-1 text-[11px] text-emerald-600">
-                Payable to organizer
+                {kpis.payoutsPending > 0 || kpis.payoutsDisputed > 0 ? (
+                  <>
+                    Available: {formatCurrency(kpis.uncommittedPayable)} (locked: {formatCurrency(kpis.payoutsPending + kpis.payoutsDisputed)})
+                  </>
+                ) : (
+                  "Payable to organizer"
+                )}
               </p>
             </div>
           </div>

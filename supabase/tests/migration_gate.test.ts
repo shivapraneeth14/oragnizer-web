@@ -80,6 +80,8 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611010002_fix_webhook_processed_at.sql",
     "202611010003_manual_payout_deduplication.sql",
     "202611010004_fix_booking_hold_reuse.sql",
+    "202611010005_fix_financial_statement_refund_debits.sql",
+    "202611010006_financial_reconciliation_engine.sql",
   ])
 })
 
@@ -239,6 +241,38 @@ Deno.test("202610300009 payment_and_registration_index_optimizations adds safe n
   assert(indexesMigration.includes("idx_payments_pending_reconcile"))
   assert(!indexesMigration.includes("INDEX CONCURRENTLY"), "Migration must NOT use CREATE INDEX CONCURRENTLY inside transactional runner")
 })
+
+Deno.test("202611010005 fix_financial_statement_refund_debits dedupes by provider refund id and enforces cumulative share cap", async () => {
+  const fix5 = await read("202611010005_fix_financial_statement_refund_debits.sql")
+  assert(fix5.includes("CREATE OR REPLACE FUNCTION public.get_admin_financial_statement"))
+  assert(fix5.includes("CREATE OR REPLACE FUNCTION public.get_organizer_financial_statement"))
+  assert(fix5.includes("SELECT DISTINCT ON (COALESCE(prh.razorpay_refund_id, prh.id::TEXT))"))
+  assert(fix5.includes("ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING"))
+  assert(fix5.includes("pal.action = 'wallet_debited'"))
+  assert(fix5.includes("WHEN rt.transaction_type = 'refund' OR rt.status IN ('success', 'processed') THEN rt.money_out"))
+})
+
+Deno.test("202611010006 financial_reconciliation_engine provides strictly read-only 3-way reconciliation, KPIs, and concurrency-safe payout locking", async () => {
+  const fix6 = await read("202611010006_financial_reconciliation_engine.sql")
+  assert(fix6.includes("CREATE OR REPLACE FUNCTION public.run_financial_reconciliation"))
+  assert(fix6.includes("CREATE OR REPLACE FUNCTION public.get_financial_observability_kpis"))
+  assert(fix6.includes("CREATE OR REPLACE FUNCTION public.admin_record_manual_payout"))
+  assert(fix6.includes("STABLE"))
+  assert(fix6.includes("SECURITY DEFINER"))
+  assert(fix6.includes("stored_wallet_balance"))
+  assert(fix6.includes("audit_ledger_balance"))
+  assert(fix6.includes("primary_transaction_balance"))
+  assert(fix6.includes("in_flight_pending_payouts"))
+  assert(fix6.includes("uncommitted_wallet_balance"))
+  assert(fix6.includes("stored_vs_ledger_diff"))
+  assert(fix6.includes("stored_vs_primary_diff"))
+  assert(fix6.includes("FOR UPDATE"))
+  assert(fix6.includes("insufficient_uncommitted_balance"))
+  assert(fix6.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.run_financial_reconciliation"))
+  assert(fix6.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.get_financial_observability_kpis"))
+  assert(fix6.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.admin_record_manual_payout"))
+})
+
 
 
 

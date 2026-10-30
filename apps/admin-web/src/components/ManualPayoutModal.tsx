@@ -242,7 +242,7 @@ export default function ManualPayoutModal({
       }
 
       if (!data || data.ok === false) {
-        throw new Error(data?.error || "Failed to record manual payout.")
+        throw new Error(data?.message || data?.error || "Failed to record manual payout.")
       }
 
       // Dispatch payout email notification to organizer asynchronously

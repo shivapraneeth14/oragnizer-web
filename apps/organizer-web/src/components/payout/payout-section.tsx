@@ -251,6 +251,7 @@ export default function PayoutSection({ communityId }: Props) {
       let platformFee = 0
       let refunds = 0
       let settled = 0
+      let disputed = 0
       const pendingPayouts: OrganizerFinancialTransaction[] = []
 
       for (const tx of eventTxs) {
@@ -264,13 +265,15 @@ export default function PayoutSection({ communityId }: Props) {
             settled += tx.money_out || 0
           } else if (tx.status === "pending_confirmation") {
             pendingPayouts.push(tx)
+          } else if (tx.status === "disputed") {
+            disputed += tx.money_out || 0
           }
         }
       }
 
       const pendingAmount = pendingPayouts.reduce((sum, p) => sum + (p.money_out || p.gross_amount || 0), 0)
       const netShare = Math.max(0, gross - platformFee - refunds)
-      const remainingBalance = Math.max(0, netShare - settled - pendingAmount)
+      const remainingBalance = Math.max(0, netShare - settled - pendingAmount - disputed)
 
       return {
         id: ev.id,
@@ -300,6 +303,38 @@ export default function PayoutSection({ communityId }: Props) {
         !tx.event_id
     )
   }, [transactions])
+
+  // Five-dimension settlement summary across the organizer passbook (Milestone D)
+  const settlementSummary = useMemo(() => {
+    let netEarned = 0
+    let confirmedReceived = 0
+    let inFlightPending = 0
+    let disputed = 0
+
+    for (const tx of transactions) {
+      if (tx.transaction_type === "ticket_sale") {
+        netEarned += (tx.organizer_share ?? (tx.money_in ?? 0))
+      } else if (tx.transaction_type === "refund") {
+        netEarned -= (tx.money_out ?? 0)
+      } else if (tx.transaction_type.startsWith("payout")) {
+        if (tx.status === "success" || tx.status === "processed" || tx.transaction_type === "payout_confirmed") {
+          confirmedReceived += (tx.money_out ?? tx.gross_amount ?? 0)
+        } else if (tx.status === "pending_confirmation" || tx.transaction_type === "payout_pending") {
+          inFlightPending += (tx.money_out ?? tx.gross_amount ?? 0)
+        } else if (tx.status === "disputed" || tx.transaction_type === "payout_disputed") {
+          disputed += (tx.money_out ?? tx.gross_amount ?? 0)
+        }
+      }
+    }
+
+    return {
+      netEarned,
+      confirmedReceived,
+      inFlightPending,
+      disputed,
+      uncommittedBalance: Math.max(0, walletBalance - inFlightPending - disputed),
+    }
+  }, [transactions, walletBalance])
 
   // Selected event summary if any
   const selectedEventSummary = useMemo(() => {
@@ -468,6 +503,59 @@ export default function PayoutSection({ communityId }: Props) {
               ⚠️ No verified bank beneficiary linked. Please add one under Community Settings.
             </div>
           )}
+        </div>
+
+        {/* Financial Settlement Breakdown (Milestone D) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-5 border-b border-neutral-100 pb-5">
+          <div className="rounded-xl border border-neutral-100 bg-neutral-50/70 p-3">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+              Net Earned
+            </span>
+            <div className="mt-1 text-base font-extrabold text-neutral-900">
+              {formatCurrency(settlementSummary.netEarned)}
+            </div>
+            <span className="text-[10px] text-neutral-500">Sales less fee & refunds</span>
+          </div>
+
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+              Confirmed Received
+            </span>
+            <div className="mt-1 text-base font-extrabold text-emerald-700">
+              {formatCurrency(settlementSummary.confirmedReceived)}
+            </div>
+            <span className="text-[10px] text-emerald-600">Settled to your bank</span>
+          </div>
+
+          <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-3">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-amber-800">
+              In-Flight Pending
+            </span>
+            <div className="mt-1 text-base font-extrabold text-amber-700">
+              {formatCurrency(settlementSummary.inFlightPending)}
+            </div>
+            <span className="text-[10px] text-amber-600">Awaiting acceptance</span>
+          </div>
+
+          <div className="rounded-xl border border-rose-100 bg-rose-50/40 p-3">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-rose-800">
+              Disputed
+            </span>
+            <div className="mt-1 text-base font-extrabold text-rose-700">
+              {formatCurrency(settlementSummary.disputed)}
+            </div>
+            <span className="text-[10px] text-rose-600">Under admin review</span>
+          </div>
+
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 col-span-2 sm:col-span-1">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-indigo-800">
+              Uncommitted Balance
+            </span>
+            <div className="mt-1 text-base font-extrabold text-indigo-700">
+              {formatCurrency(settlementSummary.uncommittedBalance)}
+            </div>
+            <span className="text-[10px] text-indigo-600">Available to withdraw</span>
+          </div>
         </div>
 
         {/* General Wallet-Wide Pending Payouts (if any) */}
