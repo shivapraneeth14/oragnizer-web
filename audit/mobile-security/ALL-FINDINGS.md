@@ -8471,17 +8471,65 @@ All three Phase 1 findings (`BUG-002`, `BUG-003`, `BUG-001`) were deployed to st
 
 ---
 
-## 13. Deployment Readiness & Next Action
+## 13. Stage 6 Phase 2: Live Staging Deployment & Full Verification
 
-All three Phase 2 findings (`BUG-004`, `BUG-005`, `BUG-010`) are completely implemented, locally verified, and protected by automated tests.
+All three Phase 2 findings (`BUG-004`, `BUG-005`, `BUG-010`) were successfully deployed to staging project `ofvfasdgdwkehdcjugnf` and verified on live Supabase staging infrastructure.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ Current Stage: Local Implementation & Testing Complete (Branch: dev)   │
-│ Staging Target: Supabase Project ofvfasdgdwkehdcjugnf                  │
-│ Production Target: vdxspyumkvwawmqwfkzr [STRICTLY AIR-GAPPED]          │
+│ Current Stage: Stage 6 Phase 2 Staging Deployment & Live Verification  │
+│ Staging Target: Supabase Project ofvfasdgdwkehdcjugnf [VERIFIED]       │
+│ Production Target: vdxspyumkvwawmqwfkzr [STRICTLY AIR-GAPPED / UNTOUCHED]│
+│ Git Branch: origin/dev (Commits: 77249c1, e91dc6a)                     │
+│ Overall Live Staging Smoke Verdict: 18/18 PASSED (100%)                │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-**STOPPED at Local Build Mode completion. Awaiting separate user authorization for Staging Deployment (Commit, Push, Remote Migrations 202611010010/202611010011, Edge Functions Deployment, and Live Smoke Verification).**
+### 13.1 Deployment Record
+1. **Git & CI/CD Pipelines:**
+   - **Feature Commit:** [`77249c1`](https://github.com/shivapraneeth14/oragnizer-web/commit/77249c1) — CI Run `41127449019` (All 6 jobs passed), Deploy Run `41127448953` (Passed).
+   - **Smoke Suite Commit:** [`e91dc6a`](https://github.com/shivapraneeth14/oragnizer-web/commit/e91dc6a) — CI Run `41129278321` (All 6 jobs passed), Deploy Run `41129278281` (Passed).
+2. **Staging Database Migrations Applied:**
+   - `202611010010_community_closure_membership_guard.sql` (Closure grace check & RLS policies).
+   - `202611010011_atomic_free_event_registration.sql` (`register_free_event` single-transaction RPC).
+3. **Staging Edge Functions Deployed:**
+   - `register-for-event`: Authenticated delegation to atomic RPC, duplicate idempotency, capacity 409 guard.
+   - `create-payment`: Defers coupon claim increment, safely releases capacity hold on exhaustion, resilient audit log fallback.
+   - Preserved Decommissioning: Obsolete functions (`withdraw-wallet`, `cashfree-webhook`, `sync-payout-status`, `create-booking`, `create-payment-order`) return HTTP 404.
+
+### 13.2 Live Staging Verification Results (18/18 Tests Passed)
+- **Stage 6 Phase 2 Suite (`scripts/stage6_phase2_smoke_test.ts` — 5/5 PASSED):**
+  - `[PASS]` Step 1: BUG-004 Community Closure RLS & Role Escalation Defense (Active join succeeded, escalation blocked, closure grace join blocked, member leave succeeded, admin recovery succeeded).
+  - `[PASS]` Step 2: BUG-005 Atomic Free-Event Registration & Concurrency Guards (Direct RPC denied with 42501, booked_count atomically incremented, duplicate request idempotent, full capacity rejected with 409).
+  - `[PASS]` Step 3: BUG-005 Active Paid Checkout Holds Respected by Free Registration (Paid checkout hold blocks free registration; release of hold immediately unlocks seat).
+  - `[PASS]` Step 4: BUG-010 Coupon Exhaustion Hold Release & Counter Integrity (Exhausted coupon returns HTTP 400, capacity hold cancelled immediately, shared coupon counter preserved).
+  - `[PASS]` Step 5: BUG-010 Resilient Hold Release & Payment Audit Log Acceptance (`payment_audit_log` accepts and indexes structured `hold_release_failed` records).
+- **Stage 6 Phase 1 Regression Suite (`scripts/stage6_phase1_smoke_test.ts` — 6/6 PASSED):**
+  - `[PASS]` Step 1: Forward-only migrations 202611010008 & 202611010009 active on database.
+  - `[PASS]` Step 2: Obsolete Cashfree & direct-booking Edge Functions return 404.
+  - `[PASS]` Step 3: `create-beneficiary` operates without Cashfree API dependencies.
+  - `[PASS]` Step 4: Event capacity guard, dynamic active-hold trigger, and draft-revert guard verified active.
+  - `[PASS]` Step 5: `delete-media` enforces active avatar anti-destruction (403) and secret isolation.
+  - `[PASS]` Step 6: Live Razorpay payment creation and HMAC webhook confirmation lifecycle verified.
+- **Stage 5 Milestone D Financial Regression (`scripts/stage5_milestone_d_smoke_test.ts` — 7/7 PASSED):**
+  - `[PASS]` Test 1: Ticket purchase fee split (6% platform fee / 94% organizer share) credited 94,000 paise.
+  - `[PASS]` Test 2: Multiple partial refunds against single payment preserved as individual ledger debits.
+  - `[PASS]` Test 3: Duplicate refund delivery safely deduplicated by provider ID.
+  - `[PASS]` Test 4: Cumulative organizer refund debits capped at original organizer share (24,000 paise).
+  - `[PASS]` Test 5: Disputed manual payout uncommitted balance reservation locks 20,000 paise.
+  - `[PASS]` Test 6: Admin manual payout over-allocation rejected with `insufficient_uncommitted_balance`.
+  - `[PASS]` Test 7: Read-only reconciliation purity verified (0 table mutations; anon execution blocked).
+
+### 13.3 Remediation Status Summary
+
+| Finding ID | Severity | Description | Remediation Artifacts | Staging Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **`BUG-001`** | High | Unsaved Cloudinary avatar uploads & state corruption | Two-tier deferral in mobile, `delete-media` backend function | **RESOLVED & VERIFIED** |
+| **`BUG-002`** | High | Obsolete Cashfree cron & dead Edge Functions | Migration `202611010008`, removed 5 functions, decoupled beneficiary | **RESOLVED & VERIFIED** |
+| **`BUG-003`** | High | Event capacity overselling & uncounted booking drift | Migration `202611010009`, capacity constraint, active-hold trigger | **RESOLVED & VERIFIED** |
+| **`BUG-004`** | Medium | `community_members_self_insert` closure grace bypass | Migration `202611010010`, restrictive closure policy, admin recovery | **RESOLVED & VERIFIED** |
+| **`BUG-005`** | Medium | Free event registration non-atomic capacity check | Migration `202611010011`, `register_free_event` atomic RPC, refactored Edge Fn | **RESOLVED & VERIFIED** |
+| **`BUG-010`** | Medium | Coupon failure capacity hold orphan & counter decrement | Deferred coupon claim, instant hold release, resilient audit log | **RESOLVED & VERIFIED** |
+
+**All Stage 6 remediation work (Phase 1 & Phase 2) is completely implemented, deployed to staging, and 100% verified.** Production project `vdxspyumkvwawmqwfkzr` remains strictly air-gapped and untouched.
 
