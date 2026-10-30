@@ -111,6 +111,18 @@ async function syncRefundState(entity: any, _eventType: string): Promise<void> {
     }
   }
 
+  // Fallback if payment.refunded arrives before payment.captured (razorpay_payment_id is null)
+  if (!paymentRow?.id && entity.order_id) {
+    const { data: byOrder } = await supabase
+      .from("payments")
+      .select("id, refund_attempt_count, refund_claim_state, refund_status, status")
+      .eq("razorpay_order_id", entity.order_id)
+      .maybeSingle()
+    if (byOrder) {
+      paymentRow = byOrder
+    }
+  }
+
   if (!paymentRow?.id) return
 
   const refundStatus = REFUND_STATUS_MAP[entity.status]
@@ -209,7 +221,7 @@ Deno.serve(async (req) => {
       return new Response("Unhandled event", { status: 200 })
     }
 
-    // Webhook deduplication via processed_webhooks table
+    // Webhook deduplication and dispatch
     const eventEntity = isCaptured
       ? payload.payload?.payment?.entity
       : (payload.payload?.refund?.entity ?? payload.payload?.payment?.entity)
@@ -218,17 +230,17 @@ Deno.serve(async (req) => {
       return new Response("Missing event identifier", { status: 400 })
     }
     const razorpayEventId = razorpayHeaderId || `${eventEntity.id}_${eventType}`.replaceAll("_", "")
-    const { data: dedupResult } = await supabase
-      .rpc("try_process_webhook", {
-        p_webhook_id: razorpayEventId,
-        p_provider: "razorpay",
-        p_event_type: eventType,
-      })
-    if (dedupResult === false) {
-      return new Response("Already processed", { status: 200 })
-    }
 
     if (isRefundSync) {
+      const { data: dedupResult } = await supabase
+        .rpc("try_process_webhook", {
+          p_webhook_id: razorpayEventId,
+          p_provider: "razorpay",
+          p_event_type: eventType,
+        })
+      if (dedupResult === false) {
+        return new Response("Already processed", { status: 200 })
+      }
       await syncRefundState(eventEntity, eventType)
       return new Response("OK", { status: 200 })
     }
@@ -236,10 +248,16 @@ Deno.serve(async (req) => {
     const payment = eventEntity
     if (!payment?.order_id) return new Response("Missing order_id", { status: 400 })
 
+    // Provider state validation: assert payment is actually captured and not already refunded
+    if (payment.status !== "captured" || (payment.amount_refunded && payment.amount_refunded > 0)) {
+      await syncRefundState(payment, eventType)
+      return new Response("Payment not in captured state or already refunded", { status: 200 })
+    }
+
     // Find payments row by razorpay_order_id
     const { data: paymentRow } = await supabase
       .from("payments")
-      .select("id, status")
+      .select("id, status, amount, currency")
       .eq("razorpay_order_id", payment.order_id)
       .maybeSingle()
 
@@ -252,21 +270,31 @@ Deno.serve(async (req) => {
       return new Response("Already processed", { status: 200 })
     }
 
-    // Update payment with razorpay_payment_id
-    const { error: updateErr } = await supabase.from("payments").update({
-      razorpay_payment_id: payment.id,
-    }).eq("id", paymentRow.id)
-
-    if (updateErr) {
-      logError("verify-payment-webhook update razorpay_payment_id", updateErr)
-      return new Response("Failed to record payment id", { status: 500 })
+    // Amount and currency security assertions (PAY-SEC-004)
+    if (payment.amount !== paymentRow.amount || (payment.currency && payment.currency !== (paymentRow.currency || "INR"))) {
+      await supabase.from("admin_alerts").insert({
+        severity: "critical",
+        alert_key: `webhook_amount_mismatch_${paymentRow.id}`,
+        message: `Webhook amount/currency mismatch for order ${payment.order_id}: expected ₹${paymentRow.amount/100} ${paymentRow.currency || "INR"}, got ₹${payment.amount/100} ${payment.currency}`
+      })
+      return new Response("Payment amount/currency mismatch", { status: 400 })
     }
 
-    // Run confirm_payment RPC (atomic transaction)
+    // Run atomic deduplication + confirmation RPC (PAY-REL-002)
     const { data: confirmResult, error: confirmErr } = await supabase
-      .rpc("confirm_payment", { p_payment_id: paymentRow.id })
+      .rpc("confirm_payment_from_webhook", {
+        p_payment_id: paymentRow.id,
+        p_webhook_id: razorpayEventId,
+        p_razorpay_payment_id: payment.id,
+        p_expected_amount: payment.amount,
+        p_expected_currency: payment.currency || "INR",
+      })
 
     if (confirmErr) throw confirmErr
+
+    if (confirmResult?.action === "skipped") {
+      return new Response("Already processed", { status: 200 })
+    }
 
     if (confirmResult?.action === "refund_required") {
       const reason = confirmResult?.reason || "capacity_full"
@@ -285,6 +313,12 @@ Deno.serve(async (req) => {
 
     return new Response("OK", { status: 200 })
   } catch (err) {
+    try {
+      const razorpayHeaderId = req.headers.get("x-razorpay-event-id")
+      if (razorpayHeaderId) {
+        await supabase.from("processed_webhooks").delete().eq("id", razorpayHeaderId)
+      }
+    } catch { /* best effort compensating delete */ }
     logError("verify-payment-webhook", err)
     return new Response("Internal error", { status: 500 })
   }

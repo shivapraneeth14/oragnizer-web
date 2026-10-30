@@ -1,11 +1,10 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { razorpayGet } from "../_shared/razorpay.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -20,14 +19,7 @@ const corsHeaders = {
 // captured but never confirmed must be CONFIRMED, never cancelled.
 async function checkOrderStatus(orderId: string): Promise<"paid" | "open" | "failed" | "unknown"> {
   try {
-    const res = await fetch(`https://api.razorpay.com/v1/orders/${orderId}`, {
-      headers: {
-        Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-      },
-      signal: AbortSignal.timeout(15000),
-    })
-    const order = await res.json()
-    if (!res.ok) return "unknown"
+    const order = await razorpayGet(`orders/${orderId}`)
     if (order.status === "paid" && (order.amount_paid || 0) > 0) return "paid"
     if (order.status === "attempted") return "open"
     return order.status === "created" ? "open" : "failed"
@@ -90,16 +82,7 @@ Deno.serve(async (req) => {
         }
 
         if (orderState === "paid") {
-          const payRes = await fetch(
-            `https://api.razorpay.com/v1/orders/${payment.razorpay_order_id}/payments`,
-            {
-              headers: {
-                Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-              },
-              signal: AbortSignal.timeout(15000),
-            },
-          )
-          const payBody = await payRes.json()
+          const payBody = await razorpayGet(`orders/${payment.razorpay_order_id}/payments`).catch(() => null)
           const captured = payBody?.items?.find((p: any) => p.status === "captured")
           if (captured) {
             const { error: updateErr } = await supabase.from("payments").update({
@@ -154,12 +137,16 @@ Deno.serve(async (req) => {
 
     const { error: regErr } = await supabase
       .from("registrations")
-      .update({ status: "cancelled", deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({ status: "cancelled", hold_expires_at: null, deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", registration.id)
     if (regErr) {
       console.error("Failed to cancel registration:", regErr)
       return new Response(JSON.stringify({ error: "Failed to clean up booking. Try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
+
+    try {
+      await supabase.rpc("release_ticket_capacity", { p_registration_id: registration.id })
+    } catch { /* best-effort */ }
 
     await supabase.from("payment_audit_log").insert({
       action: "booking_cleaned_up",

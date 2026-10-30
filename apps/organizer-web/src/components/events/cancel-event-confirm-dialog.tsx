@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { supabase } from "../../supabase"
 import type { Event } from "shared"
+import CancellationProgressModal from "./cancellation-progress-modal"
 
 interface Props {
   event: Event
@@ -14,6 +15,8 @@ export default function CancelEventConfirmDialog({ event, onClose, onCancelled }
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [totalEligible, setTotalEligible] = useState<number>(0)
 
   useEffect(() => {
     let alive = true
@@ -71,23 +74,29 @@ export default function CancelEventConfirmDialog({ event, onClose, onCancelled }
         setConfirming(false)
         return
       }
-      const refundedCount = data?.payments_refunded ?? 0
-      const failedCount = data?.payments_failed ?? 0
-      if (failedCount > 0) {
-        alert(
-          `Event cancelled. ${refundedCount} refund(s) issued, but ${failedCount} payment(s) failed to refund.\n\n` +
-          "The refund retry job will keep trying (up to 5 attempts). Keep this event's payments in your Payout tab to follow up."
-        )
-      } else if (refundedCount > 0) {
-        alert(`Event cancelled. ${refundedCount} refund(s) initiated — attendees will see updates in their payment details.`)
-      } else {
-        alert("Event cancelled.")
+      if (data?.job_id) {
+        setActiveJobId(data.job_id)
+        setTotalEligible(data.total_refunds_eligible ?? refundCount)
+        setConfirming(false)
+        return
       }
       onCancelled()
     } catch (e) {
       setError((e as Error).message)
       setConfirming(false)
     }
+  }
+
+  if (activeJobId) {
+    return (
+      <CancellationProgressModal
+        event={event}
+        jobId={activeJobId}
+        initialEligible={totalEligible}
+        onClose={onClose}
+        onCompleted={onCancelled}
+      />
+    )
   }
 
   return (

@@ -76,7 +76,7 @@ export interface Event {
   capacity: number | null
   price: number
   booked_count: number
-  status: "draft" | "published" | "cancelled" | "completed"
+  status: "draft" | "published" | "cancelling" | "cancelled" | "completed"
   created_by: string | null
   created_at: string
   updated_at: string

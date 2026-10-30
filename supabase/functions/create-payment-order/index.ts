@@ -5,11 +5,10 @@ import { platformFeeForTicket } from "../_shared/fees.ts"
 import { clearRefundFieldsForRequote, paymentNonRequotableReason } from "../_shared/payments.ts"
 import { hasConsentRecord } from "../_shared/consent.ts"
 import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
+import { razorpayPost } from "../_shared/razorpay.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -21,33 +20,12 @@ const corsHeaders = {
 
 async function createRazorpayOrder(amount: number, registrationId: string) {
   const idempotencyKey = `order_${registrationId}`
-  const body: any = { amount, currency: "INR", receipt: registrationId }
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
-  try {
-    const res = await fetch("https://api.razorpay.com/v1/orders", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-        "X-Razorpay-Idempotency-Key": idempotencyKey,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: { description: "Razorpay request failed" } }))
-      throw new Error(err.error?.description || `Razorpay error (${res.status})`)
-    }
-    const result = await res.json()
-    if (!result || !result.id) {
-      throw new Error("Razorpay returned an invalid order response")
-    }
-    return result
-  } finally {
-    clearTimeout(timeout)
+  const body = { amount, currency: "INR", receipt: registrationId }
+  const result = await razorpayPost("orders", body, { idempotencyKey })
+  if (!result || !result.id) {
+    throw new Error("Razorpay returned an invalid order response")
   }
+  return result
 }
 
 Deno.serve(async (req) => {

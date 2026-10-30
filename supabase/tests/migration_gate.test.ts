@@ -73,7 +73,24 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610300006_organizer_financial_statement_and_dispute.sql",
     "202610300007_community_applications_and_approval_flow.sql",
     "202610300008_harden_rls_policies.sql",
+    "202610300009_payment_and_registration_index_optimizations.sql",
+    "202610310001_cancellation_queue_engine.sql",
+    "202610310002_schedule_cancellation_worker.sql",
+    "202611010001_incoming_payment_remediation.sql",
   ])
+})
+
+Deno.test("202611010001 incoming_payment_remediation defines capacity holds, atomic webhook confirmation, and unique index", async () => {
+  const rem = await read("202611010001_incoming_payment_remediation.sql")
+  assert(rem.includes("ADD COLUMN IF NOT EXISTS hold_expires_at TIMESTAMPTZ DEFAULT NULL"))
+  assert(rem.includes("idx_registrations_active_holds"))
+  assert(rem.includes("uq_payments_razorpay_payment_id"))
+  assert(rem.includes("CREATE OR REPLACE FUNCTION public.reserve_ticket_capacity"))
+  assert(rem.includes("CREATE OR REPLACE FUNCTION public.release_ticket_capacity"))
+  assert(rem.includes("CREATE OR REPLACE FUNCTION public.confirm_payment"))
+  assert(rem.includes("CREATE OR REPLACE FUNCTION public.confirm_payment_from_webhook"))
+  assert(rem.includes("public.registrations.status NOT IN ('confirmed', 'attended')"))
+  assert(rem.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.reserve_ticket_capacity"))
 })
 
 Deno.test("011 adds both grace columns, the index, and the grant", () => {
@@ -188,6 +205,14 @@ Deno.test("202610300007 community_applications_and_approval_flow deploys staging
   assert(communityApplicationsAndApproval.includes("CREATE OR REPLACE FUNCTION public.get_admin_community_applications"))
   assert(communityApplicationsAndApproval.includes("public.is_admin_user()"))
 })
+
+Deno.test("202610300009 payment_and_registration_index_optimizations adds safe non-concurrent indexes", async () => {
+  const indexesMigration = await read("202610300009_payment_and_registration_index_optimizations.sql")
+  assert(indexesMigration.includes("idx_payments_order_status"))
+  assert(indexesMigration.includes("idx_payments_pending_reconcile"))
+  assert(!indexesMigration.includes("INDEX CONCURRENTLY"), "Migration must NOT use CREATE INDEX CONCURRENTLY inside transactional runner")
+})
+
 
 
 

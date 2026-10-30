@@ -16,11 +16,10 @@ import {
   resolvePendingPayment,
   type PendingDeps,
 } from "../_shared/reconcile-pending.ts"
+import { razorpayGet } from "../_shared/razorpay.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 const RECONCILE_SECRET = optionalEnv("RECONCILE_SECRET")
 
@@ -28,21 +27,6 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, x-reconcile-secret",
-}
-
-async function razorpayGet(path: string): Promise<any> {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: { description: `HTTP ${res.status}` } }))
-    throw new Error(err.error?.description || `Razorpay API error (${res.status})`)
-  }
-  return res.json()
 }
 
 // Everything the pending-payment resolver needs from the real world. Kept as

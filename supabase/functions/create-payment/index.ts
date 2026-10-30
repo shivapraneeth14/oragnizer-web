@@ -11,11 +11,10 @@ import {
 } from "../_shared/payments.ts"
 import { attemptRefund, customerOwedAmount } from "../_shared/refunds.ts"
 import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
+import { razorpayGet, razorpayPost } from "../_shared/razorpay.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -29,48 +28,12 @@ async function createRazorpayOrder(amount: number, registrationId: string) {
   // Key includes the receipt (registration + attempt) so a re-quote with a
   // different amount can never be answered with the stale order.
   const idempotencyKey = `order_${registrationId}`
-  const body: any = { amount, currency: "INR", receipt: registrationId }
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
-  try {
-    const res = await fetch("https://api.razorpay.com/v1/orders", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-        "X-Razorpay-Idempotency-Key": idempotencyKey,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: { description: "Razorpay request failed" } }))
-      throw new Error(err.error?.description || `Razorpay error (${res.status})`)
-    }
-    const result = await res.json()
-    if (!result || !result.id) {
-      throw new Error("Razorpay returned an invalid order response")
-    }
-    return result
-  } finally {
-    clearTimeout(timeout)
+  const body = { amount, currency: "INR", receipt: registrationId }
+  const result = await razorpayPost("orders", body, { idempotencyKey })
+  if (!result || !result.id) {
+    throw new Error("Razorpay returned an invalid order response")
   }
-}
-
-async function razorpayGet(path: string): Promise<any> {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: { description: `HTTP ${res.status}` } }))
-    throw new Error(err.error?.description || `Razorpay error (${res.status})`)
-  }
-  return res.json()
+  return result
 }
 
 // "Path C": if the pending order is actually paid and captured, CONFIRM the
@@ -87,7 +50,12 @@ async function confirmPaidOrder(paymentId: string, orderId: string): Promise<{ c
     const { error: updateErr } = await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", paymentId)
     if (updateErr) throw updateErr
     const { data: confirmResult, error: confirmErr } = await supabase
-      .rpc("confirm_payment", { p_payment_id: paymentId })
+      .rpc("confirm_payment", {
+        p_payment_id: paymentId,
+        p_expected_amount: captured.amount,
+        p_expected_currency: captured.currency || "INR",
+        p_razorpay_payment_id: captured.id,
+      })
     if (confirmErr) throw confirmErr
     if (confirmResult?.error) throw new Error(confirmResult.error)
     if (confirmResult?.action === "refund_required") return { confirmed: false }
@@ -277,19 +245,46 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Atomically reserve a use ONLY when a new order will be created.
-    let registrationId: string
-    if (existing) {
-      registrationId = existing.id
-    } else {
-      const { data: reg, error: regErr } = await supabase
-        .from("registrations")
-        .insert({ event_id, user_id: user.id, status: "pending" })
-        .select("id")
-        .single()
-      if (regErr) throw regErr
-      registrationId = reg!.id
+    // Atomically reserve capacity hold (PAY-CONC-001, PAY-CONC-005)
+    let holdResult: any = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data: holdData, error: holdError } = await supabase.rpc("reserve_ticket_capacity", {
+        p_event_id: event_id,
+        p_user_id: user.id,
+        p_hold_duration_seconds: 600,
+      })
+
+      if (holdError) {
+        if (holdError.message?.includes("lock timeout") || holdError.code === "55P03") {
+          if (attempt < 2) {
+            const jitterMs = Math.floor(Math.random() * 100) + (attempt + 1) * 100
+            await new Promise((r) => setTimeout(r, jitterMs))
+            continue
+          }
+          return new Response(JSON.stringify({
+            code: "high_demand_try_again",
+            error: "This event is experiencing high demand. Please try again in a few seconds."
+          }), { status: 503, headers: { "Content-Type": "application/json", "Retry-After": "1", ...corsHeaders } })
+        }
+        throw holdError
+      }
+
+      holdResult = holdData
+      break
     }
+
+    if (!holdResult?.ok) {
+      const errCode = holdResult?.error || "capacity_held"
+      const status = (errCode === "event_not_found") ? 404
+        : (errCode === "event_deleted" || errCode === "event_cancelled" || errCode === "event_started" || errCode === "event_unavailable") ? 410
+        : 409
+      return new Response(JSON.stringify({
+        code: errCode,
+        error: holdResult?.message || "All available tickets are currently held in checkout. Please try again in a few minutes."
+      }), { status, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    const registrationId: string = holdResult.registration_id
 
     let couponId: string | null = null
     if (pendingCouponId) {
@@ -352,6 +347,7 @@ Deno.serve(async (req) => {
         // Payment row could not be persisted for the freshly-created order —
         // the booking must not stay pending with no live payment behind it.
         await revertRegistrationToCancelled(supabase, registrationId)
+        try { await supabase.rpc("release_ticket_capacity", { p_registration_id: registrationId }) } catch { /* best-effort */ }
         throw err
       }
 

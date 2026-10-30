@@ -1,11 +1,10 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { razorpayGet } from "../_shared/razorpay.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const corsHeaders = {
@@ -13,21 +12,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-client-info",
   "Access-Control-Max-Age": "86400",
-}
-
-async function razorpayGet(path: string): Promise<any> {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: { description: `HTTP ${res.status}` } }))
-    throw new Error(err.error?.description || `Razorpay error (${res.status})`)
-  }
-  return res.json()
 }
 
 // Adopt a captured Razorpay order into a confirmed booking. Guarded by
@@ -53,10 +37,38 @@ async function confirmCapturedOrder(paymentId: string, orderId: string): Promise
   const captured = payBody?.items?.find((p: any) => p.status === "captured")
   if (!captured) return "awaiting"
 
+  // If payment was already refunded at provider, do not confirm
+  if (captured.amount_refunded && captured.amount_refunded > 0) {
+    return "refund_pending"
+  }
+
+  // Load payment row for amount/currency security assertion (PAY-SEC-004)
+  const { data: paymentRow } = await supabase
+    .from("payments")
+    .select("amount, currency")
+    .eq("id", paymentId)
+    .single()
+
+  if (paymentRow) {
+    if (captured.amount !== paymentRow.amount || (captured.currency && captured.currency !== (paymentRow.currency || "INR"))) {
+      await supabase.from("admin_alerts").insert({
+        severity: "critical",
+        alert_key: `direct_verify_mismatch_${paymentId}`,
+        message: `Direct verification mismatch for payment ${paymentId}: expected ₹${paymentRow.amount/100} ${paymentRow.currency}, got ₹${captured.amount/100} ${captured.currency}`
+      })
+      return "needs_repair"
+    }
+  }
+
   const { error: updateErr } = await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", paymentId)
   if (updateErr) throw updateErr
   const { data: confirmResult, error: confirmErr } = await supabase
-    .rpc("confirm_payment", { p_payment_id: paymentId })
+    .rpc("confirm_payment", {
+      p_payment_id: paymentId,
+      p_expected_amount: captured.amount,
+      p_expected_currency: captured.currency || "INR",
+      p_razorpay_payment_id: captured.id,
+    })
   if (confirmErr) throw confirmErr
   if (confirmResult?.error) return "needs_repair"
   if (confirmResult?.action === "refund_required") {

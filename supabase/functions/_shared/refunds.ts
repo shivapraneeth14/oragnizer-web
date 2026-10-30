@@ -1,7 +1,6 @@
-import { requiredEnv } from "./env.ts"
+import { razorpayGet, razorpayPost, RazorpayUncertainOutcomeError, RazorpayClientError } from "./razorpay.ts"
 
-const RAZORPAY_KEY_ID = requiredEnv("RAZORPAY_KEY_ID")
-const RAZORPAY_KEY_SECRET = requiredEnv("RAZORPAY_KEY_SECRET")
+export { razorpayGet, razorpayPost, RazorpayUncertainOutcomeError, RazorpayClientError }
 
 // Razorpay refund entity status -> our payments.refund_status domain.
 // 'queued' is preserved (a provider-accepted refud awaiting processing) so the
@@ -27,34 +26,7 @@ export function mapRefundStatus(status: string | undefined): string {
   }
 }
 
-export async function razorpayPost(path: string, body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-    body: JSON.stringify(body),
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error?.description || `Razorpay API error (${res.status})`)
-  return data
-}
 
-export async function razorpayGet(path: string): Promise<any> {
-  const res = await fetch(`https://api.razorpay.com/v1/${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`),
-    },
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: { description: `HTTP ${res.status}` } }))
-    throw new Error(err.error?.description || `Razorpay error (${res.status})`)
-  }
-  return res.json()
-}
 
 interface ProviderRefund {
   id: string
@@ -268,14 +240,45 @@ export async function attemptRefund(
   }
 
   let refund: any
+  const receipt = `ref_${payment.id}_${claim.attempt}`
   try {
-    refund = await razorpayPost(`payments/${payment.razorpay_payment_id}/refund`, {
-      amount,
-      receipt: `ref_${payment.id}_${claim.attempt}`,
-    })
+    refund = await razorpayPost(
+      `payments/${payment.razorpay_payment_id}/refund`,
+      {
+        amount,
+        receipt,
+      },
+      { idempotencyKey: receipt },
+    )
     await completeIssued(refund, amount)
     return { status: "issued", refund_id: refund.id, refund_status: mapRefundStatus(refund.status), amount, attempt: claim.attempt }
   } catch (err) {
+    if (err instanceof RazorpayUncertainOutcomeError) {
+      // UNCERTAINTY PROTOCOL:
+      // A refund POST encountered a timeout or 5xx server error.
+      // Check if Razorpay immediately lists the refund.
+      const existing = await firstExistingRefund(supabase, payment.razorpay_payment_id)
+      if (existing) {
+        await completeIssued(existing, existing.amount ?? amount)
+        return {
+          status: "issued",
+          refund_id: existing.id,
+          refund_status: mapRefundStatus(existing.status),
+          amount: existing.amount ?? amount,
+          attempt: claim.attempt,
+          recovered: true,
+        }
+      }
+      // If NOT yet visible at provider, keep claim in place (do NOT call releaseClaim()).
+      // Releasing the claim immediately would allow a concurrent caller to claim and fire
+      // a second refund POST while this one is in flight at Razorpay.
+      // Reconcile or stale reclaim will safely handle it after the quiet period.
+      console.warn(
+        `[refund] Uncertain outcome for payment ${payment.id}: ${err.message}. Claim preserved for reconciliation.`,
+      )
+      throw err
+    }
+
     // Crash between claim and provider call that was recovered as stale, or a
     // provider failure: the refund may still exist at Razorpay. Ask first.
     const existing = await firstExistingRefund(supabase, payment.razorpay_payment_id)

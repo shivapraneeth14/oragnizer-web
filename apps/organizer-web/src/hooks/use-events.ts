@@ -88,7 +88,7 @@ export function eventToForm(e: Event): EventFormData {
     longitude: e.longitude?.toString() || "",
     capacity: e.capacity?.toString() || "",
     price: (e.price / 100).toString(),
-    status: e.status === "cancelled" || e.status === "completed" ? "draft" : e.status,
+    status: e.status === "cancelled" || e.status === "cancelling" || e.status === "completed" ? "draft" : e.status,
     discussion_enabled: e.discussion_enabled,
     discussion_restricted: e.discussion_restricted,
   }

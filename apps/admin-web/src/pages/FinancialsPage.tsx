@@ -6,6 +6,7 @@ import TransactionDetailDrawer, {
   formatDateTime,
 } from "../components/TransactionDetailDrawer"
 import ManualPayoutModal from "../components/ManualPayoutModal"
+import RefundManualReviewModal, { type RefundTaskItem } from "../components/RefundManualReviewModal"
 
 interface CommunityItem {
   id: string
@@ -59,6 +60,11 @@ export default function FinancialsPage() {
   const [payoutModalEventId, setPayoutModalEventId] = useState<string | null>(null)
   const [payoutModalAmount, setPayoutModalAmount] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  // Unresolved Refund Queue Tasks (Milestone B)
+  const [unresolvedTasks, setUnresolvedTasks] = useState<RefundTaskItem[]>([])
+  const [showUnresolvedPanel, setShowUnresolvedPanel] = useState<boolean>(false)
+  const [selectedTaskForReview, setSelectedTaskForReview] = useState<RefundTaskItem | null>(null)
 
   // 1. Initial Load: Fetch all communities (Admin RPC with whitelisted fallback)
   useEffect(() => {
@@ -186,9 +192,31 @@ export default function FinancialsPage() {
     }
   }, [selectedCommunityId, selectedEventId])
 
+  const loadUnresolvedTasks = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("refund_task_queue")
+        .select("*, events(title)")
+        .in("status", ["manual_review", "uncertain"])
+        .order("created_at", { ascending: false })
+
+      if (!error && data) {
+        setUnresolvedTasks(
+          (data as any[]).map((t) => ({
+            ...t,
+            event_title: t.events?.title,
+          }))
+        )
+      }
+    } catch (err) {
+      console.error("Error loading unresolved refund tasks:", err)
+    }
+  }, [])
+
   useEffect(() => {
     loadStatement()
-  }, [loadStatement])
+    loadUnresolvedTasks()
+  }, [loadStatement, loadUnresolvedTasks])
 
   // 4. Calculate Financial KPIs from Statement
   const kpis = useMemo(() => {
@@ -535,6 +563,83 @@ export default function FinancialsPage() {
           </button>
         </div>
       </div>
+
+      {/* Unresolved Refund Tasks Alert Banner (Milestone B) */}
+      {unresolvedTasks.length > 0 && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-xs text-rose-900 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-200 text-rose-800 font-bold text-base">
+                ⚠️
+              </span>
+              <div>
+                <h4 className="text-sm font-bold text-rose-950">
+                  {unresolvedTasks.length} Refund {unresolvedTasks.length === 1 ? "Task Requires" : "Tasks Require"} Manual Review
+                </h4>
+                <p className="text-[11px] text-rose-700">
+                  Cancellation queue tasks flagged with provider timeouts, 409 conflicts, or exhausted retries requiring admin reconciliation.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowUnresolvedPanel(!showUnresolvedPanel)}
+                className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700 shadow-2xs transition-colors"
+              >
+                {showUnresolvedPanel ? "Hide Tasks" : `Review Tasks (${unresolvedTasks.length})`}
+              </button>
+            </div>
+          </div>
+
+          {showUnresolvedPanel && (
+            <div className="mt-3 overflow-x-auto rounded-xl border border-rose-200 bg-white">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-rose-50/60 border-b border-rose-100 font-bold text-rose-900 uppercase">
+                  <tr>
+                    <th className="px-3 py-2">Event</th>
+                    <th className="px-3 py-2 text-right">Amount</th>
+                    <th className="px-3 py-2 text-center">Status</th>
+                    <th className="px-3 py-2 text-center">Attempts</th>
+                    <th className="px-3 py-2">Last Reason</th>
+                    <th className="px-3 py-2 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {unresolvedTasks.map((task) => (
+                    <tr key={task.id} className="hover:bg-neutral-50 transition-colors">
+                      <td className="px-3 py-2.5 font-semibold text-neutral-800">
+                        {task.event_title || task.event_id.slice(0, 8)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-bold text-rose-600 whitespace-nowrap">
+                        {formatCurrency(task.amount)}
+                      </td>
+                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-800 uppercase">
+                          {task.status.replace("_", " ")}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-center text-neutral-600 font-mono">
+                        {task.attempt_count} / {task.max_attempts}
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-[10px] text-neutral-500 truncate max-w-[200px]" title={task.error_message || ""}>
+                        {task.error_message || "—"}
+                      </td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <button
+                          onClick={() => setSelectedTaskForReview(task)}
+                          className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-700 shadow-2xs"
+                        >
+                          Resolve
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Selectors Card (Community & Event Cascading Dropdown) */}
       <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-xs">
@@ -1308,6 +1413,17 @@ export default function FinancialsPage() {
         beneficiary={beneficiary}
         defaultEventId={payoutModalEventId}
         defaultAmountRupees={payoutModalAmount}
+      />
+
+      {/* Manual Refund Review Modal (Milestone B) */}
+      <RefundManualReviewModal
+        isOpen={selectedTaskForReview !== null}
+        task={selectedTaskForReview}
+        onClose={() => setSelectedTaskForReview(null)}
+        onResolved={() => {
+          loadStatement()
+          loadUnresolvedTasks()
+        }}
       />
     </div>
   )
