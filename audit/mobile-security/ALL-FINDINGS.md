@@ -8630,12 +8630,88 @@ All three Phase 2 findings (`BUG-004`, `BUG-005`, `BUG-010`) were successfully d
 
 ### 15.2 Phase 3 Findings Remediation Status
 
-| Finding ID | Severity | Description | Remediation Artifacts | Local Build Status |
+| Finding ID | Severity | Description | Remediation Artifacts | Staging Deployment & Verification Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **`BUG-006`** | Low | Cloudinary unvalidated upload & active asset deletion | `media_validator.dart`, `cloudinary.ts`, `delete-media` active asset protection | **LOCAL BUILD VERIFIED** |
-| **`BUG-007`** | Low | `remove-member` missing authz, rate limit, CORS, owner self-delete | `remove-member/index.ts`, Migration `202611010012_owner_self_delete_guard.sql` | **LOCAL BUILD VERIFIED** |
-| **`BUG-008`** | Low | Realtime discussion sender profile hydration failure | Profile cache in `event_discussion.dart` and `event-detail.tsx`, realtime insert/update/delete | **LOCAL BUILD VERIFIED** |
+| **`BUG-006`** | Low | Cloudinary unvalidated upload & active asset deletion | `media_validator.dart`, `cloudinary.ts`, `delete-media` active asset protection | **DEPLOYED & VERIFIED ON STAGING** |
+| **`BUG-007`** | Low | `remove-member` missing authz, rate limit, CORS, owner self-delete | `remove-member/index.ts`, Migrations `202611010012_owner_self_delete_guard.sql` & `202611010013_owner_self_delete_restrictive_guard.sql` | **DEPLOYED & VERIFIED ON STAGING** |
+| **`BUG-008`** | Low | Realtime discussion sender profile hydration failure | Profile cache in `event_discussion.dart` and `event-detail.tsx`, realtime insert/update/delete | **DEPLOYED & VERIFIED ON STAGING** |
 
-**Zero remote deployments, zero remote migrations, and zero git pushes were performed.**
-**Production environment `vdxspyumkvwawmqwfkzr` remains strictly air-gapped and 100% untouched.**
+---
+
+## 16. Stage 6 Phase 3: Live Staging Deployment & Full Verification
+
+All three Phase 3 findings (`BUG-006`, `BUG-007`, `BUG-008`) were successfully deployed to staging project `ofvfasdgdwkehdcjugnf` and verified on live Supabase staging infrastructure.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ Current Stage: Stage 6 Phase 3 Staging Deployment & Live Verification  │
+│ Staging Target: Supabase Project ofvfasdgdwkehdcjugnf [VERIFIED]       │
+│ Production Target: vdxspyumkvwawmqwfkzr [STRICTLY AIR-GAPPED / UNTOUCHED]│
+│ Git Branches: origin/dev (Mobile: 3e80fb5 | Web/Backend: 79137c5)       │
+│ GitHub Actions CI Workflow: Run 41136352926 (6/6 jobs PASSED)          │
+│ Staging Deployment Workflow: Run 41136352915 (Migrate + Deploy PASSED) │
+│ Live Staging Smoke Verdict: 22/22 PASSED (100% CLEAN PASS)             │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 16.1 Git Commits and CI/CD Verification
+1. **Repository Commits:**
+   - **Mobile Client (`apps/mobile` @ `https://github.com/shivapraneeth14/cluvo.git`):**
+     - Commit `3e80fb5`: `feat(stage6-phase3): media validation, discussion profile hydration, and tests`
+   - **Monorepo / Organizer Web / Admin Web / Supabase (`oragnizer-web` @ `https://github.com/shivapraneeth14/oragnizer-web.git`):**
+     - Commit `8199974`: `feat(stage6-phase3): implement BUG-006 media security, BUG-007 remove-member hierarchy, and BUG-008 discussion hydration`
+     - Commit `4ba83a2`: `fix(ci): handle external mobile repo in cloudinary validation test`
+     - Commit `79137c5`: `feat(security): add restrictive owner membership delete guard policy`
+2. **GitHub Actions CI Run `41136352926` (Head SHA `79137c5`):**
+   - Environment hygiene: **Success**
+   - Supabase migration lint: **Success**
+   - TypeScript type check: **Success**
+   - Edge-function contract tests (297/297): **Success**
+   - Vite build: **Success**
+   - Secret detection: **Success**
+3. **Staging Automated Deployment Run `41136352915` (Head SHA `79137c5`):**
+   - Linked to test Supabase project `ofvfasdgdwkehdcjugnf`.
+   - Applied forward-only database migrations:
+     - `202611010012_owner_self_delete_guard.sql`: Community owner delete protection helper and permissive policy narrow.
+     - `202611010013_owner_self_delete_restrictive_guard.sql`: Restrictive (`AS RESTRICTIVE`) RLS policy `block_owner_membership_delete` completely eliminating owner membership self-delete bypasses.
+   - Deployed Edge Functions:
+     - `delete-media`: Active asset protection across `profiles.avatar_url`, `communities.banner_url/community_avatar_url`, `events.image_url/video_url`, and `media.url/thumbnail_url`, with strict regex parameterization (`/^[a-zA-Z0-9_\-\/]+$/`).
+     - `remove-member`: RBAC authorization (Owner, Organizer, Platform Admin), organizer privilege escalation defense, owner immunity, rate limiting (20/min), and audit logging.
+   - Decommissioned legacy functions verified (404 Not Found): `withdraw-wallet`, `cashfree-webhook`, `sync-payout-status`, `create-booking`, `create-payment-order`.
+
+### 16.2 Live Staging Verification Results (22/22 Tests Passed)
+1. **Stage 6 Phase 3 Live Smoke Suite (`scripts/stage6_phase3_smoke_test.ts` — 4/4 PASSED):**
+   - `[PASS]` Step 1: BUG-007 / Migration `202611010012` & `202611010013` Owner Self-Delete Guard (Owner direct RLS deletion blocked; membership row remains intact).
+   - `[PASS]` Step 2: BUG-006 `delete-media` Active Asset Anti-Destruction & Parameterization (HTTP 403 returned on active avatar, active community banner, active event poster, active event video, and active gallery media; HTTP 200 returned on unreferenced orphan; HTTP 400 on malformed traversal input).
+   - `[PASS]` Step 3: BUG-007 `remove-member` Hierarchy, Rate Limiting & Audit Trail (Organizer blocked from removing owner with HTTP 403; self-removal blocked with HTTP 400; owner removing member succeeds with HTTP 200 and logs structured audit entry with `caller_role: OWNER`).
+   - `[PASS]` Step 4: BUG-008 Discussion Profile Hydration & In-Place Mutation (Realtime message inserted and hydrated via relational projection with `first_name`, `last_name`, and `avatar_url`; content update verified).
+
+2. **Stage 6 Phase 2 Live Smoke Suite (`scripts/stage6_phase2_smoke_test.ts` — 5/5 PASSED):**
+   - `[PASS]` Step 1: BUG-004 Community Closure RLS & Role Escalation Defense.
+   - `[PASS]` Step 2: BUG-005 Atomic Free-Event Registration & Concurrency Guards.
+   - `[PASS]` Step 3: BUG-005 Active Paid Checkout Holds Respected by Free Registration.
+   - `[PASS]` Step 4: BUG-010 Coupon Exhaustion Hold Release & Counter Integrity.
+   - `[PASS]` Step 5: BUG-010 Resilient Hold Release & Payment Audit Log Acceptance.
+
+3. **Stage 6 Phase 1 Live Smoke Suite (`scripts/stage6_phase1_smoke_test.ts` — 6/6 PASSED):**
+   - `[PASS]` Step 1: Forward-Only Migrations Active on Database (`202611010008` & `202611010009`).
+   - `[PASS]` Step 2: Obsolete Edge Functions Return 404 (All 5 obsolete functions verified absent).
+   - `[PASS]` Step 3: `create-beneficiary` Operates Without Cashfree Dependencies.
+   - `[PASS]` Step 4: Event Capacity & Status Guard Protects Booked Count & Active Holds.
+   - `[PASS]` Step 5: `delete-media` Enforces Active Avatar Anti-Destruction & Secret Isolation.
+   - `[PASS]` Step 6: Live Razorpay Payment & Webhook Confirmation Lifecycle.
+
+4. **Stage 5 Milestone D Financial Invariants Suite (`scripts/stage5_milestone_d_smoke_test.ts` — 7/7 PASSED):**
+   - `[PASS]` Test 1: Ticket Purchase Fee Split & Wallet Credit (94,000 paise / 6,000 paise split).
+   - `[PASS]` Test 2: Multiple Partial Refunds Preserved with Individual Debits (24,000 paise wallet balance).
+   - `[PASS]` Test 3: Duplicate Provider Refund Transaction Deduplication.
+   - `[PASS]` Test 4: Cumulative Refund Deduction Cap at Organizer Share.
+   - `[PASS]` Test 5: Disputed Manual Payout Uncommitted Balance Reservation (104,000 paise uncommitted balance).
+   - `[PASS]` Test 6: Admin Payout Over-Allocation Rejection with Row Lock.
+   - `[PASS]` Test 7: Read-Only Reconciliation Purity & Security Definier Gates (0 table mutations).
+
+### 16.3 Production Safety Confirmation
+- **Target Staging Supabase:** `https://ofvfasdgdwkehdcjugnf.supabase.co` (`ofvfasdgdwkehdcjugnf`) — **100% Deployed & Verified**.
+- **Production Supabase:** `vdxspyumkvwawmqwfkzr` — **STRICTLY AIR-GAPPED & ZERO TOUCH (ZERO ACCESS, ZERO MIGRATIONS, ZERO DEPLOYS)**.
+
 
