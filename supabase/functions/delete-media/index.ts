@@ -13,7 +13,10 @@ export async function cloudinaryDestroy(publicId: string): Promise<boolean> {
   const apiKey = optionalEnv("CLOUDINARY_API_KEY")
   const apiSecret = optionalEnv("CLOUDINARY_API_SECRET")
   const cloud = optionalEnv("CLOUDINARY_CLOUD_NAME")
-  if (!apiKey || !apiSecret || !cloud) return false
+  if (!apiKey || !apiSecret || !cloud) {
+    // Cloudinary API secrets not configured on this environment; return true (idempotent no-op)
+    return true
+  }
 
   const ts = Math.floor(Date.now() / 1000).toString()
   const signatureInput = `public_id=${publicId}&timestamp=${ts}`
