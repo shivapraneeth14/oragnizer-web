@@ -14,6 +14,7 @@ import EventsPage from "./pages/EventsPage"
 import EventDetailPage from "./pages/EventDetailPage"
 import AlertsPage from "./pages/AlertsPage"
 import ReportsPage from "./pages/ReportsPage"
+import FinancialsPage from "./pages/FinancialsPage"
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="/users/:id" element={<UserDetailPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/events/:id" element={<EventDetailPage />} />
+            <Route path="/financials" element={<FinancialsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
           </Route>

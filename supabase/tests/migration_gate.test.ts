@@ -22,6 +22,7 @@ const purgeCron = await read("202610220015_schedule_deletion_purge.sql")
 const reportsRetention = await read("202610220016_content_reports_retain_on_delete.sql")
 const refundStatus = await read("202610290003_confirm_payment_refund_status.sql")
 const atomicCheckIn = await read("202610300002_atomic_check_in.sql")
+const adminFinancials = await read("202610300003_admin_financial_ledger_and_payouts.sql")
 
 Deno.test("migration version prefixes are unique and ordered", async () => {
   const names = (await Array.fromAsync(Deno.readDir(dir)))
@@ -62,6 +63,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610290006_grant_community_grace_and_closure_columns.sql",
     "202610300001_reconcile_cron_2min.sql",
     "202610300002_atomic_check_in.sql",
+    "202610300003_admin_financial_ledger_and_payouts.sql",
   ])
 })
 
@@ -138,5 +140,14 @@ Deno.test("202610300002 check_in_registration has row lock, atomic conditional u
   assert(atomicCheckIn.includes("RETURNING id INTO v_updated_id"))
   assert(atomicCheckIn.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.check_in_registration(text) FROM PUBLIC, anon, authenticated;"))
   assert(atomicCheckIn.includes("GRANT EXECUTE ON FUNCTION public.check_in_registration(text) TO service_role;"))
+})
+
+Deno.test("202610300003 admin_financial_ledger_and_payouts deploys passbook RPC and manual payout RPCs", () => {
+  assert(adminFinancials.includes("CREATE OR REPLACE FUNCTION public.get_admin_financial_statement"))
+  assert(adminFinancials.includes("public.is_admin_user()"))
+  assert(adminFinancials.includes("ORDER BY w.created_at DESC"))
+  assert(adminFinancials.includes("CREATE OR REPLACE FUNCTION public.admin_record_manual_payout"))
+  assert(adminFinancials.includes("CREATE OR REPLACE FUNCTION public.organizer_confirm_manual_payout"))
+  assert(adminFinancials.includes("wallet_balance = wallet_balance - v_payout.amount"))
 })
 

@@ -53,3 +53,8 @@ Thumbs.db
 .vercel
 .env*
 docs
+
+# Agent tools & skills
+.agents/
+.opencode/
+skills-lock.json
