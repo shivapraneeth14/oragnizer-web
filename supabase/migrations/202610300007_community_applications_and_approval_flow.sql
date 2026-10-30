@@ -347,3 +347,4 @@ $$;
 
 REVOKE ALL PRIVILEGES ON FUNCTION public.get_admin_community_applications() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_admin_community_applications() TO authenticated, service_role;
+

@@ -72,6 +72,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610300005_admin_profiles_rpc_and_fix_ledger.sql",
     "202610300006_organizer_financial_statement_and_dispute.sql",
     "202610300007_community_applications_and_approval_flow.sql",
+    "202610300008_harden_rls_policies.sql",
   ])
 })
 

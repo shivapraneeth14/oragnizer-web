@@ -34,7 +34,7 @@ Deno.test("admin daysRemaining matches GRACE_DAYS boundaries", () => {
 
 Deno.test("delete-account payment guards are scoped to the deleting user", () => {
   const scopedPayments = deleteAccount.match(
-    /\.from\("payments"\)\s*\.select\("id"\)\s*\.eq\("user_id", userId\)/g,
+    /\.from\("payments"\)\s*\.select\("id,\s*registrations!inner\(user_id\)"\)\s*\.eq\("registrations\.user_id",\s*userId\)/g,
   )
   assertEquals(scopedPayments?.length, 3)
   assert(deleteAccount.includes('signOut(token, "global")'))

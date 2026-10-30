@@ -54,8 +54,8 @@ async function checkDeletionGuards(userId: string): Promise<{ error: string; own
   // 3. Has a pending payment (money in flight).
   const { data: pendingPays } = await supabase
     .from("payments")
-    .select("id")
-    .eq("user_id", userId)
+    .select("id, registrations!inner(user_id)")
+    .eq("registrations.user_id", userId)
     .eq("status", "pending")
     .not("razorpay_order_id", "is", null)
     .lt("created_at", new Date(Date.now() - 5 * 60 * 1000).toISOString()) // grace 5min for in-flight
@@ -68,8 +68,8 @@ async function checkDeletionGuards(userId: string): Promise<{ error: string; own
   // 4. Has a refund in flight.
   const { data: refundClaims } = await supabase
     .from("payments")
-    .select("id")
-    .eq("user_id", userId)
+    .select("id, registrations!inner(user_id)")
+    .eq("registrations.user_id", userId)
     .eq("refund_claim_state", "claimed")
   if (refundClaims && refundClaims.length > 0) {
     return {
@@ -78,8 +78,8 @@ async function checkDeletionGuards(userId: string): Promise<{ error: string; own
   }
   const { data: refundStatuses } = await supabase
     .from("payments")
-    .select("id")
-    .eq("user_id", userId)
+    .select("id, registrations!inner(user_id)")
+    .eq("registrations.user_id", userId)
     .in("refund_status", ["requested", "pending", "queued"])
   if (refundStatuses && refundStatuses.length > 0) {
     return {
