@@ -25,12 +25,14 @@ export default function CommunitiesPage() {
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([
+    Promise.allSettled([
       supabase.from("communities").select(COMMUNITY_CLIENT_COLUMNS_SELECT).order("created_at", { ascending: false }),
       fetchAdminProfiles(),
-    ]).then(([cRes, profiles]) => {
+    ]).then(([cSettled, pSettled]) => {
+      const profiles = pSettled.status === "fulfilled" ? pSettled.value : []
+      const cRes = cSettled.status === "fulfilled" ? cSettled.value : null
       const emailById = new Map(profiles.map((p) => [p.id, p.email]))
-      if (cRes.data) {
+      if (cRes?.data) {
         setCommunities(
           (cRes.data as unknown as any[]).map((c) => ({
             ...c,
@@ -39,7 +41,10 @@ export default function CommunitiesPage() {
         )
       }
       setLoading(false)
-    }, () => setLoading(false))
+    }).catch((err) => {
+      console.error("Error loading communities:", err)
+      setLoading(false)
+    })
   }, [])
 
   const filtered = communities.filter((c: any) => {
