@@ -1,0 +1,101 @@
+{
+  "timestamp": "2026-10-30T18:27:10.936Z",
+  "allPassed": true,
+  "results": [
+    {
+      "step": 1,
+      "title": "Ticket Purchase Fee Split & Wallet Credit",
+      "verdict": "PASS",
+      "details": "Wallet balance is 94000 paise (expected 94,000 paise).",
+      "evidence": {
+        "wallet_balance": 94000,
+        "expected": 94000,
+        "purchase": {
+          "paymentId": "d7902827-988e-4ab0-9934-3c4ba6abb8d2",
+          "registrationId": "3578fc43-343f-48b2-a070-2d4b1e6ff2a2",
+          "organizerShare": 94000,
+          "platformFee": 6000
+        }
+      }
+    },
+    {
+      "step": 2,
+      "title": "Multiple Partial Refunds Preserved with Individual Debits (FIN-AUDIT-005)",
+      "verdict": "PASS",
+      "details": "Both partial refunds preserved in passbook. Wallet balance is 24000 paise (expected 24000 paise).",
+      "evidence": {
+        "refunds_in_statement": 2,
+        "hasRef1": true,
+        "hasRef2": true,
+        "wallet_balance": 24000
+      }
+    },
+    {
+      "step": 3,
+      "title": "Duplicate Provider Refund Transaction Deduplication (FIN-AUDIT-005)",
+      "verdict": "PASS",
+      "details": "Passbook contains 2 refunds after duplicate webhook replay (expected 2).",
+      "evidence": {
+        "total_refund_history_rows": 3,
+        "passbook_deduped_refunds": 2
+      }
+    },
+    {
+      "step": 4,
+      "title": "Cumulative Refund Deduction Cap at Organizer Share (FIN-AUDIT-005)",
+      "verdict": "PASS",
+      "details": "Requested refund of 50,000 paise was capped at 24000 paise (remaining share).",
+      "evidence": {
+        "requested": 50000,
+        "applied_money_out": 24000,
+        "expected_cap": 24000
+      }
+    },
+    {
+      "step": 5,
+      "title": "Disputed Manual Payout Uncommitted Balance Reservation (FIN-AUDIT-006)",
+      "verdict": "PASS",
+      "details": "Disputed transfer remains locked and deducted from uncommitted balance (104000 paise).",
+      "evidence": {
+        "startingBal": 124000,
+        "stored_wallet": 124000,
+        "uncommitted": 104000,
+        "disputed_amount": 20000
+      }
+    },
+    {
+      "step": 6,
+      "title": "Admin Payout Over-Allocation Rejection with Row Lock (FIN-AUDIT-006)",
+      "verdict": "PASS",
+      "details": "Attempt to payout 154000 paise rejected with insufficient_uncommitted_balance.",
+      "evidence": {
+        "requested": 154000,
+        "uncommitted": 104000,
+        "rpc_response": {
+          "ok": false,
+          "error": "insufficient_uncommitted_balance",
+          "message": "Requested payout amount (154000 paise) exceeds available uncommitted wallet balance (104000 paise). In-flight pending and disputed payouts are reserved.",
+          "locked_payouts": 20000,
+          "uncommitted_balance": 104000,
+          "stored_wallet_balance": 124000
+        }
+      }
+    },
+    {
+      "step": 7,
+      "title": "Read-Only Reconciliation Purity & Security Definier Gates",
+      "verdict": "PASS",
+      "details": "0 table mutations detected during reconciliation. Anon execution blocked: true.",
+      "evidence": {
+        "zeroMutations": true,
+        "anonBlocked": true,
+        "preComm": {
+          "wallet_balance": 124000
+        },
+        "postComm": {
+          "wallet_balance": 124000
+        }
+      }
+    }
+  ]
+}

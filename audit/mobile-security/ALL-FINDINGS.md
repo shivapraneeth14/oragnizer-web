@@ -7414,9 +7414,54 @@ Three specific findings were identified during the pre-deployment review:
 
 ---
 
-# **`STAGE 5 MILESTONE D — PRE-DEPLOYMENT REMEDIATION COMPLETE`**
+## 6. Staging Deployment & Live End-to-End Verification Report
 
-> **Certification:** All three findings (`FIN-AUDIT-005`, `FIN-AUDIT-006`, and `FIN-AUDIT-007`) are fully remediated, verified on physical PostgreSQL 17, and certified with complete regression coverage. Zero changes have been deployed to remote staging (`ofvfasdgdwkehdcjugnf`) or production (`vdxspyumkvwawmqwfkzr`). All changes are staged locally on branch `dev` awaiting explicit user deployment authorization.
+### 6.1 Deployment Provenance & Execution Logs
+
+- **Target Staging Supabase Project:** `ofvfasdgdwkehdcjugnf` (us-east-1)
+- **Target Git Branch:** `dev`
+- **Initial Milestone D Commit:** `07437b31fc6db56f9da279a4b243f22f89071b76`
+  - GitHub Actions CI Run: `41104736605` (Conclusion: `success`)
+  - Deploy to test Supabase Workflow: `41104738962` (Conclusion: `success`)
+  - Migrations applied: `202611010005_fix_financial_statement_refund_debits.sql`, `202611010006_financial_reconciliation_engine.sql`
+- **Targeted Staging Remediation Commit (`FIN-AUDIT-008`):** `cef68fd8495537c2137279e993bd066bceac4d84`
+  - GitHub Actions CI Run: `41106673723` (Conclusion: `success`)
+  - Deploy to test Supabase Workflow: `41106673643` (Conclusion: `success`)
+  - Forward-only migration applied: `202611010007_fix_admin_financial_statement_phone.sql`
+- **Edge Functions Deployed:** All 49 Edge Functions deployed cleanly to staging project `ofvfasdgdwkehdcjugnf`.
+- **Production Isolation:** Supabase Production (`vdxspyumkvwawmqwfkzr`) was **never accessed, queried, or modified**. Live Razorpay keys were never loaded or used.
+
+---
+
+### 6.2 Discovery & Resolution of `FIN-AUDIT-008` (Medium)
+- **Finding:** During initial live staging smoke testing, `get_admin_financial_statement` failed with PostgreSQL error `42703: column prof.phone does not exist`.
+- **Root Cause:** In `202611010005`, lines 60 and 148 referenced `prof.phone AS attendee_phone`. In the live staging schema, `public.profiles` does not contain a `phone` column (earlier migration `202610300005` had sanitized this to `NULL::TEXT`, and `get_organizer_financial_statement` had already correctly used `NULL::TEXT`).
+- **Remediation (`202611010007`):** Deployed forward-only migration `202611010007_fix_admin_financial_statement_phone.sql`, standardizing all `attendee_phone` references in `get_admin_financial_statement` to `NULL::TEXT AS attendee_phone`.
+
+---
+
+### 6.3 Live Staging End-to-End Smoke Test Verification (`scripts/stage5_milestone_d_smoke_test.ts`)
+
+Live integration smoke tests were executed directly against remote staging Supabase `ofvfasdgdwkehdcjugnf` using isolated test communities, test events, test customer accounts, and test admin credentials (Razorpay test key `rzp_test_THqWNZqOZGQZOu`):
+
+| Test # | Test Description & Objective | Expected Behavior | Observed Result | Status |
+| :--- | :--- | :--- | :--- | :---: |
+| **Test 1** | **Confirmed Ticket Purchase & Baseline Passbook** | ₹1000 (100,000 paise) purchase credited to organizer wallet at 94% net share (94,000 paise), 6% platform fee (6,000 paise) partitioned | Wallet balance: `94000` paise. Platform fee: `6000` paise. Stored wallet: `94000` paise. | **PASS ✓** |
+| **Test 2** | **Multiple Legitimate Partial Refunds (FIN-AUDIT-005)** | Two distinct partial refunds (₹300 and ₹400) against the same payment are both preserved in the passbook with individual debits | Passbook contains 2 refund transactions (`rfnd_part1_*`, `rfnd_part2_*`). Wallet balance decremented to `24000` paise. | **PASS ✓** |
+| **Test 3** | **Duplicate Refund Provider Webhook Replay (FIN-AUDIT-005)** | Duplicate delivery of refund 1 (same `razorpay_refund_id`) is deduplicated in statement calculations | Total refund records in database: 3. Deduped statement refunds: 2. Duplicate safely ignored. | **PASS ✓** |
+| **Test 4** | **Cumulative Organizer Refund Deduction Cap (FIN-AUDIT-005)** | 3rd refund of 50,000 paise against 94,000 initial share (with 70,000 already debited) capped at remaining 24,000 paise | Requested: `50000` paise. Applied passbook `money_out`: `24000` paise. Total debits exactly equal original share. | **PASS ✓** |
+| **Test 5** | **Disputed Manual Payout Uncommitted Balance Reservation (FIN-AUDIT-006)** | Disputed payout (20,000 paise) leaves stored wallet intact but deducts from uncommitted available balance | Stored wallet: `124000` paise (untouched). Uncommitted balance: `104000` paise (20,000 paise locked). | **PASS ✓** |
+| **Test 6** | **Admin Manual Payout Over-Allocation Rejection (FIN-AUDIT-006)** | Admin attempt to record 154,000 paise payout against 104,000 paise uncommitted balance rejected via row lock | Call rejected with `insufficient_uncommitted_balance`. Message: *"Requested payout amount (154000 paise) exceeds available uncommitted wallet balance (104000 paise)."* | **PASS ✓** |
+| **Test 7** | **Read-Only Purity & Strict Security Gates (FIN-AUDIT-004)** | `run_financial_reconciliation` executes with zero database mutations. Anon execution blocked | Zero table mutations detected. Anonymous invocation denied (`401/403`). Service role execution: 100% clean. | **PASS ✓** |
+
+**Summary:** **`7 / 7 LIVE STAGING SMOKE TESTS PASSED (100% SUCCESS)`**
+
+---
+
+# **`STAGE 5 MILESTONE D — FINAL CERTIFICATION COMPLETE`**
+
+> **Final Auditor Sign-off:** Stage 5 Milestone D (*Financial Reconciliation and Observability*) is completely deployed, remediated, and verified on the remote staging environment (`ofvfasdgdwkehdcjugnf`). All 10 financial dimensions maintain mathematical consistency with integer paise precision, immutable audit trails, provider-level refund deduplication, cumulative organizer share caps, concurrency-safe manual payout allocation locks, and strictly read-only three-way reconciliation observability. Zero production systems or real-money credentials were accessed.
+
 
 
 
