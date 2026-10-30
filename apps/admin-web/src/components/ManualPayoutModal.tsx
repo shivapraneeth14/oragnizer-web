@@ -22,6 +22,7 @@ interface Props {
     label?: string
   } | null
   defaultEventId?: string | null
+  defaultAmountRupees?: string | null
 }
 
 const PAYMENT_METHODS = [
@@ -40,6 +41,7 @@ export default function ManualPayoutModal({
   events,
   beneficiary,
   defaultEventId,
+  defaultAmountRupees,
 }: Props) {
   const [eventId, setEventId] = useState<string>("all")
   const [rupees, setRupees] = useState<string>("")
@@ -52,13 +54,13 @@ export default function ManualPayoutModal({
   useEffect(() => {
     if (isOpen) {
       setEventId(defaultEventId || "all")
-      setRupees("")
+      setRupees(defaultAmountRupees || "")
       setUtr("")
       setPaymentMethod("IMPS")
       setAdminNotes("")
       setError(null)
     }
-  }, [isOpen, defaultEventId])
+  }, [isOpen, defaultEventId, defaultAmountRupees])
 
   if (!isOpen || !community) return null
 

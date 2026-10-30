@@ -56,6 +56,8 @@ export default function FinancialsPage() {
   // Modal and Drawer State
   const [inspectedTx, setInspectedTx] = useState<FinancialTransaction | null>(null)
   const [isPayoutModalOpen, setIsPayoutModalOpen] = useState<boolean>(false)
+  const [payoutModalEventId, setPayoutModalEventId] = useState<string | null>(null)
+  const [payoutModalAmount, setPayoutModalAmount] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
   // 1. Initial Load: Fetch all communities (Admin RPC with whitelisted fallback)
@@ -225,7 +227,128 @@ export default function FinancialsPage() {
     }
   }, [statement, communities, selectedCommunityId, selectedCommunityBalance])
 
-  // 5. Client Filtering & Searching
+  // 5. Event-Wise Aggregations (computed across events and transactions)
+  const eventBreakdownList = useMemo(() => {
+    if (events.length === 0) return []
+
+    // Group transactions by event_id
+    const txByEvent = new Map<string, FinancialTransaction[]>()
+    for (const tx of statement) {
+      if (!tx.event_id) continue
+      const list = txByEvent.get(tx.event_id) || []
+      list.push(tx)
+      txByEvent.set(tx.event_id, list)
+    }
+
+    return events.map((ev) => {
+      const eventTxs = txByEvent.get(ev.id) || []
+      let gross = 0
+      let platformFee = 0
+      let refunds = 0
+      let settled = 0
+      let pending = 0
+
+      for (const tx of eventTxs) {
+        if (tx.transaction_type === "ticket_sale") {
+          gross += tx.gross_amount || 0
+          platformFee += tx.platform_fee || 0
+        } else if (tx.transaction_type === "refund") {
+          refunds += tx.money_out || 0
+        } else if (tx.transaction_type.startsWith("payout")) {
+          if (tx.status === "success" || tx.status === "processed") {
+            settled += tx.money_out || 0
+          } else if (tx.status === "pending_confirmation") {
+            pending += tx.money_out || 0
+          }
+        }
+      }
+
+      const netOrganizerTotal = Math.max(0, gross - platformFee - refunds)
+      const remainingBalance = Math.max(0, netOrganizerTotal - settled - pending)
+
+      let settlementStatus: "fully_settled" | "pending_confirmation" | "partially_settled" | "unsettled" | "no_sales" = "unsettled"
+      if (gross === 0 && refunds === 0 && settled === 0) {
+        settlementStatus = "no_sales"
+      } else if (remainingBalance === 0 && (settled > 0 || netOrganizerTotal === 0)) {
+        settlementStatus = "fully_settled"
+      } else if (pending > 0) {
+        settlementStatus = "pending_confirmation"
+      } else if (settled > 0 && remainingBalance > 0) {
+        settlementStatus = "partially_settled"
+      } else {
+        settlementStatus = "unsettled"
+      }
+
+      return {
+        id: ev.id,
+        title: ev.title,
+        startDate: ev.start_date,
+        price: ev.price,
+        eventStatus: ev.status,
+        gross,
+        platformFee,
+        refunds,
+        netOrganizerTotal,
+        settled,
+        pending,
+        remainingBalance,
+        settlementStatus,
+        txCount: eventTxs.length,
+      }
+    })
+  }, [events, statement])
+
+  // Single Selected Event Item & Metrics
+  const selectedEventItem = useMemo(() => {
+    if (selectedEventId === "all") return null
+    return events.find((e) => e.id === selectedEventId) || null
+  }, [events, selectedEventId])
+
+  const selectedEventSummary = useMemo(() => {
+    if (!selectedEventItem) return null
+    const matched = eventBreakdownList.find((b) => b.id === selectedEventItem.id)
+    if (matched && matched.gross > 0) return matched
+
+    const gross = kpis.grossRevenue
+    const platformFee = kpis.platformFees
+    const refunds = kpis.refundsDeducted
+    const netOrganizerTotal = Math.max(0, gross - platformFee - refunds)
+    const settled = kpis.payoutsSettled
+    const pending = kpis.payoutsPending
+    const remainingBalance = Math.max(0, netOrganizerTotal - settled - pending)
+
+    let settlementStatus: "fully_settled" | "pending_confirmation" | "partially_settled" | "unsettled" | "no_sales" = "unsettled"
+    if (gross === 0 && refunds === 0 && settled === 0) {
+      settlementStatus = "no_sales"
+    } else if (remainingBalance === 0 && (settled > 0 || netOrganizerTotal === 0)) {
+      settlementStatus = "fully_settled"
+    } else if (pending > 0) {
+      settlementStatus = "pending_confirmation"
+    } else if (settled > 0 && remainingBalance > 0) {
+      settlementStatus = "partially_settled"
+    } else {
+      settlementStatus = "unsettled"
+    }
+
+    return {
+      id: selectedEventItem.id,
+      title: selectedEventItem.title,
+      startDate: selectedEventItem.start_date,
+      price: selectedEventItem.price,
+      eventStatus: selectedEventItem.status,
+      gross,
+      platformFee,
+      refunds,
+      netOrganizerTotal,
+      settled,
+      pending,
+      remainingBalance,
+      settlementStatus,
+      txCount: statement.length,
+    }
+  }, [selectedEventItem, eventBreakdownList, kpis, statement.length])
+
+  // 6. Client Filtering & Searching
   const filteredStatement = useMemo(() => {
     return statement.filter((tx) => {
       // Type filter
@@ -398,7 +521,11 @@ export default function FinancialsPage() {
           </button>
 
           <button
-            onClick={() => setIsPayoutModalOpen(true)}
+            onClick={() => {
+              setPayoutModalEventId(selectedEventId === "all" ? null : selectedEventId)
+              setPayoutModalAmount(selectedEventSummary && selectedEventSummary.remainingBalance > 0 ? (selectedEventSummary.remainingBalance / 100).toFixed(2) : "")
+              setIsPayoutModalOpen(true)
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-cluvo-primary px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-cluvo-primary/90 transition-colors"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -509,73 +636,320 @@ export default function FinancialsPage() {
         </div>
       </div>
 
-      {/* Financial KPI Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-        {/* Gross Sales */}
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
-          <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-            Gross Ticket Sales
-          </span>
-          <p className="mt-1.5 text-xl font-black text-neutral-900">
-            {formatCurrency(kpis.grossRevenue)}
-          </p>
-          <p className="mt-1 text-[11px] text-neutral-400">
-            From Razorpay customer payments
-          </p>
-        </div>
+      {/* Selected Event Financial Statement Banner OR Community Overview */}
+      {selectedEventId !== "all" && selectedEventSummary ? (
+        <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-xs">
+          {/* Header row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-100">
+            <div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedEventId("all")}
+                  className="text-xs font-bold text-cluvo-primary hover:underline flex items-center gap-1"
+                >
+                  ← Back to All Events
+                </button>
+                <span className="text-neutral-300">•</span>
+                <span className="text-xs uppercase font-bold tracking-wider text-neutral-400">
+                  Event Financial Statement
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <h4 className="text-xl font-black text-neutral-900">
+                  {selectedEventSummary.title}
+                </h4>
+                <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                  selectedEventSummary.settlementStatus === "fully_settled" ? "bg-emerald-100 text-emerald-800" :
+                  selectedEventSummary.settlementStatus === "pending_confirmation" ? "bg-amber-100 text-amber-800" :
+                  selectedEventSummary.settlementStatus === "partially_settled" ? "bg-blue-100 text-blue-800" :
+                  selectedEventSummary.settlementStatus === "no_sales" ? "bg-neutral-100 text-neutral-600" :
+                  "bg-rose-100 text-rose-800"
+                }`}>
+                  {selectedEventSummary.settlementStatus.replace("_", " ")}
+                </span>
+              </div>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                {selectedEventSummary.startDate ? `Event Date: ${new Date(selectedEventSummary.startDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""} · Ticket Base Price: {formatCurrency(selectedEventSummary.price)}
+              </p>
+            </div>
 
-        {/* Platform Fees */}
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
-          <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-            Platform Fees (6%)
-          </span>
-          <p className="mt-1.5 text-xl font-black text-cluvo-primary">
-            {formatCurrency(kpis.platformFees)}
-          </p>
-          <p className="mt-1 text-[11px] text-neutral-400">
-            Cluvo platform revenue
-          </p>
-        </div>
+            {/* Direct Settle Action Button */}
+            {selectedEventSummary.remainingBalance > 0 && (
+              <button
+                onClick={() => {
+                  setPayoutModalEventId(selectedEventSummary.id)
+                  setPayoutModalAmount((selectedEventSummary.remainingBalance / 100).toFixed(2))
+                  setIsPayoutModalOpen(true)
+                }}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-xs hover:bg-emerald-700 active:scale-98 transition-all shrink-0"
+              >
+                <span>⚡ Settle Event Balance</span>
+                <span className="rounded bg-emerald-700 px-1.5 py-0.5 text-xs font-mono">
+                  {formatCurrency(selectedEventSummary.remainingBalance)}
+                </span>
+              </button>
+            )}
+          </div>
 
-        {/* Refunds */}
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
-          <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-            Refunds Deducted
-          </span>
-          <p className="mt-1.5 text-xl font-black text-rose-600">
-            {formatCurrency(kpis.refundsDeducted)}
-          </p>
-          <p className="mt-1 text-[11px] text-neutral-400">
-            Clawed back to customers
-          </p>
-        </div>
+          {/* 6 Event KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-4">
+            {/* 1. Gross Ticket Sales */}
+            <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+              <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide">
+                Gross Sales
+              </span>
+              <p className="mt-1 text-lg font-black text-neutral-900">
+                {formatCurrency(selectedEventSummary.gross)}
+              </p>
+              <p className="text-[10px] text-neutral-400 mt-0.5">Money in</p>
+            </div>
 
-        {/* Payouts Settled */}
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
-          <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-            Payouts Settled
-          </span>
-          <p className="mt-1.5 text-xl font-black text-blue-600">
-            {formatCurrency(kpis.payoutsSettled)}
-          </p>
-          <p className="mt-1 text-[11px] text-neutral-400">
-            Transferred to organizer
-          </p>
-        </div>
+            {/* 2. Platform Fee Earned */}
+            <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+              <span className="text-[11px] font-bold text-cluvo-primary uppercase tracking-wide">
+                Cluvo Fee
+              </span>
+              <p className="mt-1 text-lg font-black text-cluvo-primary">
+                {formatCurrency(selectedEventSummary.platformFee)}
+              </p>
+              <p className="text-[10px] text-neutral-400 mt-0.5">Platform cut</p>
+            </div>
 
-        {/* Unpaid Balance */}
-        <div className="col-span-2 sm:col-span-1 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-xs">
-          <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
-            Current Wallet Balance
-          </span>
-          <p className="mt-1.5 text-xl font-black text-emerald-700">
-            {formatCurrency(kpis.walletBalance)}
-          </p>
-          <p className="mt-1 text-[11px] text-emerald-600">
-            Payable to organizer
-          </p>
+            {/* 3. Refunds Deducted */}
+            <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+              <span className="text-[11px] font-bold text-rose-600 uppercase tracking-wide">
+                Refunds
+              </span>
+              <p className="mt-1 text-lg font-black text-rose-600">
+                {formatCurrency(selectedEventSummary.refunds)}
+              </p>
+              <p className="text-[10px] text-neutral-400 mt-0.5">Returned to buyers</p>
+            </div>
+
+            {/* 4. Event Net Total */}
+            <div className="rounded-xl border border-neutral-300 bg-white p-3 shadow-2xs">
+              <span className="text-[11px] font-bold text-neutral-700 uppercase tracking-wide">
+                Event Net Total
+              </span>
+              <p className="mt-1 text-lg font-black text-neutral-900">
+                {formatCurrency(selectedEventSummary.netOrganizerTotal)}
+              </p>
+              <p className="text-[10px] text-neutral-400 mt-0.5">Organizer earned</p>
+            </div>
+
+            {/* 5. Payouts Settled */}
+            <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+              <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wide">
+                Paid Out
+              </span>
+              <p className="mt-1 text-lg font-black text-blue-600">
+                {formatCurrency(selectedEventSummary.settled)}
+              </p>
+              <p className="text-[10px] text-neutral-400 mt-0.5">
+                {selectedEventSummary.pending > 0 ? `+${formatCurrency(selectedEventSummary.pending)} pending` : "Settled to bank"}
+              </p>
+            </div>
+
+            {/* 6. Remaining to Settle */}
+            <div className={`rounded-xl border p-3 ${
+              selectedEventSummary.remainingBalance > 0 ? "border-emerald-300 bg-emerald-50/60 shadow-2xs" : "border-neutral-200 bg-neutral-50"
+            }`}>
+              <span className={`text-[11px] font-bold uppercase tracking-wide ${
+                selectedEventSummary.remainingBalance > 0 ? "text-emerald-800" : "text-neutral-500"
+              }`}>
+                Remaining Due
+              </span>
+              <p className={`mt-1 text-lg font-black ${
+                selectedEventSummary.remainingBalance > 0 ? "text-emerald-700" : "text-neutral-700"
+              }`}>
+                {formatCurrency(selectedEventSummary.remainingBalance)}
+              </p>
+              <p className="text-[10px] text-neutral-400 mt-0.5">
+                {selectedEventSummary.remainingBalance > 0 ? "Payable for this event" : "Fully settled"}
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Financial KPI Summary Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            {/* Gross Sales */}
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
+              <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+                Gross Ticket Sales
+              </span>
+              <p className="mt-1.5 text-xl font-black text-neutral-900">
+                {formatCurrency(kpis.grossRevenue)}
+              </p>
+              <p className="mt-1 text-[11px] text-neutral-400">
+                From Razorpay customer payments
+              </p>
+            </div>
+
+            {/* Platform Fees */}
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
+              <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+                Platform Fees (6%)
+              </span>
+              <p className="mt-1.5 text-xl font-black text-cluvo-primary">
+                {formatCurrency(kpis.platformFees)}
+              </p>
+              <p className="mt-1 text-[11px] text-neutral-400">
+                Cluvo platform revenue
+              </p>
+            </div>
+
+            {/* Refunds */}
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
+              <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+                Refunds Deducted
+              </span>
+              <p className="mt-1.5 text-xl font-black text-rose-600">
+                {formatCurrency(kpis.refundsDeducted)}
+              </p>
+              <p className="mt-1 text-[11px] text-neutral-400">
+                Clawed back to customers
+              </p>
+            </div>
+
+            {/* Payouts Settled */}
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
+              <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+                Payouts Settled
+              </span>
+              <p className="mt-1.5 text-xl font-black text-blue-600">
+                {formatCurrency(kpis.payoutsSettled)}
+              </p>
+              <p className="mt-1 text-[11px] text-neutral-400">
+                Transferred to organizer
+              </p>
+            </div>
+
+            {/* Unpaid Balance */}
+            <div className="col-span-2 sm:col-span-1 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-xs">
+              <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
+                Current Wallet Balance
+              </span>
+              <p className="mt-1.5 text-xl font-black text-emerald-700">
+                {formatCurrency(kpis.walletBalance)}
+              </p>
+              <p className="mt-1 text-[11px] text-emerald-600">
+                Payable to organizer
+              </p>
+            </div>
+          </div>
+
+          {/* Event-Wise Settlement Breakdown Table */}
+          {eventBreakdownList.length > 0 && (
+            <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-neutral-100 mb-4 gap-1">
+                <div>
+                  <h4 className="text-base font-bold text-neutral-900">
+                    Event Settlement & Earnings Breakdown
+                  </h4>
+                  <p className="text-xs text-neutral-500">
+                    Financial performance and settlement status across all {eventBreakdownList.length} events of {selectedCommunity?.name || "this community"}.
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-neutral-200 bg-neutral-50/70 text-neutral-500 font-bold uppercase tracking-wider">
+                      <th className="py-2.5 px-3">Event Name</th>
+                      <th className="py-2.5 px-3 text-right">Gross Sales</th>
+                      <th className="py-2.5 px-3 text-right">Cluvo Fee</th>
+                      <th className="py-2.5 px-3 text-right">Refunds</th>
+                      <th className="py-2.5 px-3 text-right font-black">Net Total</th>
+                      <th className="py-2.5 px-3 text-right">Settled</th>
+                      <th className="py-2.5 px-3 text-right text-emerald-700 font-black">Remaining</th>
+                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-3 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {eventBreakdownList.map((ev) => (
+                      <tr key={ev.id} className="hover:bg-neutral-50/70 transition-colors">
+                        <td className="py-3 px-3 font-semibold text-neutral-900 max-w-[220px]">
+                          <button
+                            onClick={() => setSelectedEventId(ev.id)}
+                            className="text-left font-bold text-neutral-900 hover:text-cluvo-primary hover:underline truncate block"
+                          >
+                            {ev.title}
+                          </button>
+                          <span className="text-[10px] text-neutral-400 block mt-0.5">
+                            {ev.startDate ? new Date(ev.startDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · Base: {formatCurrency(ev.price)}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-medium text-neutral-900">
+                          {formatCurrency(ev.gross)}
+                        </td>
+                        <td className="py-3 px-3 text-right text-cluvo-primary font-medium">
+                          {formatCurrency(ev.platformFee)}
+                        </td>
+                        <td className="py-3 px-3 text-right text-rose-600 font-medium">
+                          {formatCurrency(ev.refunds)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-bold text-neutral-900">
+                          {formatCurrency(ev.netOrganizerTotal)}
+                        </td>
+                        <td className="py-3 px-3 text-right text-blue-600 font-medium">
+                          {formatCurrency(ev.settled)}
+                          {ev.pending > 0 && (
+                            <span className="block text-[9px] text-amber-600">
+                              +{formatCurrency(ev.pending)} pend.
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-right font-black text-emerald-700">
+                          {formatCurrency(ev.remainingBalance)}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            ev.settlementStatus === "fully_settled" ? "bg-emerald-100 text-emerald-800" :
+                            ev.settlementStatus === "pending_confirmation" ? "bg-amber-100 text-amber-800" :
+                            ev.settlementStatus === "partially_settled" ? "bg-blue-100 text-blue-800" :
+                            ev.settlementStatus === "no_sales" ? "bg-neutral-100 text-neutral-600" :
+                            "bg-rose-100 text-rose-800"
+                          }`}>
+                            {ev.settlementStatus.replace("_", " ")}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => setSelectedEventId(ev.id)}
+                              className="rounded-lg border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700 hover:bg-neutral-50 shadow-2xs"
+                              title="Filter Passbook to this event"
+                            >
+                              Ledger
+                            </button>
+                            {ev.remainingBalance > 0 && (
+                              <button
+                                onClick={() => {
+                                  setPayoutModalEventId(ev.id)
+                                  setPayoutModalAmount((ev.remainingBalance / 100).toFixed(2))
+                                  setIsPayoutModalOpen(true)
+                                }}
+                                className="rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 shadow-2xs"
+                                title="Settle remaining balance for this event"
+                              >
+                                Pay
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Error Banner */}
       {error && (
@@ -597,6 +971,21 @@ export default function FinancialsPage() {
 
       {/* Passbook Ledger Container */}
       <div className="rounded-2xl border border-neutral-200 bg-white shadow-xs overflow-hidden">
+        {/* Passbook Section Header */}
+        <div className="border-b border-neutral-200 px-4 py-3 bg-neutral-50/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+          <div>
+            <h4 className="text-sm font-bold text-neutral-900 flex items-center gap-2">
+              <span>{selectedEventId === "all" ? "Consolidated Passbook Ledger" : `Event Passbook: ${selectedEventSummary?.title || "Selected Event"}`}</span>
+              <span className="text-xs font-normal text-neutral-500">({filteredStatement.length} entries)</span>
+            </h4>
+            <p className="text-[11px] text-neutral-500">
+              {selectedEventId === "all"
+                ? "Full transaction history across all events, customer refunds, and platform transfers."
+                : `Audited ticket sales, refunds, and bank settlements strictly for ${selectedEventSummary?.title || "this event"}.`}
+            </p>
+          </div>
+        </div>
+
         {/* Table Toolbar & Search */}
         <div className="border-b border-neutral-200 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-neutral-50/50">
           {/* Filter Tabs */}
@@ -892,23 +1281,32 @@ export default function FinancialsPage() {
       {/* Manual Payout Modal */}
       <ManualPayoutModal
         isOpen={isPayoutModalOpen}
-        onClose={() => setIsPayoutModalOpen(false)}
+        onClose={() => {
+          setIsPayoutModalOpen(false)
+          setPayoutModalEventId(null)
+          setPayoutModalAmount(null)
+        }}
         onSuccess={() => {
           loadStatement()
-          // Also reload community wallet balance
-          supabase
-            .from("communities")
-            .select("id, name, owner_id, wallet_balance")
-            .is("deleted_at", null)
-            .order("name", { ascending: true })
-            .then(({ data }) => {
-              if (data) setCommunities(data as CommunityItem[])
-            })
+          if (selectedCommunityId) {
+            supabase
+              .rpc("get_community_financials", { p_community_id: selectedCommunityId })
+              .then((res) => {
+                if (res.data?.[0]) {
+                  const bal = res.data[0].wallet_balance ?? 0
+                  setSelectedCommunityBalance(bal)
+                  setCommunities((prev) =>
+                    prev.map((c) => (c.id === selectedCommunityId ? { ...c, wallet_balance: bal } : c))
+                  )
+                }
+              })
+          }
         }}
         community={selectedCommunity}
         events={events}
         beneficiary={beneficiary}
-        defaultEventId={selectedEventId === "all" ? null : selectedEventId}
+        defaultEventId={payoutModalEventId}
+        defaultAmountRupees={payoutModalAmount}
       />
     </div>
   )
