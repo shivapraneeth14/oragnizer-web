@@ -57,7 +57,7 @@ BEGIN
         'Attendee'
       ) AS attendee_name,
       prof.email AS attendee_email,
-      prof.phone AS attendee_phone,
+      NULL::TEXT AS attendee_phone,
       r.id AS registration_id,
       d.event_id AS event_id,
       e.title AS event_title,
@@ -145,7 +145,7 @@ BEGIN
         'Attendee'
       ) AS attendee_name,
       prof.email AS attendee_email,
-      prof.phone AS attendee_phone,
+      NULL::TEXT AS attendee_phone,
       r.id AS registration_id,
       r.event_id AS event_id,
       e.title AS event_title,

@@ -82,6 +82,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611010004_fix_booking_hold_reuse.sql",
     "202611010005_fix_financial_statement_refund_debits.sql",
     "202611010006_financial_reconciliation_engine.sql",
+    "202611010007_fix_admin_financial_statement_phone.sql",
   ])
 })
 
@@ -271,6 +272,13 @@ Deno.test("202611010006 financial_reconciliation_engine provides strictly read-o
   assert(fix6.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.run_financial_reconciliation"))
   assert(fix6.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.get_financial_observability_kpis"))
   assert(fix6.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.admin_record_manual_payout"))
+})
+
+Deno.test("202611010007 fix_admin_financial_statement_phone replaces prof.phone with NULL::TEXT", async () => {
+  const fix7 = await read("202611010007_fix_admin_financial_statement_phone.sql")
+  assert(fix7.includes("CREATE OR REPLACE FUNCTION public.get_admin_financial_statement"))
+  assert(!fix7.includes("prof.phone AS attendee_phone"))
+  assert(fix7.includes("NULL::TEXT AS attendee_phone"))
 })
 
 
