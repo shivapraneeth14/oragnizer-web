@@ -1304,6 +1304,7 @@ export default function FinancialsPage() {
         }}
         community={selectedCommunity}
         events={events}
+        eventSummaries={eventBreakdownList}
         beneficiary={beneficiary}
         defaultEventId={payoutModalEventId}
         defaultAmountRupees={payoutModalAmount}

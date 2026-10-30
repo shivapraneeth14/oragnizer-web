@@ -25,6 +25,7 @@ const atomicCheckIn = await read("202610300002_atomic_check_in.sql")
 const adminFinancials = await read("202610300003_admin_financial_ledger_and_payouts.sql")
 const adminCommunities = await read("202610300004_admin_communities_dropdown.sql")
 const adminProfilesAndLedgerFix = await read("202610300005_admin_profiles_rpc_and_fix_ledger.sql")
+const organizerFinancialsAndDispute = await read("202610300006_organizer_financial_statement_and_dispute.sql")
 
 Deno.test("migration version prefixes are unique and ordered", async () => {
   const names = (await Array.fromAsync(Deno.readDir(dir)))
@@ -68,6 +69,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610300003_admin_financial_ledger_and_payouts.sql",
     "202610300004_admin_communities_dropdown.sql",
     "202610300005_admin_profiles_rpc_and_fix_ledger.sql",
+    "202610300006_organizer_financial_statement_and_dispute.sql",
   ])
 })
 
@@ -168,4 +170,12 @@ Deno.test("202610300005 admin_profiles_rpc_and_fix_ledger fixes attendee_phone a
   assert(adminProfilesAndLedgerFix.includes("CREATE OR REPLACE FUNCTION public.get_admin_profiles"))
   assert(adminProfilesAndLedgerFix.includes("GRANT EXECUTE ON FUNCTION public.get_admin_profiles(BOOLEAN, BOOLEAN, BOOLEAN) TO authenticated, service_role;"))
 })
+
+Deno.test("202610300006 organizer_financial_statement_and_dispute deploys organizer RPCs", () => {
+  assert(organizerFinancialsAndDispute.includes("CREATE OR REPLACE FUNCTION public.organizer_dispute_manual_payout"))
+  assert(organizerFinancialsAndDispute.includes("status = 'disputed'"))
+  assert(organizerFinancialsAndDispute.includes("CREATE OR REPLACE FUNCTION public.get_organizer_financial_statement"))
+  assert(organizerFinancialsAndDispute.includes("public.is_community_owner(p_community_id) OR public.is_community_team(p_community_id)"))
+})
+
 
