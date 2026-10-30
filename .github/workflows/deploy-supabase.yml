@@ -40,3 +40,11 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_INTERNAL_IMAGE_REGISTRY: docker.io
+      - name: Delete obsolete edge functions
+        run: |
+          for fn in withdraw-wallet cashfree-webhook sync-payout-status create-booking create-payment-order; do
+            echo "Deleting obsolete function if present: $fn"
+            supabase functions delete "$fn" --project-ref ${{ inputs.project-ref }} || true
+          done
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
