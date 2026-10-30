@@ -77,7 +77,34 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202610310001_cancellation_queue_engine.sql",
     "202610310002_schedule_cancellation_worker.sql",
     "202611010001_incoming_payment_remediation.sql",
+    "202611010002_fix_webhook_processed_at.sql",
+    "202611010003_manual_payout_deduplication.sql",
+    "202611010004_fix_booking_hold_reuse.sql",
   ])
+})
+
+Deno.test("202611010002 fix_webhook_processed_at fixes column name to processed_at", async () => {
+  const fix1 = await read("202611010002_fix_webhook_processed_at.sql")
+  assert(fix1.includes("processed_webhooks (id, provider, event_type, processed_at)"))
+  assert(!fix1.includes("processed_webhooks (id, provider, event_type, created_at)"))
+  assert(fix1.includes("CREATE OR REPLACE FUNCTION public.confirm_payment_from_webhook"))
+  assert(fix1.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.confirm_payment_from_webhook"))
+})
+
+Deno.test("202611010003 manual_payout_deduplication creates scoped partial unique index and RPC duplicate check", async () => {
+  const fix2 = await read("202611010003_manual_payout_deduplication.sql")
+  assert(fix2.includes("uq_payout_items_active_transfer"))
+  assert(fix2.includes("UPPER(TRIM(utr))"))
+  assert(fix2.includes("WHERE status IN ('pending_confirmation', 'success')"))
+  assert(fix2.includes("duplicate_payout_utr"))
+  assert(fix2.includes("CREATE OR REPLACE FUNCTION public.admin_record_manual_payout"))
+})
+
+Deno.test("202611010004 fix_booking_hold_reuse hoists hold reuse check outside payments lookup", async () => {
+  const fix3 = await read("202611010004_fix_booking_hold_reuse.sql")
+  assert(fix3.includes("CREATE OR REPLACE FUNCTION public.reserve_ticket_capacity"))
+  assert(fix3.includes("'reused_hold', true"))
+  assert(fix3.includes("v_reg.status = 'pending' AND v_reg.hold_expires_at > clock_timestamp()"))
 })
 
 Deno.test("202611010001 incoming_payment_remediation defines capacity holds, atomic webhook confirmation, and unique index", async () => {
