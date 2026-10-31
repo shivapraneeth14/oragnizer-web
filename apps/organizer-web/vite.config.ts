@@ -1,10 +1,23 @@
-import { defineConfig } from "vite"
+import { defineConfig } from "vitest/config"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { VitePWA } from "vite-plugin-pwa"
 import path from "path"
 
 export default defineConfig({
+  test: {
+    globals: true,
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    env: {
+      VITE_SUPABASE_URL: "http://127.0.0.1:54321",
+      VITE_SUPABASE_ANON_KEY: "mock-anon-key",
+      VITE_CLOUDINARY_CLOUD_NAME: "test-cloud",
+      VITE_CLOUDINARY_UPLOAD_PRESET: "test-preset",
+      VITE_APP_DEEPLINK_BASE: "cluvo://",
+      VITE_APP_URL: "http://localhost:3000",
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),

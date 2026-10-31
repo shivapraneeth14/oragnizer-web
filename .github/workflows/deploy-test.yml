@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Wait for and verify commit-specific CI completion (all 6 jobs)
+      - name: Wait for and verify commit-specific CI completion (all 7 jobs)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -89,14 +89,15 @@ jobs:
             exit 1
           fi
 
-          # 5. Verify all 6 individual required CI jobs are represented and successful
-          echo "Verifying all 6 required jobs in CI run $RUN_ID..."
+          # 5. Verify all 7 individual required CI jobs are represented and successful
+          echo "Verifying all 7 required jobs in CI run $RUN_ID..."
           JOBS_JSON=$(gh run view "$RUN_ID" --json jobs --jq '.jobs')
 
           REQUIRED_JOBS=(
             "Environment hygiene"
             "Edge-function contract tests"
             "TypeScript type check"
+            "Web automated tests"
             "Vite build"
             "Supabase migration lint"
             "Secret detection"
@@ -115,7 +116,7 @@ jobs:
             echo "  [OK] $job: $JOB_CONCLUSION"
           done
 
-          echo "Dev CI verification passed successfully: all 6 jobs completed with success."
+          echo "Dev CI verification passed successfully: all 7 jobs completed with success."
 
   deploy:
     name: Deploy to Test Supabase

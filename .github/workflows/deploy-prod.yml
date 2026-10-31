@@ -7,8 +7,8 @@ name: Deploy to prod Supabase
 # 1. Manual Dispatch Only: Never triggers automatically on push/merge to main.
 # 2. Confirmation Input: Requires typing "deploy-prod" to initiate.
 # 3. Branch Enforcement: Strictly runnable only on refs/heads/main.
-# 4. Commit-Specific CI Gate: Validates that all 6 jobs in ci.yml (env-hygiene,
-#    deno-tests, typecheck-web, build-web, supabase-migrations, detect-secrets)
+# 4. Commit-Specific CI Gate: Validates that all 7 jobs in ci.yml (env-hygiene,
+#    deno-tests, typecheck-web, test-web, build-web, supabase-migrations, detect-secrets)
 #    have completed with status=success for this EXACT commit SHA before deploying.
 # 5. Local Pre-Flight Check: Executes environment hygiene and contract tests.
 # 6. Protected Environment Gate: Bound to GitHub 'production' environment.
@@ -50,7 +50,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify commit-specific CI completion (all 6 jobs)
+      - name: Verify commit-specific CI completion (all 7 jobs)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -59,7 +59,7 @@ jobs:
 
           if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "null" ]; then
             echo "Error: No CI workflow run found for commit ${{ github.sha }} on main."
-            echo "All required CI jobs (env-hygiene, deno-tests, typecheck-web, build-web, supabase-migrations, detect-secrets) must run and pass on main before deploying."
+            echo "All required CI jobs (env-hygiene, deno-tests, typecheck-web, test-web, build-web, supabase-migrations, detect-secrets) must run and pass on main before deploying."
             exit 1
           fi
 
@@ -101,14 +101,15 @@ jobs:
             exit 1
           fi
 
-          # 5. Verify all 6 individual required CI jobs are represented and successful
-          echo "Verifying all 6 required jobs in CI run $RUN_ID..."
+          # 5. Verify all 7 individual required CI jobs are represented and successful
+          echo "Verifying all 7 required jobs in CI run $RUN_ID..."
           JOBS_JSON=$(gh run view "$RUN_ID" --json jobs --jq '.jobs')
 
           REQUIRED_JOBS=(
             "Environment hygiene"
             "Edge-function contract tests"
             "TypeScript type check"
+            "Web automated tests"
             "Vite build"
             "Supabase migration lint"
             "Secret detection"
@@ -127,7 +128,7 @@ jobs:
             echo "  [OK] $job: $JOB_CONCLUSION"
           done
 
-          echo "Commit-specific CI verification passed successfully: all 6 jobs verified."
+          echo "Commit-specific CI verification passed successfully: all 7 jobs verified."
 
       - name: Pre-flight environment hygiene
         run: ./scripts/check-env-hygiene.sh
