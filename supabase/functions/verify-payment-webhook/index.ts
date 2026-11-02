@@ -313,12 +313,11 @@ Deno.serve(async (req) => {
 
     return new Response("OK", { status: 200 })
   } catch (err) {
-    try {
-      const razorpayHeaderId = req.headers.get("x-razorpay-event-id")
-      if (razorpayHeaderId) {
-        await supabase.from("processed_webhooks").delete().eq("id", razorpayHeaderId)
-      }
-    } catch { /* best effort compensating delete */ }
+    // NOTE: Do NOT delete the processed_webhooks dedup row here. A failed
+    // webhook must keep its claim so Razorpay's automatic retry is recognised
+    // as already-processed and cannot cause duplicate financial side effects.
+    // confirm_payment is idempotent (FOR UPDATE + status guard) and refunds are
+    // claim-guarded, so a retry of an already-completed step is a safe no-op.
     logError("verify-payment-webhook", err)
     return new Response("Internal error", { status: 500 })
   }

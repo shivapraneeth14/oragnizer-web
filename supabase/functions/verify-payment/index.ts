@@ -186,7 +186,10 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({ state, registration_id: registration.id, payment_status: state === "confirmed" ? "success" : payment.status }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         } catch (err) {
           console.error(`verify-payment Razorpay check failed for ${payment.id}:`, err)
-          return new Response(JSON.stringify({ state: "awaiting", registration_id: registration.id, payment_status: payment.status }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+          // Surface a distinct state instead of silently reporting "awaiting":
+          // the client should know the check itself failed (provider down/network)
+          // so it can retry with a clear message rather than looking "stuck".
+          return new Response(JSON.stringify({ state: "provider_error", registration_id: registration.id, payment_status: payment.status }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
         }
       }
     }
