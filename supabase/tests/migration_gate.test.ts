@@ -89,7 +89,59 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611010011_atomic_free_event_registration.sql",
     "202611010012_owner_self_delete_guard.sql",
     "202611010013_owner_self_delete_restrictive_guard.sql",
+    "202611010014_atomic_cancel_and_claim_refund.sql",
+    "202611010015_verified_admin_refund_resolution.sql",
+    "202611010016_cryptographic_ticket_token.sql",
+    "202611010017_concurrency_safe_manual_settlements.sql",
+    "202611020001_harden_payment_rpc_privileges.sql",
+    "202611020002_fix_admin_resolve_refund_task_idor.sql",
+    "202611020003_fix_payment_data_integrity.sql",
+    "202611020004_fix_payout_balance_and_revoke.sql",
+    "202611020005_drop_stale_wallet_overloads.sql",
+    "202611030001_harden_exposed_money_rpcs.sql",
+    "202611030002_fix_reconciliation_rebook_undercount.sql",
+    "202611030003_fix_refund_clawback_payment_id.sql",
   ])
+})
+
+Deno.test("202611010014 atomic cancel and attended refund guard shipped", async () => {
+  const mig = await read("202611010014_atomic_cancel_and_claim_refund.sql")
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.cancel_registration_and_claim_refund"))
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.claim_payment_refund"))
+  assert(mig.includes("not_refundable_attended"))
+  assert(mig.includes("v_reg_status = 'attended'"))
+})
+
+Deno.test("202611010015 verified admin refund resolution shipped", async () => {
+  const mig = await read("202611010015_verified_admin_refund_resolution.sql")
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.admin_adopt_provider_refund"))
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.admin_manual_settlement"))
+  assert(mig.includes("rfnd_"))
+  assert(mig.includes("settlement_method"))
+  assert(mig.includes("reference_number"))
+})
+
+Deno.test("202611010016 cryptographic ticket token shipped", async () => {
+  const mig = await read("202611010016_cryptographic_ticket_token.sql")
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.confirm_payment"))
+  assert(mig.includes("cluvo_"))
+  assert(mig.includes("COALESCE"))
+})
+
+Deno.test("202611010017 concurrency-safe manual settlements, dispute resolution, and event limits shipped", async () => {
+  const mig = await read("202611010017_concurrency_safe_manual_settlements.sql")
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.organizer_confirm_manual_payout"))
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.organizer_dispute_manual_payout"))
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.admin_resolve_payout_dispute"))
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.admin_cancel_manual_payout"))
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.admin_record_manual_payout"))
+  assert(mig.includes("invalid_payout_status"))
+  assert(mig.includes("cancel_disputed_payout"))
+  assert(mig.includes("confirm_received_payout"))
+  assert(mig.includes("insufficient_event_payable_balance"))
+  assert(mig.includes("FOR UPDATE"))
+  assert(!mig.includes("prof.phone AS attendee_phone"))
+  assert(mig.includes("NULL::TEXT AS attendee_phone"))
 })
 
 Deno.test("202611010012 owner_self_delete_guard prevents owners from orphaning community", async () => {
