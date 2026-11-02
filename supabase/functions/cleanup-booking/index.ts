@@ -91,7 +91,11 @@ Deno.serve(async (req) => {
             if (updateErr) throw updateErr
 
             const { data: confirmResult, error: confirmErr } = await supabase
-              .rpc("confirm_payment", { p_payment_id: payment.id })
+              .rpc("confirm_payment", {
+                p_payment_id: payment.id,
+                p_expected_amount: captured.amount,
+                p_expected_currency: captured.currency || "INR",
+              })
 
             if (!confirmErr && confirmResult?.action === "confirmed") {
               await supabase.from("payment_audit_log").insert({

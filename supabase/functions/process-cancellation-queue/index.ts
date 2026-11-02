@@ -153,7 +153,14 @@ Deno.serve(async (req) => {
               const captured = payBody?.items?.find((p: any) => p.status === "captured")
               if (captured) {
                 await supabase.from("payments").update({ razorpay_payment_id: captured.id }).eq("id", payment.id)
-                await supabase.rpc("confirm_payment", { p_payment_id: payment.id })
+                const { data: confirmRes, error: confirmErr } = await supabase.rpc("confirm_payment", {
+                  p_payment_id: payment.id,
+                  p_expected_amount: captured.amount,
+                  p_expected_currency: captured.currency || "INR",
+                })
+                if (confirmErr) throw confirmErr
+                // A mismatched capture must never be silently confirmed + refunded.
+                if (confirmRes?.error) throw new Error(confirmRes.error)
                 payment.status = "success"
                 payment.razorpay_payment_id = captured.id
               }
