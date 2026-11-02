@@ -13,6 +13,7 @@ import {
   resolvePendingPayment,
   type PendingDeps,
   type PendingPaymentRow,
+  type ProviderPayment,
 } from "../functions/_shared/reconcile-pending.ts"
 
 const NOW = 1_800_000_000_000
@@ -31,7 +32,7 @@ function row(overrides: Partial<PendingPaymentRow> = {}): PendingPaymentRow {
 
 interface HarnessOptions {
   order?: { status?: string; amount_paid?: number } | Error
-  payments?: Array<{ id: string; status?: string; amount?: number }> | Error
+  payments?: ProviderPayment[] | Error
   confirm?: { action?: string; error?: string; skipped?: boolean }
   expiryWins?: boolean
 }
@@ -39,6 +40,7 @@ interface HarnessOptions {
 function harness(opts: HarnessOptions = {}) {
   const calls: string[] = []
   const writes: string[] = []
+  let confirmCaptured: ProviderPayment | undefined
 
   const deps: PendingDeps = {
     getOrder: () => {
@@ -56,8 +58,9 @@ function harness(opts: HarnessOptions = {}) {
       writes.push("captured_payment_id")
       return Promise.resolve()
     },
-    confirmPayment: () => {
+    confirmPayment: (_paymentId: string, captured: ProviderPayment) => {
       calls.push("confirmPayment")
+      confirmCaptured = captured
       return Promise.resolve(opts.confirm ?? { action: "confirmed" })
     },
     markExpired: () => {
@@ -84,7 +87,7 @@ function harness(opts: HarnessOptions = {}) {
     now: () => NOW,
   }
 
-  return { deps, calls, writes }
+  return { deps, calls, writes, confirmCaptured: () => confirmCaptured }
 }
 
 // --- pure decision table ---------------------------------------------------
@@ -150,6 +153,21 @@ Deno.test("a paid capture confirms and never writes a failure", async () => {
   assertEquals(out.action, "confirmed")
   assertEquals(h.calls, ["getOrder", "listOrderPayments", "setCapturedPaymentId", "confirmPayment"])
   assertEquals(h.writes, ["captured_payment_id"], "no terminal failure write may happen")
+})
+
+Deno.test("confirm passes the captured amount + currency through (W1 regression)", async () => {
+  const h = harness({
+    order: { status: "paid", amount_paid: 1000 },
+    payments: [{ id: "pay_captured", status: "captured", amount: 1000, currency: "INR" }],
+  })
+
+  const out = await resolvePendingPayment(row(), h.deps)
+
+  assertEquals(out.action, "confirmed")
+  const captured = h.confirmCaptured()
+  assert(captured, "confirmPayment must receive the captured payment for amount verification")
+  assertEquals(captured.amount, 1000)
+  assertEquals(captured.currency, "INR")
 })
 
 Deno.test("a paid order with no captured payment is never cancelled", async () => {

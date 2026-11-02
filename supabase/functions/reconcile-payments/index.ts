@@ -45,8 +45,12 @@ const pendingDeps: PendingDeps = {
       .eq("id", paymentId)
     if (error) throw error
   },
-  confirmPayment: async (paymentId) => {
-    const { data, error } = await supabase.rpc("confirm_payment", { p_payment_id: paymentId })
+  confirmPayment: async (paymentId, captured) => {
+    const { data, error } = await supabase.rpc("confirm_payment", {
+      p_payment_id: paymentId,
+      p_expected_amount: captured.amount ?? null,
+      p_expected_currency: captured.currency || "INR",
+    })
     if (error) return { error: error.message }
     return data as { action?: string; error?: string; skipped?: boolean } | null
   },

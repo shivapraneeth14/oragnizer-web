@@ -16,6 +16,7 @@ export interface ProviderPayment {
   id: string
   status?: string | null
   amount?: number | null
+  currency?: string | null
 }
 
 export interface PendingPaymentRow {
@@ -60,8 +61,13 @@ export interface PendingDeps {
   getOrder(orderId: string): Promise<ProviderOrder | null>
   listOrderPayments(orderId: string): Promise<ProviderPayment[]>
   setCapturedPaymentId(paymentId: string, capturedPaymentId: string): Promise<void>
-  /** Returns the confirm_payment RPC jsonb body (or a transport error). */
-  confirmPayment(paymentId: string): Promise<{ action?: string; error?: string; skipped?: boolean } | null>
+  /** Returns the confirm_payment RPC jsonb body (or a transport error). The
+   * captured provider payment is passed so the RPC can verify the amount and
+   * currency against the stored order (same guard as the webhook + Path C). */
+  confirmPayment(
+    paymentId: string,
+    captured: ProviderPayment,
+  ): Promise<{ action?: string; error?: string; skipped?: boolean } | null>
   /** Guarded: true only when the row was still 'pending' and became 'failed'. */
   markExpired(paymentId: string): Promise<boolean>
   cancelRegistration(registrationId: string): Promise<void>
@@ -119,7 +125,7 @@ export async function resolvePendingPayment(
 
   if (decision.action === "confirm" && captured) {
     await deps.setCapturedPaymentId(pay.id, captured.id)
-    const result = await deps.confirmPayment(pay.id)
+    const result = await deps.confirmPayment(pay.id, captured)
 
     if (result?.error) {
       return { action: "manual", reason: "confirm_failed", error: result.error }
