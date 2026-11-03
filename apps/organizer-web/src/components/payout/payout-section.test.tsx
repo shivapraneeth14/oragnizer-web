@@ -118,4 +118,56 @@ describe("PayoutSection (Organizer Financial Observability & Payout Reconciliati
       expect(screen.getByText(/Dispute recorded\. The admin team has been notified/i)).toBeInTheDocument()
     })
   })
+
+  it("handles race condition gracefully when payout is no longer pending", async () => {
+    const user = userEvent.setup()
+
+    server.use(
+      http.post(`${BASE_URL}/rest/v1/rpc/organizer_confirm_manual_payout`, async () => {
+        return HttpResponse.json({
+          ok: false,
+          error: "invalid_payout_status",
+          message: "Payout is no longer pending confirmation (current status: success).",
+        })
+      })
+    )
+
+    render(<PayoutSection communityId="comm_mock_123" />)
+
+    const confirmBtn = await screen.findByRole("button", { name: /Accept & Confirm Payout/i })
+    await user.click(confirmBtn)
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Payout is no longer pending confirmation \(current status: success\)/i)
+      ).toBeInTheDocument()
+    })
+  })
+
+  it("renders cancelled payout status badge and details correctly", async () => {
+    server.use(
+      http.post(`${BASE_URL}/rest/v1/rpc/get_organizer_financial_statement`, async () => {
+        return HttpResponse.json([
+          {
+            created_at: "2026-10-30T10:00:00Z",
+            transaction_id: "tx-cancelled-payout-1",
+            transaction_type: "payout_cancelled",
+            status: "cancelled",
+            description: "Payout → Tech Corp",
+            reference_id: "UTR-CANCELLED-99",
+            money_in: 0,
+            money_out: 0,
+            admin_notes: "Cancelled by admin due to incorrect IFSC code",
+          },
+        ])
+      })
+    )
+
+    render(<PayoutSection communityId="comm_mock_123" />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Cancelled")).toBeInTheDocument()
+      expect(screen.getByText("Ref: UTR-CANCELLED-99")).toBeInTheDocument()
+    })
+  })
 })

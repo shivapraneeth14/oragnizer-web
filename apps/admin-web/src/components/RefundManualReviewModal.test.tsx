@@ -117,12 +117,12 @@ describe("RefundManualReviewModal (Financial Recovery & Invariants)", () => {
     await user.click(screen.getByRole("button", { name: /Confirm & Resolve Task/i }))
 
     expect(
-      await screen.findByText(/A valid Razorpay Refund ID .* is required for adoption/i)
+      await screen.findByText(/A valid Razorpay Refund ID/i)
     ).toBeInTheDocument()
     expect(mockOnResolved).not.toHaveBeenCalled()
   })
 
-  it("requires settlement notes when selecting manual offline settlement", async () => {
+  it("requires settlement reference and notes when selecting manual offline settlement", async () => {
     const user = userEvent.setup()
 
     render(
@@ -145,19 +145,19 @@ describe("RefundManualReviewModal (Financial Recovery & Invariants)", () => {
     await user.click(submitBtn)
 
     expect(
-      await screen.findByText(/Please specify settlement details .* for manual settlement/i)
+      await screen.findByText(/A valid settlement reference \/ UTR is required/i)
     ).toBeInTheDocument()
     expect(mockOnResolved).not.toHaveBeenCalled()
   })
 
-  it("successfully adopts provider refund with valid Razorpay Refund ID", async () => {
+  it("successfully adopts provider refund with valid Razorpay Refund ID via Edge Function", async () => {
     const user = userEvent.setup()
 
     let capturedPayload: Record<string, unknown> | null = null
     server.use(
-      http.post(`${BASE_URL}/rest/v1/rpc/admin_resolve_refund_task`, async ({ request }) => {
+      http.post(`${BASE_URL}/functions/v1/admin-adopt-refund`, async ({ request }) => {
         capturedPayload = (await request.json()) as Record<string, unknown>
-        return HttpResponse.json({ ok: true, task_id: "task-refund-999" })
+        return HttpResponse.json({ success: true, task_id: "task-refund-999" })
       })
     )
 
@@ -185,11 +185,60 @@ describe("RefundManualReviewModal (Financial Recovery & Invariants)", () => {
     })
 
     expect(capturedPayload).toEqual({
+      task_id: "task-refund-999",
+      razorpay_refund_id: "rfnd_Success123456",
+      notes: "Verified in Razorpay dashboard",
+    })
+  })
+
+  it("successfully records manual settlement with reference number and structured evidence", async () => {
+    const user = userEvent.setup()
+
+    let capturedPayload: Record<string, unknown> | null = null
+    server.use(
+      http.post(`${BASE_URL}/rest/v1/rpc/admin_resolve_refund_task`, async ({ request }) => {
+        capturedPayload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ ok: true, task_id: "task-refund-999" })
+      })
+    )
+
+    render(
+      <RefundManualReviewModal
+        isOpen={true}
+        task={sampleTask}
+        onClose={mockOnClose}
+        onResolved={mockOnResolved}
+      />
+    )
+
+    const manualRadio = screen.getByRole("radio", { name: /Record Offline \/ Direct Settlement/i })
+    await user.click(manualRadio)
+
+    const refInput = screen.getByPlaceholderText(/UTR429381028481/i)
+    await user.type(refInput, "UTR429381028481")
+
+    const notesInput = screen.getByPlaceholderText(/Direct IMPS transfer to customer/i)
+    await user.type(notesInput, "Direct IMPS transfer confirmed with recipient on 2026-10-31")
+
+    const submitBtn = screen.getByRole("button", { name: /Confirm & Resolve Task/i })
+    await user.click(submitBtn)
+
+    await waitFor(() => {
+      expect(mockOnResolved).toHaveBeenCalledTimes(1)
+      expect(mockOnClose).toHaveBeenCalledTimes(1)
+    })
+
+    expect(capturedPayload).toEqual({
       p_task_id: "task-refund-999",
-      p_resolution_type: "adopt_provider_refund",
+      p_resolution_type: "manual_settlement",
       p_admin_id: "admin-auth-uuid-456",
-      p_razorpay_refund_id: "rfnd_Success123456",
-      p_notes: "Verified in Razorpay dashboard",
+      p_razorpay_refund_id: "UTR429381028481",
+      p_notes: "Direct IMPS transfer confirmed with recipient on 2026-10-31",
+      p_evidence: {
+        settlement_method: "bank_transfer",
+        reference_number: "UTR429381028481",
+        notes: "Direct IMPS transfer confirmed with recipient on 2026-10-31",
+      },
     })
   })
 
@@ -239,7 +288,7 @@ describe("RefundManualReviewModal (Financial Recovery & Invariants)", () => {
     const user = userEvent.setup()
 
     server.use(
-      http.post(`${BASE_URL}/rest/v1/rpc/admin_resolve_refund_task`, () => {
+      http.post(`${BASE_URL}/functions/v1/admin-adopt-refund`, () => {
         return HttpResponse.json({
           error: "Database constraint: task is already resolved by another admin.",
         })

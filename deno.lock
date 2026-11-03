@@ -81,6 +81,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@playwright/test@^1.64.1",
         "npm:pg@^8.23.1"
       ]
     },
@@ -90,9 +91,14 @@
           "dependencies": [
             "npm:@supabase/supabase-js@^2.49.1",
             "npm:@tailwindcss/vite@4",
+            "npm:@testing-library/jest-dom@^6.6.3",
+            "npm:@testing-library/react@^16.3.3",
+            "npm:@testing-library/user-event@^14.6.1",
             "npm:@types/react-dom@19",
             "npm:@types/react@19",
             "npm:@vitejs/plugin-react@^4.3.0",
+            "npm:jsdom@26",
+            "npm:msw@^2.7.3",
             "npm:react-dom@19",
             "npm:react-router-dom@^7.1.0",
             "npm:react@19",
@@ -100,7 +106,8 @@
             "npm:typescript@^5.7.0",
             "npm:ui@*",
             "npm:vite-plugin-pwa@2",
-            "npm:vite@6"
+            "npm:vite@6",
+            "npm:vitest@^3.2.7"
           ]
         }
       },
@@ -109,13 +116,18 @@
           "dependencies": [
             "npm:@supabase/supabase-js@^2.49.1",
             "npm:@tailwindcss/vite@4",
+            "npm:@testing-library/jest-dom@^6.6.3",
+            "npm:@testing-library/react@^16.3.3",
+            "npm:@testing-library/user-event@^14.6.1",
             "npm:@types/leaflet@^1.9.22",
             "npm:@types/react-dom@19",
             "npm:@types/react@19",
             "npm:@vitejs/plugin-react@^4.3.0",
             "npm:country-state-city@^3.2.1",
             "npm:html5-qrcode@^2.3.8",
+            "npm:jsdom@26",
             "npm:leaflet@^1.9.4",
+            "npm:msw@^2.7.3",
             "npm:react-dom@19",
             "npm:react-leaflet@5",
             "npm:react-phone-number-input@^3.4.0",
@@ -125,7 +137,8 @@
             "npm:typescript@^5.7.0",
             "npm:ui@*",
             "npm:vite-plugin-pwa@2",
-            "npm:vite@6"
+            "npm:vite@6",
+            "npm:vitest@^3.2.7"
           ]
         }
       },

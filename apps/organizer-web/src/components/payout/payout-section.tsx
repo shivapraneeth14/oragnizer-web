@@ -18,7 +18,7 @@ interface Beneficiary {
 export interface OrganizerFinancialTransaction {
   created_at: string
   transaction_id: string
-  transaction_type: "ticket_sale" | "refund" | "payout_confirmed" | "payout_pending" | "payout_disputed" | "credit" | "debit"
+  transaction_type: "ticket_sale" | "refund" | "payout_confirmed" | "payout_pending" | "payout_disputed" | "payout_cancelled" | "credit" | "debit"
   status: string
   description: string
   reference_id: string | null
@@ -157,6 +157,8 @@ export default function PayoutSection({ communityId }: Props) {
                 ? "payout_confirmed"
                 : p.status === "disputed"
                 ? "payout_disputed"
+                : p.status === "cancelled"
+                ? "payout_cancelled"
                 : "payout_pending",
             status: p.status,
             description: `Payout → ${p.community_beneficiaries?.account_holder || "Bank Transfer"}`,
@@ -168,8 +170,8 @@ export default function PayoutSection({ communityId }: Props) {
             platform_fee: 0,
             organizer_share: p.amount,
             money_in: 0,
-            money_out: p.amount,
-            admin_notes: p.admin_notes,
+            money_out: p.status === "cancelled" ? 0 : p.amount,
+            admin_notes: p.admin_notes || p.resolution_notes,
             refund_reason: p.dispute_reason,
             payment_method: p.payment_method,
             confirmed_at: p.confirmed_at,
@@ -367,7 +369,7 @@ export default function PayoutSection({ communityId }: Props) {
 
       if (error) throw error
       if (!data || data.ok === false) {
-        throw new Error(data?.error || "Failed to confirm payout.")
+        throw new Error(data?.message || data?.error || "Failed to confirm payout.")
       }
 
       setActionSuccessMessage(
@@ -402,7 +404,7 @@ export default function PayoutSection({ communityId }: Props) {
 
       if (error) throw error
       if (!data || data.ok === false) {
-        throw new Error(data?.error || "Failed to report dispute.")
+        throw new Error(data?.message || data?.error || "Failed to report dispute.")
       }
 
       setActionSuccessMessage(
@@ -974,6 +976,8 @@ export default function PayoutSection({ communityId }: Props) {
                               ? "bg-amber-100 text-amber-800"
                               : tx.status === "disputed"
                               ? "bg-red-100 text-red-800"
+                              : tx.status === "cancelled"
+                              ? "bg-neutral-100 text-neutral-600 border border-neutral-300"
                               : "bg-neutral-100 text-neutral-700"
                           }`}
                         >
@@ -981,6 +985,8 @@ export default function PayoutSection({ communityId }: Props) {
                             ? "Action Required"
                             : tx.status === "success"
                             ? "Confirmed"
+                            : tx.status === "cancelled"
+                            ? "Cancelled"
                             : tx.status}
                         </span>
                       </td>
@@ -1174,6 +1180,12 @@ export default function PayoutSection({ communityId }: Props) {
                 <div className="py-2 bg-red-50 rounded-lg p-2.5 text-red-900">
                   <span className="font-bold text-red-900 block mb-0.5">Dispute / Reason:</span>
                   {inspectedTx.refund_reason}
+                </div>
+              )}
+              {inspectedTx.status === "cancelled" && (
+                <div className="py-2 bg-neutral-100 rounded-lg p-2.5 text-neutral-800 border border-neutral-200">
+                  <span className="font-bold text-neutral-900 block mb-0.5">Cancellation Audit:</span>
+                  {inspectedTx.admin_notes || inspectedTx.refund_reason || "Settlement cancelled by administrator. Reserved funds returned to available balance."}
                 </div>
               )}
             </div>

@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react"
+import PayoutDisputeResolutionModal from "./PayoutDisputeResolutionModal"
 
 export interface FinancialTransaction {
   transaction_id: string
   created_at: string
-  transaction_type: "ticket_sale" | "refund" | "payout_confirmed" | "payout_pending" | "payout_disputed"
+  transaction_type: "ticket_sale" | "refund" | "payout_confirmed" | "payout_pending" | "payout_disputed" | "payout_cancelled"
   status: string
   description: string
   reference_id: string | null
@@ -64,10 +65,12 @@ export function formatDateTime(iso: string | null | undefined): string {
 interface Props {
   transaction: FinancialTransaction | null
   onClose: () => void
+  onActionSuccess?: () => void
 }
 
-export default function TransactionDetailDrawer({ transaction, onClose }: Props) {
+export default function TransactionDetailDrawer({ transaction, onClose, onActionSuccess }: Props) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -121,6 +124,14 @@ export default function TransactionDetailDrawer({ transaction, onClose }: Props)
         <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-inset ring-red-600/20">
           <span className="h-1.5 w-1.5 rounded-full bg-red-600"></span>
           Disputed by Organizer
+        </span>
+      )
+    }
+    if (transaction.status === "cancelled") {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600 ring-1 ring-inset ring-neutral-400/20">
+          <span className="h-1.5 w-1.5 rounded-full bg-neutral-400"></span>
+          Settlement Cancelled
         </span>
       )
     }
@@ -450,7 +461,7 @@ export default function TransactionDetailDrawer({ transaction, onClose }: Props)
                   </div>
                 )}
 
-                {/* Confirmation Status */}
+                {/* Confirmation Status & Settlement Actions */}
                 <div className="mt-3 pt-2 border-t border-neutral-100">
                   <p className="text-[11px] font-semibold text-neutral-500">Organizer Confirmation</p>
                   {transaction.confirmed_at ? (
@@ -458,13 +469,40 @@ export default function TransactionDetailDrawer({ transaction, onClose }: Props)
                       ✓ Confirmed by Organizer on {formatDateTime(transaction.confirmed_at)}
                     </p>
                   ) : transaction.status === "disputed" ? (
-                    <p className="text-xs text-rose-700 font-medium mt-0.5">
-                      ⚠️ Disputed: {transaction.refund_reason || "Organizer reported discrepancy"}
-                    </p>
+                    <div className="space-y-2 mt-1">
+                      <p className="text-xs text-rose-700 font-medium">
+                        ⚠️ Disputed: {transaction.refund_reason || "Organizer reported discrepancy"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsDisputeModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700 transition-colors shadow-2xs"
+                      >
+                        Resolve Dispute
+                      </button>
+                    </div>
+                  ) : transaction.status === "cancelled" ? (
+                    <div className="space-y-1 mt-1 text-xs text-neutral-600">
+                      <p className="font-semibold text-neutral-800">
+                        Settlement Cancelled
+                      </p>
+                      <p className="text-[11px] text-neutral-500">
+                        {transaction.admin_notes || "Reserved balance returned to community uncommitted wallet."}
+                      </p>
+                    </div>
                   ) : (
-                    <p className="text-xs text-amber-600 font-medium mt-0.5">
-                      ⏳ Pending digital confirmation by organizer in web dashboard
-                    </p>
+                    <div className="space-y-2 mt-1">
+                      <p className="text-xs text-amber-600 font-medium">
+                        ⏳ Pending digital confirmation by organizer in web dashboard
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsDisputeModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 transition-colors shadow-2xs"
+                      >
+                        Cancel Settlement
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -482,6 +520,18 @@ export default function TransactionDetailDrawer({ transaction, onClose }: Props)
           </div>
         </div>
       </div>
+
+      {/* Payout Dispute Resolution & Cancellation Modal */}
+      <PayoutDisputeResolutionModal
+        isOpen={isDisputeModalOpen}
+        transaction={transaction}
+        onClose={() => setIsDisputeModalOpen(false)}
+        onSuccess={() => {
+          setIsDisputeModalOpen(false)
+          onClose()
+          onActionSuccess?.()
+        }}
+      />
     </div>
   )
 }

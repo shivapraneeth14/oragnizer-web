@@ -42,6 +42,8 @@ export default function RefundManualReviewModal({
   const { user } = useAuth()
   const [resolutionType, setResolutionType] = useState<ResolutionType>("adopt_provider_refund")
   const [razorpayRefundId, setRazorpayRefundId] = useState("")
+  const [settlementMethod, setSettlementMethod] = useState<string>("bank_transfer")
+  const [referenceNumber, setReferenceNumber] = useState("")
   const [notes, setNotes] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,25 +69,58 @@ export default function RefundManualReviewModal({
 
     try {
       if (resolutionType === "adopt_provider_refund") {
-        if (!razorpayRefundId.trim() || razorpayRefundId.trim().length < 5) {
-          throw new Error("A valid Razorpay Refund ID (e.g. rfnd_XXXXXXXXXXXXXX) is required for adoption.")
+        const cleanRefundId = razorpayRefundId.trim()
+        if (!cleanRefundId || cleanRefundId.length < 10 || !/^rfnd_[A-Za-z0-9]+$/.test(cleanRefundId)) {
+          throw new Error("A valid Razorpay Refund ID (must match rfnd_[A-Za-z0-9]+ and be at least 10 characters) is required for adoption.")
         }
+
+        // Invoke server-side verification Edge Function
+        const { data, error: fnError } = await supabase.functions.invoke("admin-adopt-refund", {
+          body: {
+            task_id: task.id,
+            razorpay_refund_id: cleanRefundId,
+            notes: notes.trim() || null,
+          },
+        })
+
+        if (fnError) throw fnError
+        if (data?.error) throw new Error(data.error)
       } else if (resolutionType === "manual_settlement") {
-        if (!notes.trim() || notes.trim().length < 5) {
-          throw new Error("Please specify settlement details (e.g. UTR / IMPS reference and date) for manual settlement.")
+        const cleanRef = referenceNumber.trim()
+        if (!cleanRef || cleanRef.length < 10 || !/^[A-Za-z0-9_-]+$/.test(cleanRef)) {
+          throw new Error("A valid settlement reference / UTR is required (at least 10 alphanumeric characters).")
         }
+        if (!notes.trim() || notes.trim().length < 20) {
+          throw new Error("Detailed settlement notes and evidence are required (minimum 20 characters).")
+        }
+
+        const { data, error: rpcError } = await supabase.rpc("admin_resolve_refund_task", {
+          p_task_id: task.id,
+          p_resolution_type: "manual_settlement",
+          p_admin_id: user.id,
+          p_razorpay_refund_id: cleanRef,
+          p_notes: notes.trim(),
+          p_evidence: {
+            settlement_method: settlementMethod,
+            reference_number: cleanRef,
+            notes: notes.trim(),
+          },
+        })
+
+        if (rpcError) throw rpcError
+        if (data?.error) throw new Error(data.error)
+      } else if (resolutionType === "retry_task") {
+        const { data, error: rpcError } = await supabase.rpc("admin_resolve_refund_task", {
+          p_task_id: task.id,
+          p_resolution_type: "retry_task",
+          p_admin_id: user.id,
+          p_razorpay_refund_id: null,
+          p_notes: notes.trim() || null,
+        })
+
+        if (rpcError) throw rpcError
+        if (data?.error) throw new Error(data.error)
       }
-
-      const { data, error: rpcError } = await supabase.rpc("admin_resolve_refund_task", {
-        p_task_id: task.id,
-        p_resolution_type: resolutionType,
-        p_admin_id: user.id,
-        p_razorpay_refund_id: resolutionType === "adopt_provider_refund" ? razorpayRefundId.trim() : null,
-        p_notes: notes.trim() || null,
-      })
-
-      if (rpcError) throw rpcError
-      if (data?.error) throw new Error(data.error)
 
       onResolved()
       onClose()
@@ -314,21 +349,57 @@ export default function RefundManualReviewModal({
           )}
 
           {resolutionType === "manual_settlement" && (
-            <div className="space-y-1.5 animate-in fade-in duration-150">
-              <label className="block text-xs font-bold text-neutral-700">
-                Settlement Reference & Bank Details <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. Direct IMPS UTR 429381028481 to HDFC Acct ending 4910 on 2026-10-31"
-                className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-900 focus:border-cluvo-primary focus:outline-none focus:ring-1 focus:ring-cluvo-primary"
-                required
-              />
-              <p className="text-[11px] text-neutral-500">
-                Document bank reference number, transfer mode, and recipient confirmation.
-              </p>
+            <div className="space-y-3 animate-in fade-in duration-150">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-neutral-700">
+                  Settlement Method <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={settlementMethod}
+                  onChange={(e) => setSettlementMethod(e.target.value)}
+                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-900 focus:border-cluvo-primary focus:outline-none focus:ring-1 focus:ring-cluvo-primary bg-white"
+                >
+                  <option value="bank_transfer">Bank Transfer (NEFT / IMPS / RTGS)</option>
+                  <option value="upi">UPI Direct Transfer</option>
+                  <option value="cash">Direct Cash Handover</option>
+                  <option value="cheque">Account Payee Cheque</option>
+                  <option value="dispute_resolution">Dispute / Legal Settlement</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-neutral-700">
+                  Bank Reference Number / UTR <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={referenceNumber}
+                  onChange={(e) => setReferenceNumber(e.target.value)}
+                  placeholder="e.g. UTR429381028481 (min 10 chars)"
+                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-xs font-mono font-semibold text-neutral-900 focus:border-cluvo-primary focus:outline-none focus:ring-1 focus:ring-cluvo-primary"
+                  required
+                />
+                <p className="text-[11px] text-neutral-500">
+                  Unique bank UTR or IMPS reference number (minimum 10 alphanumeric characters).
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-neutral-700">
+                  Settlement Details & Justification Notes <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. Direct IMPS transfer to customer HDFC Acct ending 4910 on 2026-10-31 per ticket refund request (min 20 chars)..."
+                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-xs font-semibold text-neutral-900 focus:border-cluvo-primary focus:outline-none focus:ring-1 focus:ring-cluvo-primary"
+                  required
+                />
+                <p className="text-[11px] text-neutral-500">
+                  Comprehensive audit justification for accounting and dispute compliance (minimum 20 characters).
+                </p>
+              </div>
             </div>
           )}
 

@@ -342,7 +342,7 @@ export default function FinancialsPage() {
           payoutsSettled += tx.money_out || 0
         } else if (tx.status === "disputed") {
           payoutsDisputed += tx.money_out || 0
-        } else {
+        } else if (tx.status === "pending_confirmation") {
           payoutsPending += tx.money_out || 0
         }
       }
@@ -1894,6 +1894,10 @@ export default function FinancialsPage() {
                           <span className="inline-flex rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-inset ring-red-600/20">
                             Disputed
                           </span>
+                        ) : tx.status === "cancelled" ? (
+                          <span className="inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold text-neutral-600 ring-1 ring-inset ring-neutral-400/20">
+                            Cancelled
+                          </span>
                         ) : (
                           <span className="inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold text-neutral-600 ring-1 ring-inset ring-neutral-500/20">
                             {tx.status}
@@ -1926,6 +1930,22 @@ export default function FinancialsPage() {
       <TransactionDetailDrawer
         transaction={inspectedTx}
         onClose={() => setInspectedTx(null)}
+        onActionSuccess={() => {
+          loadStatement()
+          if (selectedCommunityId) {
+            supabase
+              .rpc("get_community_financials", { p_community_id: selectedCommunityId })
+              .then((res) => {
+                if (res.data?.[0]) {
+                  const bal = res.data[0].wallet_balance ?? 0
+                  setSelectedCommunityBalance(bal)
+                  setCommunities((prev) =>
+                    prev.map((c) => (c.id === selectedCommunityId ? { ...c, wallet_balance: bal } : c))
+                  )
+                }
+              })
+          }
+        }}
       />
 
       {/* Manual Payout Modal */}

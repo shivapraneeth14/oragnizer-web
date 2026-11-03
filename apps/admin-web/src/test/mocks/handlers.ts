@@ -94,6 +94,24 @@ export const handlers = [
     })
   }),
 
+  http.post(`${BASE_URL}/functions/v1/admin-adopt-refund`, async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>
+    if (!body.task_id) {
+      return HttpResponse.json({ error: "Task ID required" }, { status: 400 })
+    }
+    const cleanRefundId = String(body.razorpay_refund_id ?? "").trim()
+    if (!cleanRefundId || cleanRefundId.length < 10 || !/^rfnd_[A-Za-z0-9]+$/.test(cleanRefundId)) {
+      return HttpResponse.json({ error: "Invalid Razorpay Refund ID format" }, { status: 400 })
+    }
+    return HttpResponse.json({
+      success: true,
+      task_id: body.task_id,
+      refund_id: cleanRefundId,
+      status: "processed",
+      amount: 50000,
+    })
+  }),
+
   http.post(`${BASE_URL}/rest/v1/rpc/get_financial_observability_kpis`, () => {
     return HttpResponse.json({
       system_health: "HEALTHY",

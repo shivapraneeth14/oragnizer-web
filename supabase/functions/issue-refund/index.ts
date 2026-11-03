@@ -102,15 +102,52 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Not authorized to refund this payment" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
+    // REF-001 & REF-002: Atomically cancel registration (releasing ticket & QR, decrementing
+    // capacity exactly once) and acquire the refund claim in one database transaction.
+    const { data: cancelClaimResult, error: cancelClaimErr } = await supabase.rpc(
+      "cancel_registration_and_claim_refund",
+      {
+        p_payment_id: payment.id,
+        p_caller_id: user.id,
+      }
+    )
+    if (cancelClaimErr) {
+      console.error("cancel_registration_and_claim_refund error:", cancelClaimErr)
+      return new Response(JSON.stringify({ error: "Failed to cancel registration and claim refund" }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+    if (cancelClaimResult?.error) {
+      if (cancelClaimResult.error === "not_refundable_attended") {
+        return new Response(JSON.stringify({ error: "Cannot refund — this attendee has already attended the event." }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+      if (cancelClaimResult.error === "already_cancelled") {
+        return new Response(JSON.stringify({ error: "Registration is already cancelled" }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+      if (String(cancelClaimResult.error).startsWith("Unauthorized")) {
+        return new Response(JSON.stringify({ error: "Not authorized to refund this payment" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      }
+      return new Response(JSON.stringify({ error: cancelClaimResult.message || cancelClaimResult.error }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
     let outcome
     try {
-      outcome = await attemptRefund(supabase, payment, refundAmountForPayment(payment), "organizer_issue_refund")
+      outcome = await attemptRefund(
+        supabase,
+        payment,
+        refundAmountForPayment(payment),
+        "organizer_issue_refund",
+        { attempt: cancelClaimResult.claim_attempt }
+      )
     } catch (err) {
       console.error("issue-refund error:", err)
       await supabase.from("payment_audit_log").insert({
         action: "refund_failed",
         payment_id: payment.id,
-        details: { error: String(err), triggered_by: user.id, event_id: event.id },
+        details: {
+          error: String(err),
+          triggered_by: user.id,
+          event_id: event.id,
+          note: "Registration cancelled atomically — reconcile will retry refund",
+        },
       })
       return new Response(JSON.stringify({ error: "Something went wrong. Please try again." }), { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
@@ -136,6 +173,18 @@ Deno.serve(async (req) => {
         },
       })
     }
+
+    await supabase.from("audit_log").insert({
+      actor_id: user.id,
+      action: "registration_cancelled",
+      target_type: "registration",
+      target_id: registration.id,
+      details: {
+        reason: "organizer_issue_refund",
+        payment_id: payment.id,
+        decremented_capacity: cancelClaimResult.decremented_capacity,
+      },
+    })
 
     if (registration.user_id) {
       await supabase.from("notifications").insert({
