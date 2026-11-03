@@ -270,3 +270,25 @@ Deno.test("legacy failed row (no persisted due) keeps the historical fallback", 
     reason: "reconcile_refund_retry",
   })
 })
+
+Deno.test("boundary property: confirmed refunds exactly the ticket; never-confirmed exactly the total", async () => {
+  const { refundAmountForPayment } = await importAttempt()
+  const ticketPrices = [0, 1, 50000, 9999900]
+  const commissions = [0, 6, 100]
+
+  for (const ticket of ticketPrices) {
+    for (const pct of commissions) {
+      // Same integer-paise fee formula as _shared/fees.ts and mobile utils.
+      const fee = Math.round((ticket * pct) / 100)
+      const amount = ticket + fee
+
+      const confirmed = refundAmountForPayment({ amount, platform_fee: fee, organizer_share: ticket })
+      const neverConfirmed = refundAmountForPayment({ amount, platform_fee: fee, organizer_share: null })
+
+      assertEquals(confirmed, ticket, `ticket=${ticket} pct=${pct}: confirmed refund = ticket`)
+      assertEquals(neverConfirmed, amount, `ticket=${ticket} pct=${pct}: never-confirmed refund = total`)
+      assert(confirmed <= amount && neverConfirmed <= amount, "refund never exceeds the charge")
+      assert(amount - confirmed === fee, "the kept amount is exactly the platform fee")
+    }
+  }
+})
