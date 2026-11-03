@@ -224,6 +224,7 @@ Deno.serve(async (req) => {
 
           await supabase.from("refund_task_queue").update({
             status: "completed",
+            amount: refundAmountForPayment(payment),
             razorpay_refund_id: outcome.refund_id,
             error_message: null,
             updated_at: new Date().toISOString(),
