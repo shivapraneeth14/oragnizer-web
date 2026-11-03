@@ -1,6 +1,6 @@
 import { optionalEnv, requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
-import { attemptRefund } from "../_shared/refunds.ts"
+import { attemptRefund, refundAmountForPayment } from "../_shared/refunds.ts"
 import {
   razorpayGet,
   RazorpayClientError,
@@ -187,8 +187,9 @@ Deno.serve(async (req) => {
             }
           }
 
-          // Issue refund via attemptRefund
-          const outcome = await attemptRefund(supabase, payment, task.amount, "event_cancellation")
+          // Issue refund via attemptRefund (ticket price only — fee kept for
+          // a confirmed booking; full amount for a never-confirmed capture).
+          const outcome = await attemptRefund(supabase, payment, refundAmountForPayment(payment), "event_cancellation")
 
           if (outcome.status === "conflict") {
             // Concurrent claim lock active: backoff 30s
@@ -210,10 +211,10 @@ Deno.serve(async (req) => {
           const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
           if (platformFee > 0) {
             await supabase.from("payment_audit_log").insert({
-              action: "commission_reversed",
+              action: "platform_fee_kept",
               payment_id: payment.id,
               details: {
-                commission_amount: platformFee,
+                fee_amount: platformFee,
                 reason: "event_cancellation",
                 job_id: task.job_id,
                 task_id: task.id,

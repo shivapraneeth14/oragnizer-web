@@ -761,7 +761,7 @@ export default function PayoutSection({ communityId }: Props) {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="rounded-xl bg-neutral-50 p-3">
-                <span className="text-[11px] font-medium text-neutral-400">Gross Ticket Sales</span>
+                <span className="text-[11px] font-medium text-neutral-400">Total Collected (incl. fee)</span>
                 <p className="text-base font-bold text-neutral-900 mt-0.5">
                   {formatCurrency(selectedEventSummary.gross)}
                 </p>
@@ -852,7 +852,7 @@ export default function PayoutSection({ communityId }: Props) {
                 {/* 4 Mini KPIs */}
                 <div className="mt-3.5 grid grid-cols-2 gap-2 text-[11px] border-t border-neutral-100 pt-3">
                   <div>
-                    <span className="text-neutral-400 block">Gross Sales</span>
+                    <span className="text-neutral-400 block">Total Collected</span>
                     <span className="font-semibold text-neutral-900">{formatCurrency(ev.gross)}</span>
                   </div>
                   <div>

@@ -556,7 +556,7 @@ export default function FinancialsPage() {
       "Attendee Phone",
       "Razorpay / Bank Ref (UTR)",
       "Secondary Ref (Order ID)",
-      "Gross Amount (INR)",
+      "Total Collected (INR)",
       "Platform Fee 6% (INR)",
       "Money In (INR)",
       "Money Out (INR)",
@@ -846,12 +846,12 @@ export default function FinancialsPage() {
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
                 <div className="rounded-xl border border-neutral-100 bg-neutral-50/50 p-3">
                   <span className="block text-[11px] font-bold uppercase tracking-wider text-neutral-400">
-                    Gross Revenue
+                    Total Collected (incl. fee)
                   </span>
                   <div className="mt-1 text-sm font-extrabold text-neutral-900">
                     {formatCurrency(reconReport.settlement_overview.gross_revenue_paise)}
                   </div>
-                  <span className="text-[10px] text-neutral-500">Total customer sales</span>
+                  <span className="text-[10px] text-neutral-500">Ticket price + platform fee</span>
                 </div>
 
                 <div className="rounded-xl border border-neutral-100 bg-neutral-50/50 p-3">
@@ -1337,15 +1337,15 @@ export default function FinancialsPage() {
 
           {/* 6 Event KPI Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-4">
-            {/* 1. Gross Ticket Sales */}
+            {/* 1. Total Collected (ticket + platform fee) */}
             <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
               <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide">
-                Gross Sales
+                Total Collected
               </span>
               <p className="mt-1 text-lg font-black text-neutral-900">
                 {formatCurrency(selectedEventSummary.gross)}
               </p>
-              <p className="text-[10px] text-neutral-400 mt-0.5">Money in</p>
+              <p className="text-[10px] text-neutral-400 mt-0.5">Ticket + fee</p>
             </div>
 
             {/* 2. Platform Fee Earned */}
@@ -1418,10 +1418,10 @@ export default function FinancialsPage() {
         <>
           {/* Financial KPI Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-            {/* Gross Sales */}
+            {/* Total Collected (ticket + platform fee) */}
             <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-xs">
               <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
-                Gross Ticket Sales
+                Total Collected (incl. fee)
               </span>
               <p className="mt-1.5 text-xl font-black text-neutral-900">
                 {formatCurrency(kpis.grossRevenue)}
@@ -1509,7 +1509,7 @@ export default function FinancialsPage() {
                   <thead>
                     <tr className="border-b border-neutral-200 bg-neutral-50/70 text-neutral-500 font-bold uppercase tracking-wider">
                       <th className="py-2.5 px-3">Event Name</th>
-                      <th className="py-2.5 px-3 text-right">Gross Sales</th>
+                      <th className="py-2.5 px-3 text-right">Total Collected</th>
                       <th className="py-2.5 px-3 text-right">Cluvo Fee</th>
                       <th className="py-2.5 px-3 text-right">Refunds</th>
                       <th className="py-2.5 px-3 text-right font-black">Net Total</th>

@@ -75,30 +75,31 @@ export interface RefundOutcome {
 // --- Refund-amount policy -----------------------------------------------------
 // Business rule, applied identically by every call site, retry and reconcile
 // pass:
-//   organizer-cancelled  -> refund the FULL amount (platform fee included):
-//     event_cancellation, organizer_issue_refund, capacity_full,
-//     event_cancelled, registration_cancelled (auto full refund on a capture
-//     that landed on a cancelled booking).
-//   customer-cancelled   -> refund amount MINUS the persisted platform fee:
-//     registration_cancellation (self-cancel via cancel-registration).
-// The cancellation type is persisted on payments.refund_reason at the first
-// claim and never overwritten; retries always re-use it (and the persisted
-// refund_amount_due) instead of re-deriving.
+//   booking confirmed (organizer_share IS SET) -> refund the ticket price only;
+//     the platform fee is NEVER refunded. Applies to customer self-cancel,
+//     organizer event-cancellation, and organizer-initiated refunds.
+//   booking never confirmed (organizer_share NULL) -> refund the FULL amount
+//     (platform fee included). Applies to capacity-full and a capture that
+//     landed on an already-cancelled/closed booking (customer never got a
+//     ticket).
+// The owed amount is persisted on payments.refund_amount_due at the first claim
+// and never overwritten; retries always re-use it instead of re-deriving.
 export type RefundPolicy = "customer" | "organizer"
 
 export function refundPolicyForReason(reason: string | null | undefined): RefundPolicy {
   return reason === "registration_cancellation" ? "customer" : "organizer"
 }
 
-// The exact customer-owed amount under a policy, from the stored breakdown —
-// never a recomputed percentage.
-export function refundAmountForPolicy(
-  policy: RefundPolicy,
-  payment: { amount: number | null | undefined; platform_fee?: number | null },
-): number {
-  const amount = Math.max(Number(payment.amount ?? 0), 0)
-  if (policy === "customer") return customerOwedAmount(payment)
-  return amount
+// The exact amount to refund, from the stored breakdown — never a recomputed
+// percentage. organizer_share is set only when confirm_payment succeeded, so
+// it is the definitive "did the customer get a ticket" signal.
+export function refundAmountForPayment(payment: {
+  amount: number | null | undefined
+  platform_fee?: number | null
+  organizer_share?: number | null
+}): number {
+  if (payment.organizer_share != null) return Math.max(Number(payment.organizer_share), 0)
+  return Math.max(Number(payment.amount ?? 0), 0)
 }
 
 export function customerOwedAmount(payment: {

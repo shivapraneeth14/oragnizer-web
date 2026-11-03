@@ -28,7 +28,7 @@ describe("FinancialsPage (Admin Financial Observability & Control)", () => {
 
     // Check KPI cards render
     await waitFor(() => {
-      expect(screen.getByText("Gross Ticket Sales")).toBeInTheDocument()
+      expect(screen.getByText("Total Collected (incl. fee)")).toBeInTheDocument()
       expect(screen.getByText("Platform Fees (6%)")).toBeInTheDocument()
       expect(screen.getByText("Payouts Settled")).toBeInTheDocument()
     })

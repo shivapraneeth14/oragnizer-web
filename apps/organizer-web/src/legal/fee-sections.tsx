@@ -34,9 +34,9 @@ export const feeSections: LegalSection[] = [
       <p>
         If an attendee cancels their own registration more than 24 hours before
         the event starts, the ticket price is refunded to them and the platform
-        fee is kept. If you cancel the event, every non-attended registration is
-        refunded in full — including the platform fee — and your wallet is
-        debited for the refunded share.
+        fee is kept. If you cancel the event, each non-attended registration is
+        refunded the ticket price only — the platform fee is not refunded — and
+        your wallet is debited for the ticket price you received.
       </p>
     ),
   },

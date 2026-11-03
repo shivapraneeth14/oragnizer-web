@@ -102,6 +102,8 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611030002_fix_reconciliation_rebook_undercount.sql",
     "202611030003_fix_refund_clawback_payment_id.sql",
     "202611030004_fix_refund_clawback_uncredited.sql",
+    "202611040001_organizer_refund_keeps_fee.sql",
+    "202611040002_statement_refund_debit_fee_kept.sql",
   ])
 })
 

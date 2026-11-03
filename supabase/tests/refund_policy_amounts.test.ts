@@ -1,10 +1,15 @@
-// P3: refund policy integrity — organizer vs customer amounts, retries, and
-// the webhook/reconcile paths. Run:
+// P3: refund policy integrity — the amount refunded depends on whether the
+// customer was actually issued a ticket, not on who cancelled. Run:
 //   deno test --allow-env supabase/tests/refund_policy_amounts.test.ts
 //
 // The rule (one place, all call sites/retries):
-//   organizer-cancelled -> FULL amount incl. platform fee
-//   customer-cancelled  -> amount MINUS the persisted platform fee
+//   booking confirmed (organizer_share IS SET)
+//       -> refund the TICKET PRICE only; the platform fee is never refunded.
+//          Applies to customer self-cancel, organizer event-cancellation and
+//          organizer-initiated refunds alike.
+//   booking never confirmed (organizer_share IS NULL)
+//       -> refund the FULL amount (platform fee included), because the customer
+//          never got a ticket (capacity-full, late capture after cancellation).
 // Persistence (refund_reason/refund_amount_due written once by
 // claim_payment_refund, never overwritten) is enforced by migration
 // 202610220004; here the claim mock mirrors its COALESCE-once semantics.
@@ -51,13 +56,20 @@ function makeProvider(opts: { failIssues?: number } = {}) {
   return state
 }
 
-function makeDb(init: { refund_reason?: string | null; refund_amount_due?: number | null } = {}) {
+function makeDb(
+  init: {
+    refund_reason?: string | null
+    refund_amount_due?: number | null
+    organizer_share?: number | null
+  } = {},
+) {
   const row = {
     id: "pay_1",
     razorpay_payment_id: "payid_1",
     status: "success",
     amount: AMOUNT,
     platform_fee: FEE,
+    organizer_share: init.organizer_share === undefined ? OWED : init.organizer_share,
     refund_claim_state: "none",
     refund_claim_at: null as number | null,
     refund_status: null as string | null,
@@ -111,38 +123,45 @@ function makeDb(init: { refund_reason?: string | null; refund_amount_due?: numbe
 // must happen AFTER the Deno.env.set calls above.
 const importAttempt = () => import("../functions/_shared/refunds.ts")
 
-Deno.test("policy mapping: only customer self-cancel excludes the fee", async () => {
-  const { refundPolicyForReason, customerOwedAmount } = await importAttempt()
-  assertEquals(refundPolicyForReason("registration_cancellation"), "customer")
-  for (const r of ["event_cancellation", "organizer_issue_refund", "capacity_full", "event_cancelled", "registration_cancelled", null]) {
-    assertEquals(refundPolicyForReason(r), "organizer", `${r} -> full refund`)
-  }
-  assertEquals(customerOwedAmount({ amount: AMOUNT, platform_fee: FEE }), OWED)
+Deno.test("refund amount: confirmed booking refunds the ticket price only", async () => {
+  const { refundAmountForPayment } = await importAttempt()
+  assertEquals(
+    refundAmountForPayment({ amount: AMOUNT, platform_fee: FEE, organizer_share: OWED }),
+    OWED,
+    "confirmed -> ticket price, fee kept",
+  )
 })
 
-Deno.test("organizer cancellation refunds the FULL amount including the fee", async () => {
+Deno.test("refund amount: never-confirmed capture refunds the full amount", async () => {
+  const { refundAmountForPayment } = await importAttempt()
+  assertEquals(
+    refundAmountForPayment({ amount: AMOUNT, platform_fee: FEE, organizer_share: null }),
+    AMOUNT,
+    "never confirmed -> full amount incl. fee",
+  )
+})
+
+Deno.test("organizer cancellation refunds the ticket price, NOT the fee", async () => {
   const provider = makeProvider()
   const db = makeDb()
-  const { attemptRefund, refundPolicyForReason, refundAmountForPolicy } = await importAttempt()
+  const { attemptRefund, refundAmountForPayment } = await importAttempt()
 
-  const policy = refundPolicyForReason("event_cancellation")
-  const amount = refundAmountForPolicy(policy, db.row)
-  assertEquals(amount, AMOUNT, "full amount, fee included")
+  const amount = refundAmountForPayment(db.row)
+  assertEquals(amount, OWED, "ticket only, fee kept")
 
   const out = await attemptRefund({ rpc: db.rpc.bind(db) } as any, db.row as any, amount, "event_cancellation")
   assertEquals(out.status, "issued")
-  assertEquals(provider.bodies[0].amount, AMOUNT, "provider refunded the full 11000")
-  assertEquals(db.row.refunded_amount, AMOUNT)
+  assertEquals(provider.bodies[0].amount, OWED, "provider refunded 10000, never 11000")
+  assertEquals(db.row.refunded_amount, OWED)
   assertEquals(db.row.refund_amount_due, null, "settled due cleared")
 })
 
-Deno.test("customer self-cancel refunds amount MINUS the platform fee", async () => {
+Deno.test("customer self-cancel refunds the ticket price (fee kept)", async () => {
   const provider = makeProvider()
   const db = makeDb()
-  const { attemptRefund, refundPolicyForReason, refundAmountForPolicy } = await importAttempt()
+  const { attemptRefund, refundAmountForPayment } = await importAttempt()
 
-  const policy = refundPolicyForReason("registration_cancellation")
-  const amount = refundAmountForPolicy(policy, db.row)
+  const amount = refundAmountForPayment(db.row)
   assertEquals(amount, OWED, "ticket only, fee kept")
 
   const out = await attemptRefund({ rpc: db.rpc.bind(db) } as any, db.row as any, amount, "registration_cancellation")
@@ -153,15 +172,18 @@ Deno.test("customer self-cancel refunds amount MINUS the platform fee", async ()
   assertEquals(db.row.refund_amount_due, null)
 })
 
-Deno.test("webhook auto-refund on a cancelled capture is FULL (organizer policy)", async () => {
-  const { refundPolicyForReason, refundAmountForPolicy } = await importAttempt()
+Deno.test("webhook auto-refund on a never-confirmed capture is FULL", async () => {
+  const { refundAmountForPayment } = await importAttempt()
   for (const reason of ["registration_cancelled", "capacity_full", "event_cancelled"]) {
-    const policy = refundPolicyForReason(reason)
-    assertEquals(refundAmountForPolicy(policy, { amount: AMOUNT, platform_fee: FEE }), AMOUNT)
+    assert(reason)
+    assertEquals(
+      refundAmountForPayment({ amount: AMOUNT, platform_fee: FEE, organizer_share: null }),
+      AMOUNT,
+    )
   }
 })
 
-Deno.test("a failed customer refund retries EXACTLY the owed amount (no fee leak)", async () => {
+Deno.test("a failed refund retries EXACTLY the persisted amount (no fee leak)", async () => {
   const provider = makeProvider({ failIssues: 1 })
   const db = makeDb()
   const { attemptRefund, refundRetryPlan } = await importAttempt()
@@ -204,34 +226,18 @@ Deno.test("claim persistence is COALESCE-once: a later claim cannot flip reason/
   assertEquals(db.row.refund_amount_due, OWED, "owed amount immutable after first claim")
 })
 
-Deno.test("a failed customer refund retries the persisted policy, not a re-derivation", async () => {
-  const provider = makeProvider({ failIssues: 1 })
-  const db = makeDb({ refund_reason: "registration_cancellation", refund_amount_due: OWED })
-  const { attemptRefund, refundRetryPlan } = await importAttempt()
-  const supabase = { rpc: db.rpc.bind(db) }
-
-  await attemptRefund(supabase as any, db.row as any, OWED, "registration_cancellation").catch(() => {})
-  const plan = refundRetryPlan(db.row)
-  assertEquals(plan, { amount: OWED, reason: "registration_cancellation" })
-
-  const retry = await attemptRefund(supabase as any, db.row as any, plan.amount, plan.reason)
-  assertEquals(retry.status, "issued")
-  assertEquals(provider.bodies.map((b) => b.amount), [OWED, OWED], "never escalates to full 11000")
-  assertEquals(db.row.refund_reason, "registration_cancellation")
-})
-
-Deno.test("organizer refund retries the full amount", async () => {
+Deno.test("a failed organizer refund retries the ticket amount, not the full amount", async () => {
   const provider = makeProvider({ failIssues: 1 })
   const db = makeDb()
   const { attemptRefund, refundRetryPlan } = await importAttempt()
   const supabase = { rpc: db.rpc.bind(db) }
 
-  await attemptRefund(supabase as any, db.row as any, AMOUNT, "event_cancellation").catch(() => {})
+  await attemptRefund(supabase as any, db.row as any, OWED, "event_cancellation").catch(() => {})
   const plan = refundRetryPlan(db.row)
-  assertEquals(plan, { amount: AMOUNT, reason: "event_cancellation" })
+  assertEquals(plan, { amount: OWED, reason: "event_cancellation" })
   const retry = await attemptRefund(supabase as any, db.row as any, plan.amount, plan.reason)
   assertEquals(retry.status, "issued")
-  assertEquals(provider.bodies.map((b) => b.amount), [AMOUNT, AMOUNT])
+  assertEquals(provider.bodies.map((b) => b.amount), [OWED, OWED])
 })
 
 Deno.test("concurrent retries after a failure still refund exactly once", async () => {

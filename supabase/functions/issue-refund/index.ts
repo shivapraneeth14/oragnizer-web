@@ -1,7 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { attemptRefund } from "../_shared/refunds.ts"
+import { attemptRefund, refundAmountForPayment } from "../_shared/refunds.ts"
 import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
 
     let outcome
     try {
-      outcome = await attemptRefund(supabase, payment, payment.amount, "organizer_issue_refund")
+      outcome = await attemptRefund(supabase, payment, refundAmountForPayment(payment), "organizer_issue_refund")
     } catch (err) {
       console.error("issue-refund error:", err)
       await supabase.from("payment_audit_log").insert({
@@ -127,12 +127,12 @@ Deno.serve(async (req) => {
     const platformFee = Math.max(Number(payment.platform_fee ?? 0), 0)
     if (platformFee > 0) {
       await supabase.from("payment_audit_log").insert({
-        action: "commission_reversed",
+        action: "platform_fee_kept",
         payment_id: payment.id,
         details: {
-          commission_amount: platformFee,
+          fee_amount: platformFee,
           reason: "organizer_issue_refund",
-          note: `Platform commission zeroed — organizer-initiated refund of ₹${(baseAmount / 100).toFixed(0)} includes our fee`,
+          note: `Platform fee kept — organizer-initiated refund of ₹${(baseAmount / 100).toFixed(0)} refunds the ticket price only; the ₹${(platformFee / 100).toFixed(0)} fee is not refunded`,
         },
       })
     }

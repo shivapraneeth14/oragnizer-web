@@ -409,7 +409,7 @@ export default function ManualPayoutModal({
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
                       <div>
-                        <span className="text-neutral-400 block">Gross Ticket Sales</span>
+                        <span className="text-neutral-400 block">Total Collected (incl. fee)</span>
                         <span className="font-semibold text-neutral-800">
                           {formatCurrency(activeEventSummary.gross)}
                         </span>
