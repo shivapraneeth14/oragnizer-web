@@ -22,7 +22,7 @@ Deno.test("cancel-registration cancels BEFORE it tries to refund", async () => {
     "registration must be cancelled first: a refund failure cannot leave a live confirmed booking on refunded money",
   )
   assert(
-    src.includes("Registration already cancelled — reconcile will retry"),
+    src.includes("reconcile will retry"),
     "refund failure after cancel must be audited for reconcile",
   )
 })

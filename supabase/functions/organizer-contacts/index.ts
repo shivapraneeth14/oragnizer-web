@@ -8,13 +8,6 @@ const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
 const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-function json(body: unknown, status = 200) {
-  const corsHeaders = getCorsHeaders(undefined)
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
-  })
-}
 
 const TEAM_ROLES = ["OWNER", "ORGANIZER", "MODERATOR"]
 const CHUNK = 200
@@ -35,7 +28,14 @@ async function inChunks<T>(
 // client can no longer read profiles.email directly
 // (202610120005_profiles_email_is_admin_scope.sql).
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return json(null, 204)
+  const corsHeaders = getCorsHeaders(req)
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    })
+
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405)
 
   try {

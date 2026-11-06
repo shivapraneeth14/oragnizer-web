@@ -117,6 +117,29 @@ Deno.test("deletionPendingResponse is a 409 with deletion_grace flag", async () 
   assertEquals(body.deletion_grace, true)
 })
 
+Deno.test("deletion responses carry CORS headers so browsers can read them", () => {
+  // Regression: a 409/403 without CORS headers surfaces in the browser as a
+  // opaque "CORS error" instead of the real deletion-grace message.
+  for (const res of [deletionPendingResponse(), deletionGraceForbiddenResponse()]) {
+    assert(res.headers.get("Access-Control-Allow-Origin") !== null)
+    assertStringIncludes(res.headers.get("Access-Control-Allow-Headers") ?? "", "apikey")
+  }
+})
+
+Deno.test("deletion responses echo the requesting origin", () => {
+  const req = new Request("https://api.example.com", {
+    headers: { origin: "http://localhost:5174" },
+  })
+  assertEquals(
+    deletionPendingResponse(req).headers.get("Access-Control-Allow-Origin"),
+    "http://localhost:5174",
+  )
+  assertEquals(
+    deletionGraceForbiddenResponse(req).headers.get("Access-Control-Allow-Origin"),
+    "http://localhost:5174",
+  )
+})
+
 Deno.test("deletionGraceForbiddenResponse is a 403 with deletion_grace flag", async () => {
   const res = deletionGraceForbiddenResponse()
   assertEquals(res.status, 403)

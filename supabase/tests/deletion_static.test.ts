@@ -57,6 +57,13 @@ Deno.test("admin restore clears grace/purge state and audits without email", () 
   assert(!adminUndelete.includes("details: { email"))
 })
 
+Deno.test("admin restore uses the shared CORS helper (apikey allowed)", () => {
+  // Regression: a hardcoded allow-list without `apikey` made browsers block
+  // the restore POST at preflight, leaving the account stuck in deletion grace.
+  assert(adminUndelete.includes("getCorsHeaders"))
+  assert(!adminUndelete.includes('"Access-Control-Allow-Headers": "Content-Type, Authorization"'))
+})
+
 Deno.test("admin list supports scheduled-only and excludes grace from active", () => {
   assert(adminList.includes("scheduled_only"))
   assert(adminList.includes('.not("deletion_grace_started_at", "is", null)'))
