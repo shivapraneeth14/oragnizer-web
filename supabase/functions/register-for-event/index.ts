@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse(req)
 
     const { event_id } = await req.json()
 

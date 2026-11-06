@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse(req)
 
     const {
       community_name, category, description,

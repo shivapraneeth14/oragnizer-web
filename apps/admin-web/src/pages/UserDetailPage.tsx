@@ -47,14 +47,24 @@ export default function UserDetailPage() {
     setActionError("")
     const { data: { session } } = await supabase.auth.getSession()
     const { supabaseFetch } = await import("../supabase-fetch")
-    const res = await supabaseFetch("/functions/v1/admin-delete-user", session?.access_token, { user_id: id })
-    const result = await res.json()
-    setDeleting(false)
-    if (result.success) {
-      setConfirmDelete(false)
-      await loadProfile()
-    } else {
-      setActionError(result.error || "Something went wrong.")
+    try {
+      const res = await supabaseFetch("/functions/v1/admin-delete-user", session?.access_token, { user_id: id })
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}))
+        setActionError(errorBody.error || `Request failed (${res.status}). Please try again.`)
+        return
+      }
+      const result = await res.json()
+      if (result.success) {
+        setConfirmDelete(false)
+        await loadProfile()
+      } else {
+        setActionError(result.error || "Something went wrong.")
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Request timed out. Please try again.")
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -64,17 +74,27 @@ export default function UserDetailPage() {
     setActionError("")
     const { data: { session } } = await supabase.auth.getSession()
     const { supabaseFetch } = await import("../supabase-fetch")
-    const res = await supabaseFetch("/functions/v1/admin-delete-user", session?.access_token, {
-      user_id: id,
-      mode: "grace",
-    })
-    const result = await res.json()
-    setScheduling(false)
-    if (result.success) {
-      setConfirmGrace(false)
-      await loadProfile()
-    } else {
-      setActionError(result.error || "Something went wrong.")
+    try {
+      const res = await supabaseFetch("/functions/v1/admin-delete-user", session?.access_token, {
+        user_id: id,
+        mode: "grace",
+      })
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}))
+        setActionError(errorBody.error || `Request failed (${res.status}). Please try again.`)
+        return
+      }
+      const result = await res.json()
+      if (result.success) {
+        setConfirmGrace(false)
+        await loadProfile()
+      } else {
+        setActionError(result.error || "Something went wrong.")
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Request timed out. Please try again.")
+    } finally {
+      setScheduling(false)
     }
   }
 
@@ -84,13 +104,23 @@ export default function UserDetailPage() {
     setActionError("")
     const { data: { session } } = await supabase.auth.getSession()
     const { supabaseFetch } = await import("../supabase-fetch")
-    const res = await supabaseFetch("/functions/v1/admin-undelete-user", session?.access_token, { user_id: id })
-    const result = await res.json()
-    setRestoring(false)
-    if (result.success) {
-      await loadProfile()
-    } else {
-      setActionError(result.error || "Something went wrong.")
+    try {
+      const res = await supabaseFetch("/functions/v1/admin-undelete-user", session?.access_token, { user_id: id })
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}))
+        setActionError(errorBody.error || `Request failed (${res.status}). Please try again.`)
+        return
+      }
+      const result = await res.json()
+      if (result.success) {
+        await loadProfile()
+      } else {
+        setActionError(result.error || "Something went wrong.")
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Request timed out. Please try again.")
+    } finally {
+      setRestoring(false)
     }
   }
 

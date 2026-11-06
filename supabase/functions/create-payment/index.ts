@@ -88,7 +88,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Please accept the Privacy Policy and Terms of Service to continue." }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
-    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse()
+    if (await isDeletionPending(supabase, user.id)) return deletionPendingResponse(req)
 
     const { event_id, coupon_code } = await req.json()
     if (!event_id) return new Response(JSON.stringify({ error: "event_id is required" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } })

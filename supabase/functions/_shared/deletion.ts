@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2"
+import { getCorsHeaders } from "./cors.ts"
 
 // Shared helpers for the 30-day grace-period deletion model.
 //
@@ -59,7 +60,8 @@ export async function isDeletionPending(
 }
 
 // Standard 409 response for actions blocked by an active deletion grace.
-export function deletionPendingResponse(): Response {
+export function deletionPendingResponse(req?: Request): Response {
+  const corsHeaders = getCorsHeaders(req)
   return new Response(
     JSON.stringify({
       error: DELETION_PENDING_MESSAGE,
@@ -67,14 +69,15 @@ export function deletionPendingResponse(): Response {
     }),
     {
       status: 409,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     },
   )
 }
 
 // Standard 403 response for organizer-gated actions when grace is active.
 // Distinct from the suspension message so the client can show the right UI.
-export function deletionGraceForbiddenResponse(): Response {
+export function deletionGraceForbiddenResponse(req?: Request): Response {
+  const corsHeaders = getCorsHeaders(req)
   return new Response(
     JSON.stringify({
       error: DELETION_PENDING_MESSAGE,
@@ -82,7 +85,7 @@ export function deletionGraceForbiddenResponse(): Response {
     }),
     {
       status: 403,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     },
   )
 }
