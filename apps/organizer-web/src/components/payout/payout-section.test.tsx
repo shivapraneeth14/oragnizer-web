@@ -144,6 +144,34 @@ describe("PayoutSection (Organizer Financial Observability & Payout Reconciliati
     })
   })
 
+  it("shows a statement error instead of misleading zero balances when the RPC fails", async () => {
+    server.use(
+      http.post(`${BASE_URL}/rest/v1/rpc/get_organizer_financial_statement`, async () => {
+        return HttpResponse.json(
+          {
+            code: "42P01",
+            message: 'relation "calculated_refunds" does not exist',
+          },
+          { status: 400 }
+        )
+      })
+    )
+
+    render(<PayoutSection communityId="comm_mock_123" />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Financial statement unavailable/i)).toBeInTheDocument()
+      expect(screen.getByText(/relation "calculated_refunds" does not exist/i)).toBeInTheDocument()
+    })
+
+    // The wallet balance still loads from its own RPC.
+    expect(await screen.findByText("₹750")).toBeInTheDocument()
+
+    // A failed statement must not be presented as an empty ledger.
+    expect(screen.queryByText(/No transactions match the selected filter/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/transaction ledger could not be loaded/i)).toBeInTheDocument()
+  })
+
   it("renders cancelled payout status badge and details correctly", async () => {
     server.use(
       http.post(`${BASE_URL}/rest/v1/rpc/get_organizer_financial_statement`, async () => {

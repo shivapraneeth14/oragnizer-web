@@ -101,14 +101,18 @@ export default function PayoutSection({ communityId }: Props) {
   const [inspectedTx, setInspectedTx] = useState<OrganizerFinancialTransaction | null>(null)
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null)
   const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null)
+  const [statementError, setStatementError] = useState<string | null>(null)
 
   const activeBeneficiary = beneficiaries.find((b) => b.is_active)
+  // A failed RPC must not be presented as a real zero-balance ledger.
+  const statementUnavailable = Boolean(statementError) && transactions.length === 0
 
   // Load community wallet, beneficiaries, events, and transactions
   const loadData = useCallback(async () => {
     if (!communityId) return
     setLoading(true)
     setActionErrorMessage(null)
+    setStatementError(null)
 
     try {
       const [balanceRes, benRes, eventsRes, rpcTxRes] = await Promise.all([
@@ -140,10 +144,18 @@ export default function PayoutSection({ communityId }: Props) {
         setEvents(eventsRes.data as EventItem[])
       }
 
-      if (rpcTxRes.data && Array.isArray(rpcTxRes.data)) {
+      if (rpcTxRes.error) {
+        // Never turn a failed statement into a silent "everything is zero".
+        // Keep any previously loaded rows visible while showing the failure.
+        setStatementError(
+          rpcTxRes.error.message ||
+            "Financial statement could not be loaded. Your wallet balance is unaffected."
+        )
+      } else if (rpcTxRes.data && Array.isArray(rpcTxRes.data)) {
         setTransactions(rpcTxRes.data as OrganizerFinancialTransaction[])
       } else {
-        // Fallback to direct payout_items and payments query if needed
+        // Compatibility fallback for projects that predate the statement RPC.
+        // This intentionally shows payouts only and is labelled in the UI.
         const { data: payouts } = await supabase
           .from("payout_items")
           .select("*, events(id, title), community_beneficiaries(*)")
@@ -477,6 +489,33 @@ export default function PayoutSection({ communityId }: Props) {
         </div>
       )}
 
+      {statementError && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 shadow-xs">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-2.5">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white text-xs font-bold">
+                !
+              </span>
+              <div>
+                <p className="font-bold">Financial statement unavailable</p>
+                <p className="mt-0.5 text-xs text-amber-900">{statementError}</p>
+                <p className="mt-1 text-xs text-amber-800">
+                  Your community wallet balance is still accurate. This only affects the statement view.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadData()}
+              disabled={loading}
+              className="shrink-0 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50 transition-colors"
+            >
+              {loading ? "Retrying..." : "Retry"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Card: Community Wallet Balance & Beneficiary Details */}
       <div className="rounded-2xl border border-neutral-200/80 bg-white p-5 sm:p-6 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-100 pb-5">
@@ -517,57 +556,63 @@ export default function PayoutSection({ communityId }: Props) {
         </div>
 
         {/* Financial Settlement Breakdown (Milestone D) */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-5 border-b border-neutral-100 pb-5">
-          <div className="rounded-xl border border-neutral-100 bg-neutral-50/70 p-3">
-            <span className="block text-[11px] font-bold uppercase tracking-wider text-neutral-400">
-              Net Earned
-            </span>
-            <div className="mt-1 text-base font-extrabold text-neutral-900">
-              {formatCurrency(settlementSummary.netEarned)}
-            </div>
-            <span className="text-[10px] text-neutral-500">Sales less fee & refunds</span>
+        {statementUnavailable ? (
+          <div className="pt-5 pb-5 border-b border-neutral-100 text-xs text-neutral-500">
+            Settlement summary is unavailable until the financial statement loads.
           </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-5 border-b border-neutral-100 pb-5">
+            <div className="rounded-xl border border-neutral-100 bg-neutral-50/70 p-3">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+                Net Earned
+              </span>
+              <div className="mt-1 text-base font-extrabold text-neutral-900">
+                {formatCurrency(settlementSummary.netEarned)}
+              </div>
+              <span className="text-[10px] text-neutral-500">Sales less fee & refunds</span>
+            </div>
 
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
-            <span className="block text-[11px] font-bold uppercase tracking-wider text-emerald-800">
-              Confirmed Received
-            </span>
-            <div className="mt-1 text-base font-extrabold text-emerald-700">
-              {formatCurrency(settlementSummary.confirmedReceived)}
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+                Confirmed Received
+              </span>
+              <div className="mt-1 text-base font-extrabold text-emerald-700">
+                {formatCurrency(settlementSummary.confirmedReceived)}
+              </div>
+              <span className="text-[10px] text-emerald-600">Settled to your bank</span>
             </div>
-            <span className="text-[10px] text-emerald-600">Settled to your bank</span>
-          </div>
 
-          <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-3">
-            <span className="block text-[11px] font-bold uppercase tracking-wider text-amber-800">
-              In-Flight Pending
-            </span>
-            <div className="mt-1 text-base font-extrabold text-amber-700">
-              {formatCurrency(settlementSummary.inFlightPending)}
+            <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-3">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                In-Flight Pending
+              </span>
+              <div className="mt-1 text-base font-extrabold text-amber-700">
+                {formatCurrency(settlementSummary.inFlightPending)}
+              </div>
+              <span className="text-[10px] text-amber-600">Awaiting acceptance</span>
             </div>
-            <span className="text-[10px] text-amber-600">Awaiting acceptance</span>
-          </div>
 
-          <div className="rounded-xl border border-rose-100 bg-rose-50/40 p-3">
-            <span className="block text-[11px] font-bold uppercase tracking-wider text-rose-800">
-              Disputed
-            </span>
-            <div className="mt-1 text-base font-extrabold text-rose-700">
-              {formatCurrency(settlementSummary.disputed)}
+            <div className="rounded-xl border border-rose-100 bg-rose-50/40 p-3">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-rose-800">
+                Disputed
+              </span>
+              <div className="mt-1 text-base font-extrabold text-rose-700">
+                {formatCurrency(settlementSummary.disputed)}
+              </div>
+              <span className="text-[10px] text-rose-600">Under admin review</span>
             </div>
-            <span className="text-[10px] text-rose-600">Under admin review</span>
-          </div>
 
-          <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 col-span-2 sm:col-span-1">
-            <span className="block text-[11px] font-bold uppercase tracking-wider text-indigo-800">
-              Uncommitted Balance
-            </span>
-            <div className="mt-1 text-base font-extrabold text-indigo-700">
-              {formatCurrency(settlementSummary.uncommittedBalance)}
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 col-span-2 sm:col-span-1">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-indigo-800">
+                Uncommitted Balance
+              </span>
+              <div className="mt-1 text-base font-extrabold text-indigo-700">
+                {formatCurrency(settlementSummary.uncommittedBalance)}
+              </div>
+              <span className="text-[10px] text-indigo-600">Available to withdraw</span>
             </div>
-            <span className="text-[10px] text-indigo-600">Available to withdraw</span>
           </div>
-        </div>
+        )}
 
         {/* General Wallet-Wide Pending Payouts (if any) */}
         {generalPendingPayouts.length > 0 && !selectedEventId && (
@@ -770,44 +815,50 @@ export default function PayoutSection({ communityId }: Props) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div className="rounded-xl bg-neutral-50 p-3">
-                <span className="text-[11px] font-medium text-neutral-400">Total Collected (incl. fee)</span>
-                <p className="text-base font-bold text-neutral-900 mt-0.5">
-                  {formatCurrency(selectedEventSummary.gross)}
-                </p>
+            {statementUnavailable ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-xs text-amber-900">
+                Event financial details are unavailable until the statement loads. The community wallet balance above is still accurate.
               </div>
-              <div className="rounded-xl bg-neutral-50 p-3">
-                <span className="text-[11px] font-medium text-neutral-400">Cluvo Fee</span>
-                <p className="text-base font-bold text-neutral-700 mt-0.5">
-                  -{formatCurrency(selectedEventSummary.platformFee)}
-                </p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div className="rounded-xl bg-neutral-50 p-3">
+                  <span className="text-[11px] font-medium text-neutral-400">Total Collected (incl. fee)</span>
+                  <p className="text-base font-bold text-neutral-900 mt-0.5">
+                    {formatCurrency(selectedEventSummary.gross)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-neutral-50 p-3">
+                  <span className="text-[11px] font-medium text-neutral-400">Cluvo Fee</span>
+                  <p className="text-base font-bold text-neutral-700 mt-0.5">
+                    -{formatCurrency(selectedEventSummary.platformFee)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-neutral-50 p-3">
+                  <span className="text-[11px] font-medium text-neutral-400">Refunds Deducted</span>
+                  <p className="text-base font-bold text-neutral-700 mt-0.5">
+                    -{formatCurrency(selectedEventSummary.refunds)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-neutral-50 p-3">
+                  <span className="text-[11px] font-medium text-neutral-400">Net Organizer Share</span>
+                  <p className="text-base font-bold text-neutral-900 mt-0.5">
+                    {formatCurrency(selectedEventSummary.netShare)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-emerald-50/60 p-3">
+                  <span className="text-[11px] font-medium text-emerald-800">Settled Payouts</span>
+                  <p className="text-base font-bold text-emerald-700 mt-0.5">
+                    {formatCurrency(selectedEventSummary.settled)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-blue-50/60 p-3">
+                  <span className="text-[11px] font-medium text-blue-800">Remaining Balance Due</span>
+                  <p className="text-base font-bold text-cluvo-primary mt-0.5">
+                    {formatCurrency(selectedEventSummary.remainingBalance)}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-xl bg-neutral-50 p-3">
-                <span className="text-[11px] font-medium text-neutral-400">Refunds Deducted</span>
-                <p className="text-base font-bold text-neutral-700 mt-0.5">
-                  -{formatCurrency(selectedEventSummary.refunds)}
-                </p>
-              </div>
-              <div className="rounded-xl bg-neutral-50 p-3">
-                <span className="text-[11px] font-medium text-neutral-400">Net Organizer Share</span>
-                <p className="text-base font-bold text-neutral-900 mt-0.5">
-                  {formatCurrency(selectedEventSummary.netShare)}
-                </p>
-              </div>
-              <div className="rounded-xl bg-emerald-50/60 p-3">
-                <span className="text-[11px] font-medium text-emerald-800">Settled Payouts</span>
-                <p className="text-base font-bold text-emerald-700 mt-0.5">
-                  {formatCurrency(selectedEventSummary.settled)}
-                </p>
-              </div>
-              <div className="rounded-xl bg-blue-50/60 p-3">
-                <span className="text-[11px] font-medium text-blue-800">Remaining Balance Due</span>
-                <p className="text-base font-bold text-cluvo-primary mt-0.5">
-                  {formatCurrency(selectedEventSummary.remainingBalance)}
-                </p>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       ) : (
@@ -822,6 +873,11 @@ export default function PayoutSection({ communityId }: Props) {
             </span>
           </div>
 
+          {statementUnavailable ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-xs text-amber-900">
+              Event collections are unavailable until the financial statement loads. The community wallet balance above is still accurate.
+            </div>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {eventSummaries.map((ev) => (
               <div
@@ -888,6 +944,7 @@ export default function PayoutSection({ communityId }: Props) {
               </div>
             ))}
           </div>
+          )}
         </div>
       )}
 
@@ -926,6 +983,10 @@ export default function PayoutSection({ communityId }: Props) {
         {/* Transactions Table / Cards */}
         {loading ? (
           <div className="py-8 text-center text-xs text-neutral-400">Loading financial transactions...</div>
+        ) : statementUnavailable ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-6 text-center text-xs text-amber-900">
+            The transaction ledger could not be loaded. This is a statement display issue — your wallet balance and payment records are unchanged.
+          </div>
         ) : displayedTransactions.length === 0 ? (
           <div className="py-8 text-center text-xs text-neutral-400">
             No transactions match the selected filter.

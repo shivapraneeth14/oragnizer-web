@@ -115,6 +115,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611050006_refund_failure_sync.sql",
     "202611050007_refund_clawback_reserve.sql",
     "202611050008_admin_adopt_clawback_safety.sql",
+    "202611060001_fix_financial_statement_regression.sql",
   ])
 })
 
@@ -386,6 +387,49 @@ Deno.test("202611010009 event_capacity_and_status_guard enforces checks and trig
   assert(fix9.includes("trg_events_capacity_and_status_guard"))
   // Guarantee NO automatic rewriting of historical booked_count
   assert(!fix9.includes("UPDATE public.events SET booked_count"))
+})
+
+Deno.test("202611060001 restores valid statement CTEs and additive payout ledger columns", async () => {
+  const fix = await read("202611060001_fix_financial_statement_regression.sql")
+
+  for (const fn of ["get_admin_financial_statement", "get_organizer_financial_statement"]) {
+    assert(fix.includes(`CREATE OR REPLACE FUNCTION public.${fn}`), `${fn} missing`)
+    assert(fix.includes("deduped_prh AS ("), `${fn}: deduped_prh missing`)
+    assert(fix.includes("calculated_refunds AS ("), `${fn}: calculated_refunds missing`)
+    assert(fix.includes("raw_transactions AS ("), `${fn}: raw_transactions missing`)
+    assert(fix.includes("with_running_balance AS ("), `${fn}: with_running_balance missing`)
+    assert(fix.includes("wallet_debit_amount"), `${fn}: wallet_debit_amount missing`)
+    assert(fix.includes("reserved_amount"), `${fn}: reserved_amount missing`)
+    assert(fix.includes("replaces_payout_id"), `${fn}: replaces_payout_id missing`)
+  }
+
+  // The refund CTE must never absorb ticket-sale or payout rows, and must
+  // never reference itself. This was the exact production regression.
+  const functionBodies = fix.split("AS $function$").slice(1)
+  assertEquals(functionBodies.length >= 2, true)
+
+  for (const body of functionBodies) {
+    const refundStart = body.indexOf("calculated_refunds AS (")
+    const rawStart = body.indexOf("raw_transactions AS (")
+    assertEquals(refundStart >= 0 && rawStart > refundStart, true)
+
+    const refundBlock = body.slice(refundStart, rawStart)
+    assert(!refundBlock.includes("SELECT * FROM calculated_refunds"))
+    assert(!refundBlock.includes("FROM public.payout_items"))
+    assert(!refundBlock.includes("'ticket_sale'::TEXT"))
+
+    const rawBlock = body.slice(rawStart)
+    assert(rawBlock.includes("SELECT * FROM calculated_refunds"))
+    assert(rawBlock.includes("FROM public.payout_items"))
+  }
+
+  // Preserve the exact security and grant posture.
+  assert(fix.includes("SECURITY DEFINER"))
+  assert(fix.includes("SET search_path TO ''"))
+  assert(fix.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.get_admin_financial_statement(UUID, UUID)"))
+  assert(fix.includes("REVOKE ALL PRIVILEGES ON FUNCTION public.get_organizer_financial_statement(UUID, UUID)"))
+  assert(fix.includes("GRANT EXECUTE ON FUNCTION public.get_admin_financial_statement(UUID, UUID)"))
+  assert(fix.includes("GRANT EXECUTE ON FUNCTION public.get_organizer_financial_statement(UUID, UUID)"))
 })
 
 
