@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { createHmac } from "node:crypto"
 import { safeEqual } from "../_shared/crypto.ts"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { attemptRefund } from "../_shared/refunds.ts"
+import { attemptRefund, settleRefund, markRefundFailed } from "../_shared/refunds.ts"
 import { refundSyncRowTrustworthy } from "../_shared/payments.ts"
 import { logError } from "../_shared/logger.ts"
 
@@ -91,16 +91,20 @@ async function processRefund(paymentId: string, amount: number, reason: string =
 async function syncRefundState(entity: any, _eventType: string): Promise<void> {
   if (!entity?.id) return
 
+  const paymentColumns = "id, refund_attempt_count, refund_claim_state, refund_status, status, razorpay_refund_id"
+
   let { data: paymentRow } = await supabase
     .from("payments")
-    .select("id, refund_attempt_count, refund_claim_state, refund_status, status")
+    .select(paymentColumns)
     .eq("razorpay_refund_id", entity.id)
     .maybeSingle()
+
+  let matchedByRefundId = Boolean(paymentRow?.id)
 
   if (!paymentRow?.id && entity.payment_id) {
     const { data: byPayment } = await supabase
       .from("payments")
-      .select("id, refund_attempt_count, refund_claim_state, refund_status, status")
+      .select(paymentColumns)
       .eq("razorpay_payment_id", entity.payment_id)
       .maybeSingle()
     // Matching by capture id alone is ambiguous (ghost-refund bug): only
@@ -115,7 +119,7 @@ async function syncRefundState(entity: any, _eventType: string): Promise<void> {
   if (!paymentRow?.id && entity.order_id) {
     const { data: byOrder } = await supabase
       .from("payments")
-      .select("id, refund_attempt_count, refund_claim_state, refund_status, status")
+      .select(paymentColumns)
       .eq("razorpay_order_id", entity.order_id)
       .maybeSingle()
     if (byOrder) {
@@ -125,23 +129,37 @@ async function syncRefundState(entity: any, _eventType: string): Promise<void> {
 
   if (!paymentRow?.id) return
 
+  // A late event for an OLD (failed) refund id must never overwrite the state
+  // of the current retry. Only accept the fallback match when the row has no
+  // refund id yet or it is this same refund.
+  if (!matchedByRefundId
+      && paymentRow.razorpay_refund_id
+      && paymentRow.razorpay_refund_id !== entity.id) {
+    console.warn(`[refund-webhook] ignoring stale refund ${entity.id} for payment ${paymentRow.id} (current ${paymentRow.razorpay_refund_id})`)
+    return
+  }
+
   const refundStatus = REFUND_STATUS_MAP[entity.status]
   if (!refundStatus) return
 
-  const updates: Record<string, unknown> = {
-    refund_status: refundStatus,
-    razorpay_refund_id: entity.id,
+  if (refundStatus === "failed") {
+    // Keep the debt: this attempt did not reach the customer. The attempt was
+    // already counted by claim_payment_refund when it was issued, so the
+    // webhook must not increment again (that halved the real retry budget).
+    try {
+      await markRefundFailed(supabase, paymentRow.id, entity.id, entity.amount)
+    } catch (e) {
+      console.error("[refund-webhook] failed to record refund failure:", e)
+    }
+  } else {
+    // processed -> debit the organizer once and close the debt.
+    // pending/queued -> status sync only; the debt stays reserved.
+    try {
+      await settleRefund(supabase, paymentRow.id, entity.id, refundStatus, entity.amount)
+    } catch (e) {
+      console.error("[refund-webhook] settle_payment_refund failed:", e)
+    }
   }
-  if (refundStatus === "processed") {
-    updates.status = "refunded"
-    updates.refunded_amount = entity.amount
-    updates.refund_amount_due = null
-  } else if (refundStatus === "failed") {
-    updates.refund_attempt_count = (paymentRow.refund_attempt_count ?? 0) + 1
-  }
-
-  const { error: updateErr } = await supabase.from("payments").update(updates).eq("id", paymentRow.id)
-  if (updateErr) throw updateErr
 
   await supabase.from("payment_audit_log").insert({
     action: "refund_status_synced",

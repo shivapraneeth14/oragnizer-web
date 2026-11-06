@@ -40,7 +40,7 @@ export default function ResetPasswordPage() {
     <div className="flex min-h-screen items-center justify-center bg-cluvo-primary px-4">
       <div className="w-full max-w-md animate-slide-in-right">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold tracking-wider text-white">CLUVO</h1>
+          <h1 className="text-3xl font-bold tracking-wider text-white">chigzo</h1>
           <p className="mt-2 text-sm text-white/80">Admin Portal</p>
         </div>
         <form onSubmit={handleSubmit} className="rounded-2xl bg-white p-6 shadow-strong sm:p-8">

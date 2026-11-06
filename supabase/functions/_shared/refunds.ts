@@ -140,6 +140,49 @@ export class RefundNotPossibleError extends Error {
   }
 }
 
+// Settle a provider refund state into our ledger.
+//   processed -> closes the customer debt AND debits the organizer share once
+//   pending/queued/requested -> status sync only, debt stays reserved
+// The database keeps the refund owed until 'processed'; a failed attempt never
+// releases the organizer's money, it is retried instead.
+export async function settleRefund(
+  supabase: any,
+  paymentId: string,
+  refundId: string | null | undefined,
+  status: string,
+  amount?: number | null,
+): Promise<any> {
+  const { data, error } = await supabase.rpc("settle_payment_refund", {
+    p_payment_id: paymentId,
+    p_refund_id: refundId ?? null,
+    p_status: status,
+    p_amount: amount ?? null,
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
+// Record a failed attempt WITHOUT releasing the debt. The refund remains owed
+// and is retried (the next claim_payment_refund may reclaim it).
+export async function markRefundFailed(
+  supabase: any,
+  paymentId: string,
+  refundId?: string | null,
+  amount?: number | null,
+): Promise<any> {
+  const { data, error } = await supabase.rpc("complete_payment_refund", {
+    p_payment_id: paymentId,
+    p_success: false,
+    p_refund_id: refundId ?? null,
+    p_status: "failed",
+    p_amount: amount ?? null,
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 // Exactly-once refund issuance. All refund entry points (cancel-event,
 // cancel-registration, issue-refund, reconcile retry) must go through this:
 //   1. claim_payment_refund     -> atomic lock; exactly one winner per payment
@@ -148,26 +191,47 @@ export class RefundNotPossibleError extends Error {
 //   2. Retry pre-check          -> on a stale claim or any retry, ask Razorpay
 //                                  whether a prior attempt already sent money
 //   3. Razorpay refund          -> the single provider call
-//   4. complete_payment_refund  -> persists 'issued', records wallet clawback
+//   4. complete_payment_refund  -> persists 'issued'; the wallet is NOT debited
+//                                  here. The organizer share is debited only
+//                                  when the provider reaches 'processed'
+//                                  (webhook / reconcile / immediate response).
 // If the pre-check itself fails, the claim is released and the error is
 // surfaced: never send money unless we proved none was sent. Provider failures
 // after the POST are re-checked the same way before giving up.
+export interface AttemptRefundOptions {
+  // The caller already atomically claimed the refund (e.g. the customer-cancel
+  // RPC) — skip a second claim, which would answer 'conflict' against itself.
+  claimHeld?: boolean
+  attempt?: number
+}
+
 export async function attemptRefund(
   supabase: any,
   payment: { id: string; razorpay_payment_id?: string | null },
   amount: number,
   walletReason: string,
+  options: AttemptRefundOptions = {},
 ): Promise<RefundOutcome> {
   if (!payment.razorpay_payment_id) {
     throw new RefundNotPossibleError(`Payment ${payment.id} has no razorpay_payment_id`)
   }
 
-  const { data: claim, error: claimErr } = await supabase.rpc("claim_payment_refund", {
-    p_payment_id: payment.id,
-    p_reason: walletReason,
-    p_amount: amount,
-  })
-  if (claimErr) throw claimErr
+  let claim: any
+  if (options.claimHeld) {
+    claim = {
+      ok: true,
+      attempt: Math.max(Number(options.attempt ?? 1), 1),
+      stale_reclaimed: false,
+    }
+  } else {
+    const { data, error: claimErr } = await supabase.rpc("claim_payment_refund", {
+      p_payment_id: payment.id,
+      p_reason: walletReason,
+      p_amount: amount,
+    })
+    if (claimErr) throw claimErr
+    claim = data
+  }
 
   if (claim?.error) throw new RefundNotPossibleError(claim.error)
   if (claim?.already_refunded) {
@@ -191,6 +255,9 @@ export async function attemptRefund(
       p_status: mapRefundStatus(refund.status),
       p_amount: issuedAmount,
       p_wallet_reason: walletReason,
+      // Never debit at issuance — the organizer is debited once the refund
+      // reaches 'processed' (see settle_payment_refund).
+      p_debit_wallet: false,
     })
     if (error) throw error
     // The RPC reports "no live claim"/"payment not found" in a JSONB {error}

@@ -147,6 +147,23 @@ export default function FinancialsPage() {
   const [showUnresolvedPanel, setShowUnresolvedPanel] = useState<boolean>(false)
   const [selectedTaskForReview, setSelectedTaskForReview] = useState<RefundTaskItem | null>(null)
 
+  // Failed customer refunds (self-cancel / organizer refund). These are NOT in
+  // the event-cancellation queue, so they need their own retry action.
+  type FailedRefundItem = {
+    id: string
+    amount: number
+    refund_amount_due: number | null
+    refund_status: string | null
+    refund_reason: string | null
+    refund_attempt_count: number | null
+    razorpay_payment_id: string | null
+    registration_id: string
+    registrations?: { id: string; user_id: string; event_id: string; events?: { title?: string } } | null
+  }
+  const [failedRefunds, setFailedRefunds] = useState<FailedRefundItem[]>([])
+  const [showFailedRefundPanel, setShowFailedRefundPanel] = useState<boolean>(false)
+  const [retryingRefundId, setRetryingRefundId] = useState<string | null>(null)
+
   // Financial Reconciliation Engine State (Stage 5 Milestone D)
   const [reconReport, setReconReport] = useState<ReconciliationReport | null>(null)
   const [loadingRecon, setLoadingRecon] = useState<boolean>(false)
@@ -317,10 +334,47 @@ export default function FinancialsPage() {
     }
   }, [])
 
+  const loadFailedRefunds = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("payments")
+        .select("id, amount, refund_amount_due, refund_status, refund_reason, refund_attempt_count, razorpay_payment_id, registration_id, registrations!inner(id, user_id, event_id, events!inner(title))")
+        .or("refund_status.eq.failed,refund_claim_state.eq.failed")
+        .gt("refund_amount_due", 0)
+        .order("updated_at", { ascending: false })
+        .limit(50)
+
+      if (error) throw error
+      setFailedRefunds((data as unknown as FailedRefundItem[]) || [])
+    } catch (err) {
+      console.error("Error loading failed refunds:", err)
+    }
+  }, [])
+
+  const retryFailedRefund = useCallback(async (paymentId: string) => {
+    setRetryingRefundId(paymentId)
+    setError(null)
+    try {
+      const { data, error } = await supabase.functions.invoke("admin-retry-refund", {
+        body: { payment_id: paymentId },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.message || data.error)
+
+      await Promise.all([loadFailedRefunds(), loadUnresolvedTasks()])
+      if (typeof loadStatement === "function") await loadStatement()
+    } catch (err: any) {
+      setError(err?.message || "Failed to retry the Razorpay refund.")
+    } finally {
+      setRetryingRefundId(null)
+    }
+  }, [loadFailedRefunds, loadUnresolvedTasks, loadStatement])
+
   useEffect(() => {
     loadStatement()
     loadUnresolvedTasks()
-  }, [loadStatement, loadUnresolvedTasks])
+    loadFailedRefunds()
+  }, [loadStatement, loadUnresolvedTasks, loadFailedRefunds])
 
   // 4. Calculate Financial KPIs from Statement
   const kpis = useMemo(() => {
@@ -339,11 +393,11 @@ export default function FinancialsPage() {
         refundsDeducted += tx.money_out || 0
       } else if (tx.transaction_type.startsWith("payout")) {
         if (tx.status === "success" || tx.status === "processed") {
-          payoutsSettled += tx.money_out || 0
+          payoutsSettled += tx.wallet_debit_amount ?? tx.money_out ?? 0
         } else if (tx.status === "disputed") {
-          payoutsDisputed += tx.money_out || 0
+          payoutsDisputed += tx.reserved_amount ?? tx.money_out ?? 0
         } else if (tx.status === "pending_confirmation") {
-          payoutsPending += tx.money_out || 0
+          payoutsPending += tx.reserved_amount ?? tx.money_out ?? 0
         }
       }
     }
@@ -760,6 +814,76 @@ export default function FinancialsPage() {
                           className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-rose-700 shadow-2xs"
                         >
                           Resolve
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Failed customer refunds — Razorpay retry first, manual settlement later */}
+      {failedRefunds.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-xs text-amber-950 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-200 text-amber-800 font-bold text-base">
+                ₹
+              </span>
+              <div>
+                <h4 className="text-sm font-bold text-amber-950">
+                  {failedRefunds.length} Failed Refund{failedRefunds.length === 1 ? "" : "s"} Still Owed to {failedRefunds.length === 1 ? "a Customer" : "Customers"}
+                </h4>
+                <p className="text-[11px] text-amber-700">
+                  The customer is still owed this money. Retry through Razorpay first; the reserved amount is already excluded from organizer payouts.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowFailedRefundPanel(!showFailedRefundPanel)}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 shadow-2xs transition-colors"
+            >
+              {showFailedRefundPanel ? "Hide Refunds" : `Review Refunds (${failedRefunds.length})`}
+            </button>
+          </div>
+
+          {showFailedRefundPanel && (
+            <div className="mt-3 overflow-x-auto rounded-xl border border-amber-200 bg-white">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-amber-50/60 border-b border-amber-100 font-bold text-amber-900 uppercase">
+                  <tr>
+                    <th className="px-3 py-2">Event</th>
+                    <th className="px-3 py-2 text-right">Owed</th>
+                    <th className="px-3 py-2 text-center">Attempts</th>
+                    <th className="px-3 py-2">Reason</th>
+                    <th className="px-3 py-2 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {failedRefunds.map((refund) => (
+                    <tr key={refund.id} className="hover:bg-neutral-50 transition-colors">
+                      <td className="px-3 py-2.5 font-semibold text-neutral-800">
+                        {refund.registrations?.events?.title || refund.registration_id.slice(0, 8)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-bold text-amber-700 whitespace-nowrap">
+                        {formatCurrency(Number(refund.refund_amount_due ?? refund.amount))}
+                      </td>
+                      <td className="px-3 py-2.5 text-center text-neutral-600 font-mono">
+                        {refund.refund_attempt_count ?? 0} / 5
+                      </td>
+                      <td className="px-3 py-2.5 text-[10px] text-neutral-500">
+                        {(refund.refund_reason || "refund").replace(/_/g, " ")}
+                      </td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <button
+                          onClick={() => retryFailedRefund(refund.id)}
+                          disabled={retryingRefundId === refund.id}
+                          className="rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-700 shadow-2xs disabled:opacity-50"
+                        >
+                          {retryingRefundId === refund.id ? "Retrying…" : "Retry with Razorpay"}
                         </button>
                       </td>
                     </tr>
@@ -1810,6 +1934,11 @@ export default function FinancialsPage() {
                             <p className="text-[11px] text-neutral-500 truncate max-w-[200px]">
                               {tx.attendee_name || tx.event_title || "General Ledger"}
                             </p>
+                            {tx.replaces_payout_id && (
+                              <span className="mt-0.5 inline-flex rounded-full bg-indigo-50 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
+                                Reissued
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -1856,15 +1985,22 @@ export default function FinancialsPage() {
                         )}
                       </td>
 
-                      {/* Money Out */}
+                      {/* Money Out — reserved funds are shown inline, never as a separate column */}
                       <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                        {tx.money_out > 0 ? (
+                        {tx.status === "pending_confirmation" || tx.status === "disputed" ? (
+                          <div className="flex flex-col items-end leading-tight">
+                            <span className="text-neutral-300">—</span>
+                            <span className="text-[10px] font-bold text-amber-700">
+                              Reserved {formatCurrency(tx.reserved_amount ?? tx.money_out)}
+                            </span>
+                          </div>
+                        ) : tx.money_out > 0 ? (
                           <span
                             className={`font-bold ${
                               isRefund ? "text-rose-600" : "text-blue-600"
                             }`}
                           >
-                            −{formatCurrency(tx.money_out)}
+                            −{formatCurrency(tx.wallet_debit_amount ?? tx.money_out)}
                           </span>
                         ) : (
                           <span className="text-neutral-300">—</span>

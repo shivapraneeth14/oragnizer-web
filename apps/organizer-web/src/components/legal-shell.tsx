@@ -15,7 +15,7 @@ export default function LegalShell({
       <header className="border-b border-neutral-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
           <Link to="/" className="text-lg font-bold tracking-[0.2em] text-cluvo-primary">
-            CLUVO
+            chigzo
           </Link>
           <nav className="flex items-center gap-5 text-sm">
             <Link to="/privacy" className="text-neutral-600 transition hover:text-neutral-900">

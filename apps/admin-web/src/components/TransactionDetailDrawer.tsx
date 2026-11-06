@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
-import PayoutDisputeResolutionModal from "./PayoutDisputeResolutionModal"
+import PayoutDisputeResolutionModal, { PayoutDisputeMode } from "./PayoutDisputeResolutionModal"
+import ReissuePayoutModal from "./ReissuePayoutModal"
 
 export interface FinancialTransaction {
   transaction_id: string
@@ -32,6 +33,13 @@ export interface FinancialTransaction {
     label?: string
   } | null
   confirmed_at: string | null
+  payout_id?: string | null
+  /** Actual wallet debit for this row (0 for pending/disputed/cancelled). */
+  wallet_debit_amount?: number | null
+  /** Amount held back from the available balance (pending/disputed only). */
+  reserved_amount?: number | null
+  /** Set when this payout replaced an earlier disputed payout. */
+  replaces_payout_id?: string | null
 }
 
 export function formatCurrency(paise: number | null | undefined): string {
@@ -70,7 +78,9 @@ interface Props {
 
 export default function TransactionDetailDrawer({ transaction, onClose, onActionSuccess }: Props) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
-  const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false)
+  const [modalMode, setModalMode] = useState<PayoutDisputeMode | null>(null)
+  const [isReissueOpen, setIsReissueOpen] = useState(false)
+  const [showMoreOptions, setShowMoreOptions] = useState(false)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -464,22 +474,65 @@ export default function TransactionDetailDrawer({ transaction, onClose, onAction
                 {/* Confirmation Status & Settlement Actions */}
                 <div className="mt-3 pt-2 border-t border-neutral-100">
                   <p className="text-[11px] font-semibold text-neutral-500">Organizer Confirmation</p>
-                  {transaction.confirmed_at ? (
-                    <p className="text-xs text-emerald-700 font-medium mt-0.5">
-                      ✓ Confirmed by Organizer on {formatDateTime(transaction.confirmed_at)}
-                    </p>
-                  ) : transaction.status === "disputed" ? (
-                    <div className="space-y-2 mt-1">
+
+                  {transaction.status === "disputed" ? (
+                    <div className="space-y-2.5 mt-1">
                       <p className="text-xs text-rose-700 font-medium">
                         ⚠️ Disputed: {transaction.refund_reason || "Organizer reported discrepancy"}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => setIsDisputeModalOpen(true)}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700 transition-colors shadow-2xs"
-                      >
-                        Resolve Dispute
-                      </button>
+                      <p className="text-[11px] text-neutral-500 leading-relaxed">
+                        Reserved funds stay locked until you resolve this. The wallet is only debited on
+                        organizer confirmation or when you force-mark it received.
+                      </p>
+
+                      <div className="grid gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setModalMode("reconfirm")}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-800 hover:bg-purple-100 transition-colors"
+                        >
+                          Ask Organizer to Re-confirm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsReissueOpen(true)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 transition-colors"
+                        >
+                          Resolve &amp; Reissue
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModalMode("cancel")}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-100 transition-colors"
+                        >
+                          Cancel &amp; Release
+                        </button>
+                      </div>
+
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => setShowMoreOptions((v) => !v)}
+                          className="text-[11px] font-semibold text-neutral-500 hover:text-neutral-800 transition-colors"
+                        >
+                          {showMoreOptions ? "▾ Hide more options" : "▸ More options"}
+                        </button>
+                        {showMoreOptions && (
+                          <div className="mt-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setModalMode("force_received")}
+                              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                            >
+                              Force Mark Received
+                            </button>
+                            <p className="text-[11px] text-neutral-500 mt-1">
+                              Only after you have verified the transfer in the bank statement. This marks
+                              the payout settled and debits the wallet once.
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ) : transaction.status === "cancelled" ? (
                     <div className="space-y-1 mt-1 text-xs text-neutral-600">
@@ -490,19 +543,27 @@ export default function TransactionDetailDrawer({ transaction, onClose, onAction
                         {transaction.admin_notes || "Reserved balance returned to community uncommitted wallet."}
                       </p>
                     </div>
-                  ) : (
+                  ) : transaction.status === "pending_confirmation" ? (
                     <div className="space-y-2 mt-1">
                       <p className="text-xs text-amber-600 font-medium">
                         ⏳ Pending digital confirmation by organizer in web dashboard
                       </p>
                       <button
                         type="button"
-                        onClick={() => setIsDisputeModalOpen(true)}
+                        onClick={() => setModalMode("cancel_pending")}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 transition-colors shadow-2xs"
                       >
                         Cancel Settlement
                       </button>
                     </div>
+                  ) : transaction.confirmed_at ? (
+                    <p className="text-xs text-emerald-700 font-medium mt-0.5">
+                      ✓ Confirmed by Organizer on {formatDateTime(transaction.confirmed_at)}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-neutral-500 mt-0.5">
+                      No organizer confirmation recorded for this transaction.
+                    </p>
                   )}
                 </div>
               </div>
@@ -522,12 +583,27 @@ export default function TransactionDetailDrawer({ transaction, onClose, onAction
       </div>
 
       {/* Payout Dispute Resolution & Cancellation Modal */}
-      <PayoutDisputeResolutionModal
-        isOpen={isDisputeModalOpen}
+      {modalMode && (
+        <PayoutDisputeResolutionModal
+          isOpen={true}
+          transaction={transaction}
+          mode={modalMode}
+          onClose={() => setModalMode(null)}
+          onSuccess={() => {
+            setModalMode(null)
+            onClose()
+            onActionSuccess?.()
+          }}
+        />
+      )}
+
+      {/* Reissue disputed payout as a new row with a new UTR */}
+      <ReissuePayoutModal
+        isOpen={isReissueOpen}
         transaction={transaction}
-        onClose={() => setIsDisputeModalOpen(false)}
+        onClose={() => setIsReissueOpen(false)}
         onSuccess={() => {
-          setIsDisputeModalOpen(false)
+          setIsReissueOpen(false)
           onClose()
           onActionSuccess?.()
         }}

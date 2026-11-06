@@ -184,7 +184,7 @@ export default function LandingPage() {
         <div className="hidden md:flex md:w-[58%] items-center justify-center">
           <div className="flex flex-col items-start">
             <h1 className="text-8xl font-bold tracking-[0.15em] text-white">
-              CLUVO
+              chigzo
             </h1>
             <p className="mt-4 text-lg font-light tracking-wider text-white/70">
               Connecting communities
@@ -209,7 +209,7 @@ export default function LandingPage() {
             <div className="flex-1 flex items-center justify-center px-6 py-12 md:px-14">
               <div className="w-full max-w-sm mx-auto">
                 <div className="mb-8 text-center md:hidden">
-                  <h1 className="text-4xl font-bold tracking-[0.15em] text-cluvo-primary">CLUVO</h1>
+                  <h1 className="text-4xl font-bold tracking-[0.15em] text-cluvo-primary">chigzo</h1>
                   <p className="mt-2 text-sm font-light tracking-wider text-neutral-500">Connecting communities</p>
                 </div>
 

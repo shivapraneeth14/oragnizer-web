@@ -66,16 +66,26 @@ export default function CommunityDetailPage() {
     if (!id) return
     setDeleting(true)
     setError("")
-    const { data: { session } } = await supabase.auth.getSession()
-    const { supabaseFetch } = await import("../supabase-fetch")
-    const res = await supabaseFetch("/functions/v1/admin-delete-community", session?.access_token, { community_id: id })
-    const result = await res.json()
-    setDeleting(false)
-    setConfirmDelete(false)
-    if (result.success) {
-      window.location.reload()
-    } else {
-      setError(result.error || "Something went wrong.")
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const { supabaseFetch } = await import("../supabase-fetch")
+      const res = await supabaseFetch("/functions/v1/admin-delete-community", session?.access_token, { community_id: id })
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}))
+        setError(errorBody.error || `Request failed (${res.status}). Please try again.`)
+        return
+      }
+      const result = await res.json()
+      if (result.success) {
+        window.location.reload()
+      } else {
+        setError(result.error || "Something went wrong.")
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Request timed out. Please try again.")
+    } finally {
+      setDeleting(false)
+      setConfirmDelete(false)
     }
   }
 
@@ -83,15 +93,25 @@ export default function CommunityDetailPage() {
     if (!id) return
     setCancelling(true)
     setError("")
-    const { data: { session } } = await supabase.auth.getSession()
-    const { supabaseFetch } = await import("../supabase-fetch")
-    const res = await supabaseFetch("/functions/v1/admin-cancel-community-deletion", session?.access_token, { community_id: id })
-    const result = await res.json()
-    setCancelling(false)
-    if (result.success) {
-      window.location.reload()
-    } else {
-      setError(result.error || "Something went wrong.")
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const { supabaseFetch } = await import("../supabase-fetch")
+      const res = await supabaseFetch("/functions/v1/admin-cancel-community-deletion", session?.access_token, { community_id: id })
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => ({}))
+        setError(errorBody.error || `Request failed (${res.status}). Please try again.`)
+        return
+      }
+      const result = await res.json()
+      if (result.success) {
+        window.location.reload()
+      } else {
+        setError(result.error || "Something went wrong.")
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Request timed out. Please try again.")
+    } finally {
+      setCancelling(false)
     }
   }
 

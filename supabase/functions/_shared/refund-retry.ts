@@ -53,6 +53,9 @@ export interface ExhaustionDeps {
   hasAudit(paymentId: string): Promise<boolean>
   insertAudit(paymentId: string, attempts: number, note: string): Promise<boolean>
   alert(paymentId: string, attempts: number, note: string): Promise<void>
+  // Tell the customer their refund is still owed and being handled (called
+  // exactly once, together with the admin alert).
+  notify?(paymentId: string, attempts: number, note: string): Promise<void>
 }
 
 // Idempotent: the audit row is the dedupe gate, so the alert is recorded once
@@ -65,5 +68,6 @@ export async function flagRefundExhausted(
   if (await deps.hasAudit(input.paymentId)) return false
   if (!(await deps.insertAudit(input.paymentId, input.attempts, note))) return false
   await deps.alert(input.paymentId, input.attempts, note)
+  await deps.notify?.(input.paymentId, input.attempts, note)
   return true
 }

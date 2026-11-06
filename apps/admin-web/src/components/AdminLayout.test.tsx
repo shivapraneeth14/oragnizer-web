@@ -129,7 +129,7 @@ describe("AdminLayout (Admin Portal Shell & Route Guard)", () => {
 
     // Check header brand and outlet content
     await waitFor(() => {
-      expect(screen.getByText("CLUVO ADMIN")).toBeInTheDocument()
+      expect(screen.getByText("chigzo ADMIN")).toBeInTheDocument()
       expect(screen.getByText("Admin Dashboard Content")).toBeInTheDocument()
     })
 
@@ -173,8 +173,8 @@ describe("AdminLayout (Admin Portal Shell & Route Guard)", () => {
       expect(screen.getByText("Admin Dashboard Content")).toBeInTheDocument()
     })
 
-    // On mobile initially sidebar is collapsed (CLUVO ADMIN brand not shown)
-    expect(screen.queryByText("CLUVO ADMIN")).not.toBeInTheDocument()
+    // On mobile initially sidebar is collapsed (chigzo ADMIN brand not shown)
+    expect(screen.queryByText("chigzo ADMIN")).not.toBeInTheDocument()
 
     // Click mobile hamburger button in header
     const hamburgerBtn = container.querySelector("header button")!
@@ -183,7 +183,7 @@ describe("AdminLayout (Admin Portal Shell & Route Guard)", () => {
 
     // Now sidebar is open on mobile
     await waitFor(() => {
-      expect(screen.getByText("CLUVO ADMIN")).toBeInTheDocument()
+      expect(screen.getByText("chigzo ADMIN")).toBeInTheDocument()
     })
   })
 })

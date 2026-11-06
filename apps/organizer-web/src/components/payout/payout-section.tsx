@@ -35,6 +35,8 @@ export interface OrganizerFinancialTransaction {
   organizer_share?: number
   money_in?: number
   money_out?: number
+  wallet_debit_amount?: number
+  reserved_amount?: number
   refund_reason?: string | null
   admin_notes?: string | null
   payment_method?: string | null
@@ -263,18 +265,25 @@ export default function PayoutSection({ communityId }: Props) {
         } else if (tx.transaction_type === "refund") {
           refunds += tx.money_out || 0
         } else if (tx.transaction_type.startsWith("payout")) {
+          // Use wallet_debit_amount for actual debits, reserved_amount for holds
+          const debitAmount = (tx.wallet_debit_amount ?? tx.money_out) || 0
+          const reservedAmount = (tx.reserved_amount ?? tx.money_out) || 0
+
           if (tx.status === "success" || tx.status === "processed") {
-            settled += tx.money_out || 0
+            settled += debitAmount
           } else if (tx.status === "pending_confirmation") {
             pendingPayouts.push(tx)
           } else if (tx.status === "disputed") {
-            disputed += tx.money_out || 0
+            disputed += reservedAmount
+          } else if (tx.status === "cancelled") {
+            // cancelled payouts have no wallet impact
           }
         }
       }
 
-      const pendingAmount = pendingPayouts.reduce((sum, p) => sum + (p.money_out || p.gross_amount || 0), 0)
+      const pendingAmount = pendingPayouts.reduce((sum, p) => sum + ((p.reserved_amount ?? p.money_out) || p.gross_amount || 0), 0)
       const netShare = Math.max(0, gross - platformFee - refunds)
+      // Available = netShare - settled (actual debits) - reserved (holds)
       const remainingBalance = Math.max(0, netShare - settled - pendingAmount - disputed)
 
       return {
@@ -320,11 +329,11 @@ export default function PayoutSection({ communityId }: Props) {
         netEarned -= (tx.money_out ?? 0)
       } else if (tx.transaction_type.startsWith("payout")) {
         if (tx.status === "success" || tx.status === "processed" || tx.transaction_type === "payout_confirmed") {
-          confirmedReceived += (tx.money_out ?? tx.gross_amount ?? 0)
+          confirmedReceived += (tx.wallet_debit_amount ?? tx.money_out ?? tx.gross_amount ?? 0)
         } else if (tx.status === "pending_confirmation" || tx.transaction_type === "payout_pending") {
-          inFlightPending += (tx.money_out ?? tx.gross_amount ?? 0)
+          inFlightPending += (tx.reserved_amount ?? tx.money_out ?? tx.gross_amount ?? 0)
         } else if (tx.status === "disputed" || tx.transaction_type === "payout_disputed") {
-          disputed += (tx.money_out ?? tx.gross_amount ?? 0)
+          disputed += (tx.reserved_amount ?? tx.money_out ?? tx.gross_amount ?? 0)
         }
       }
     }
@@ -939,6 +948,8 @@ export default function PayoutSection({ communityId }: Props) {
                 {displayedTransactions.map((tx) => {
                   const isPayout = tx.transaction_type.startsWith("payout")
                   const isPendingPayout = isPayout && tx.status === "pending_confirmation"
+                  const debitAmount = (tx.wallet_debit_amount ?? tx.money_out) || 0
+                  const reservedAmount = (tx.reserved_amount ?? tx.money_out) || 0
 
                   return (
                     <tr
@@ -965,7 +976,18 @@ export default function PayoutSection({ communityId }: Props) {
                         {tx.money_in ? `+${formatCurrency(tx.money_in)}` : "—"}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-red-600">
-                        {tx.money_out ? `-${formatCurrency(tx.money_out)}` : "—"}
+                        {isPendingPayout || tx.status === "disputed" ? (
+                          <div className="flex flex-col items-end leading-tight">
+                            <span className="text-neutral-400">—</span>
+                            <span className="text-[10px] font-semibold text-amber-700">
+                              Reserved {formatCurrency(reservedAmount)}
+                            </span>
+                          </div>
+                        ) : debitAmount > 0 ? (
+                          `-${formatCurrency(debitAmount)}`
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span

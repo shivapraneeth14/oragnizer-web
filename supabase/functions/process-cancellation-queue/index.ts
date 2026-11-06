@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
 
           const { data: payment, error: pErr } = await supabase
             .from("payments")
-            .select("id, amount, razorpay_payment_id, razorpay_order_id, registration_id, status, platform_fee, organizer_share, refund_claim_state, refund_status")
+            .select("id, amount, razorpay_payment_id, razorpay_order_id, razorpay_refund_id, registration_id, status, platform_fee, organizer_share, refund_claim_state, refund_status, refund_amount_due")
             .eq("id", task.payment_id)
             .single()
 
@@ -127,8 +127,12 @@ Deno.serve(async (req) => {
             throw new Error(`Payment ${task.payment_id} not found`)
           }
 
-          // If payment was already refunded
-          if (payment.status === "refunded" || payment.refund_claim_state === "issued") {
+          // Already refunded/in flight — but a FAILED attempt still owes the
+          // customer, so it must fall through to the retry below.
+          if (
+            (payment.status === "refunded" || payment.refund_claim_state === "issued") &&
+            payment.refund_status !== "failed"
+          ) {
             await supabase.rpc("cancel_registration_and_decrement", {
               p_registration_id: task.registration_id,
               p_deleted_at: new Date().toISOString(),
@@ -189,7 +193,10 @@ Deno.serve(async (req) => {
 
           // Issue refund via attemptRefund (ticket price only — fee kept for
           // a confirmed booking; full amount for a never-confirmed capture).
-          const outcome = await attemptRefund(supabase, payment, refundAmountForPayment(payment), "event_cancellation")
+          // On a retry, reuse the persisted owed amount instead of re-deriving
+          // it, so a fee-policy change can never alter an existing debt.
+          const refundAmount = Number(payment.refund_amount_due ?? refundAmountForPayment(payment))
+          const outcome = await attemptRefund(supabase, payment, refundAmount, "event_cancellation")
 
           if (outcome.status === "conflict") {
             // Concurrent claim lock active: backoff 30s
@@ -224,7 +231,7 @@ Deno.serve(async (req) => {
 
           await supabase.from("refund_task_queue").update({
             status: "completed",
-            amount: refundAmountForPayment(payment),
+            amount: refundAmount,
             razorpay_refund_id: outcome.refund_id,
             error_message: null,
             updated_at: new Date().toISOString(),
@@ -244,7 +251,7 @@ Deno.serve(async (req) => {
               status: newStatus,
               next_attempt_at: new Date(Date.now() + 120_000).toISOString(),
               error_message: `Uncertain outcome: ${err.message}`,
-              error_details: { code: err.statusCode, isExhausted },
+              error_details: { code: err.status, isExhausted },
               updated_at: new Date().toISOString(),
             }).eq("id", task.id)
 
@@ -267,7 +274,7 @@ Deno.serve(async (req) => {
             await supabase.from("refund_task_queue").update({
               status: "manual_review",
               error_message: `Provider rejected: ${err.message}`,
-              error_details: { code: err.statusCode, body: err.errorData },
+              error_details: { code: err.status, provider_code: err.code },
               updated_at: new Date().toISOString(),
             }).eq("id", task.id)
 

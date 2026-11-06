@@ -85,7 +85,7 @@ export default function AdminLayout() {
         }`}
       >
         <div className="flex h-16 items-center justify-between border-b border-neutral-200 px-4">
-          {sidebarOpen && <span className="text-lg font-bold tracking-wider text-cluvo-primary">CLUVO ADMIN</span>}
+          {sidebarOpen && <span className="text-lg font-bold tracking-wider text-cluvo-primary">chigzo ADMIN</span>}
           <button
             onClick={toggleSidebar}
             className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700"

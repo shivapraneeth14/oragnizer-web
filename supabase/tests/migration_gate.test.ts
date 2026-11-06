@@ -105,6 +105,16 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611040001_organizer_refund_keeps_fee.sql",
     "202611040002_statement_refund_debit_fee_kept.sql",
     "202611040003_admin_refund_records_ticket_amount.sql",
+    "202611040004_dispute_reissue_and_ledger_accuracy.sql",
+    "202611040005_refund_task_queue_grants.sql",
+    "202611050001_refund_ledger_safety.sql",
+    "202611050002_add_customer_cancel_atomic_rpc.sql",
+    "202611050003_refund_lifecycle_settle.sql",
+    "202611050004_payout_reserves_owed_refunds.sql",
+    "202611050005_drop_ambiguous_refund_overload.sql",
+    "202611050006_refund_failure_sync.sql",
+    "202611050007_refund_clawback_reserve.sql",
+    "202611050008_admin_adopt_clawback_safety.sql",
   ])
 })
 

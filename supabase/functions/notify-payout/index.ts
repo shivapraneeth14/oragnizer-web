@@ -105,18 +105,24 @@ Deno.serve(async (req) => {
       ? `Event Settlement: "${eventTitle}"`
       : "Entire Community Wallet Settlement"
 
-    const subject = `[Action Required] Payout Initiated: ₹${amountRupees} for ${community.name}`
+    // Optional, additive: lets the admin app tailor the email to the action taken.
+    // Unknown / missing context keeps the original "initiated" wording.
+    const context = typeof body?.context === "string" ? body.context : "initiated"
 
-    const textBody = `Hello ${ownerName},
-
-A manual payout of ₹${amountRupees} has been initiated for your community "${community.name}".
-
-Payout Details:
+    const payoutDetails = `Payout Details:
 - Amount: ₹${amountRupees}
 - Scope: ${scopeDescription}
 - Transfer Method: ${payout.payment_method || "Bank Transfer"}
 - Reference / UTR: ${payout.utr || "N/A"}
-${payout.admin_notes ? `- Admin Note: ${payout.admin_notes}\n` : ""}- Status: Pending Your Digital Confirmation
+${payout.admin_notes ? `- Admin Note: ${payout.admin_notes}\n` : ""}`
+
+    let subject = `[Action Required] Payout Initiated: ₹${amountRupees} for ${community.name}`
+
+    let textBody = `Hello ${ownerName},
+
+A manual payout of ₹${amountRupees} has been initiated for your community "${community.name}".
+
+${payoutDetails}- Status: Pending Your Digital Confirmation
 
 Next Steps:
 Please sign in to your Cluvo Organizer Portal to review and confirm receipt of these funds.
@@ -126,6 +132,46 @@ If you have any questions or notice an issue with this transfer, you can flag it
 
 Warm regards,
 The Cluvo Team`
+
+    if (context === "verified") {
+      subject = `[Settled] Payout of ₹${amountRupees} marked received for ${community.name}`
+      textBody = `Hello ${ownerName},
+
+We verified the manual payout below against the bank statement and marked it as received.
+
+${payoutDetails}- Status: Settled / Received
+
+No further action is required. This amount is now recorded as paid out from your community wallet.
+
+Warm regards,
+The Cluvo Team`
+    } else if (context === "reconfirmed") {
+      subject = `[Action Required] Please re-confirm payout of ₹${amountRupees} for ${community.name}`
+      textBody = `Hello ${ownerName},
+
+We re-checked the settlement below with the bank and believe it was delivered to your account. Please review it and confirm receipt.
+
+${payoutDetails}- Status: Pending Your Digital Confirmation
+
+Next Steps:
+Sign in to your Cluvo Organizer Portal and confirm receipt. If the funds still have not arrived, select "Report Issue / Dispute" again and attach your bank statement.
+
+Warm regards,
+The Cluvo Team`
+    } else if (context === "reissued") {
+      subject = `[Action Required] Payout reissued: ₹${amountRupees} for ${community.name}`
+      textBody = `Hello ${ownerName},
+
+The earlier transfer could not be completed, so we reissued the payout below with a new bank reference.
+
+${payoutDetails}- Status: Pending Your Digital Confirmation
+
+Next Steps:
+Please sign in to your Cluvo Organizer Portal to review and confirm receipt of these funds.
+
+Warm regards,
+The Cluvo Team`
+    }
 
     try {
       await sendCluvoEmail(ownerProfile.email, subject, textBody)

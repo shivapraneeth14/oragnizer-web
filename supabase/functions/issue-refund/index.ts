@@ -130,12 +130,15 @@ Deno.serve(async (req) => {
 
     let outcome
     try {
+      // The RPC above already cancelled the ticket and claimed the refund in
+      // one transaction. Re-claiming here would answer 'conflict' against our
+      // own fresh claim and silently skip the provider refund.
       outcome = await attemptRefund(
         supabase,
         payment,
-        refundAmountForPayment(payment),
+        Number(cancelClaimResult.amount ?? refundAmountForPayment(payment)),
         "organizer_issue_refund",
-        { attempt: cancelClaimResult.claim_attempt }
+        { claimHeld: true, attempt: cancelClaimResult.claim_attempt }
       )
     } catch (err) {
       console.error("issue-refund error:", err)

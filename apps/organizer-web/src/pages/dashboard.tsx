@@ -437,7 +437,7 @@ export default function DashboardPage() {
         {/* Logo */}
         <div className="flex h-16 items-center justify-between border-b border-neutral-200 px-4">
           {sidebarOpen && (
-            <span className="text-lg font-bold tracking-wider text-cluvo-primary">CLUVO</span>
+            <span className="text-lg font-bold tracking-wider text-cluvo-primary">chigzo</span>
           )}
           <button
             onClick={toggleSidebar}

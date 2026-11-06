@@ -369,6 +369,10 @@ export const handlers = [
     return HttpResponse.json([])
   }),
 
+  http.get(`${BASE_URL}/rest/v1/payments`, () => {
+    return HttpResponse.json([])
+  }),
+
   http.get(`${BASE_URL}/rest/v1/community_beneficiaries`, () => {
     return HttpResponse.json([
       {

@@ -3,11 +3,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { recordAlert } from "../_shared/alerts.ts"
 import { safeEqual } from "../_shared/crypto.ts"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
-import { attemptRefund, refundRetryPlan, RefundNotPossibleError } from "../_shared/refunds.ts"
+import { attemptRefund, markRefundFailed, refundRetryPlan, RefundNotPossibleError, settleRefund } from "../_shared/refunds.ts"
 import {
   flagRefundExhausted,
   isProviderRefundDead,
-  nextRefundAttempt,
   REFUND_ATTEMPT_CAP,
   refundPendingTooLong,
   shouldFlagExhausted,
@@ -166,6 +165,35 @@ async function flagExhausted(
           details: { payment_id: id, attempts, note },
         })
       },
+      notify: async (id, attempts, note) => {
+        const { data: pay } = await supabase
+          .from("payments")
+          .select("registration_id, amount, refund_amount_due")
+          .eq("id", id)
+          .maybeSingle()
+        if (!pay?.registration_id) return
+        const { data: reg } = await supabase
+          .from("registrations")
+          .select("user_id, event_id")
+          .eq("id", pay.registration_id)
+          .maybeSingle()
+        if (!reg?.user_id) return
+        const amount = Number(pay.refund_amount_due ?? pay.amount ?? 0)
+        await supabase.from("notifications").insert({
+          user_id: reg.user_id,
+          type: "refund_needs_attention",
+          title: "Your refund is taking longer than expected",
+          body: `Your refund of ₹${(amount / 100).toFixed(0)} is still owed and our support team has been notified. We will contact you as soon as it is completed.`,
+          payload: {
+            payment_id: id,
+            registration_id: pay.registration_id,
+            event_id: reg.event_id,
+            amount,
+            attempts,
+            note,
+          },
+        })
+      },
     },
   )
 }
@@ -233,24 +261,23 @@ async function retryPendingRefunds(): Promise<number> {
       if (inFlight && pay.razorpay_refund_id) {
         const refund = await razorpayGet(`refunds/${pay.razorpay_refund_id}`).catch(() => null)
         if (refund?.status === "processed") {
-          const { error: updateErr } = await supabase.from("payments").update({
-            refund_status: "processed",
-            status: "refunded",
-            refunded_amount: refund.amount ?? pay.refunded_amount ?? pay.amount,
-            refund_amount_due: null,
-            refund_claim_state: "issued",
-          }).eq("id", pay.id)
-          if (updateErr) throw updateErr
+          // Close the customer debt and debit the organizer share exactly once.
+          await settleRefund(
+            supabase,
+            pay.id,
+            pay.razorpay_refund_id,
+            "processed",
+            refund.amount ?? pay.refunded_amount ?? pay.amount,
+          )
           handled++
           continue
         }
         if (isProviderRefundDead(refund?.status)) {
-          const attempts = nextRefundAttempt(pay.refund_attempt_count)
-          const { error: updateErr } = await supabase.from("payments").update({
-            refund_status: "failed",
-            refund_attempt_count: attempts,
-          }).eq("id", pay.id)
-          if (updateErr) throw updateErr
+          // claim_payment_refund already counted this attempt when it was
+          // issued; incrementing again here would shrink the real retry budget.
+          const attempts = Number(pay.refund_attempt_count ?? 0)
+          // Keep the debt (customer still owed).
+          await markRefundFailed(supabase, pay.id, pay.razorpay_refund_id, refund?.amount ?? pay.refund_amount_due ?? pay.amount)
           // This path can reach the cap too; record it here, not only in the
           // catch block below.
           if (attempts >= REFUND_ATTEMPT_CAP) {
@@ -536,6 +563,24 @@ Deno.serve(async (req) => {
     // on our side), capped at 5 attempts -> refund_retry_exhausted flags the
     // payment for manual follow-up. Refund webhooks keep the truth in sync.
     totalActions += await retryPendingRefunds()
+
+    // --- Step 3d: Recover organizer clawbacks that were short at settlement
+    // time (the customer was refunded; the wallet did not have enough yet).
+    const { data: clawbackRetry, error: clawbackErr } = await supabase.rpc(
+      "retry_refund_clawbacks",
+      { p_limit: 50 },
+    )
+    if (clawbackErr) {
+      console.error("retry_refund_clawbacks failed:", clawbackErr)
+      await recordAlert(supabase, {
+        severity: "warning",
+        category: "payment",
+        title: "Refund clawback retry failed",
+        details: { error: clawbackErr.message },
+      })
+    } else if (clawbackRetry?.debited) {
+      totalActions += Number(clawbackRetry.debited)
+    }
 
     // --- Step 4: Cleanup old processed webhook records (keep last 7 days) ---
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()

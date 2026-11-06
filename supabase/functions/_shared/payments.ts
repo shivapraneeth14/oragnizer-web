@@ -11,6 +11,8 @@ export interface PaymentRowSummary {
   refund_reason?: string | null
   refund_amount_due?: number | null
   refund_attempt_count?: number | null
+  refund_clawback_state?: string | null
+  refund_wallet_debited_attempt?: number | null
 }
 
 // A payment row that is paid, or has a refund in flight at the provider, must
@@ -113,6 +115,8 @@ export async function clearRefundFieldsForRequote(
     refund_reason: null,
     refund_amount_due: null,
     refund_attempt_count: 0,
+    refund_clawback_state: "none",
+    refund_wallet_debited_attempt: 0,
   }).eq("id", payment.id)
   if (clearErr) throw clearErr
 }
