@@ -103,8 +103,19 @@ export async function clearRefundFieldsForRequote(
       prior_refund_reason: payment.refund_reason ?? null,
       prior_refund_amount_due: payment.refund_amount_due ?? null,
       prior_refund_attempt_count: payment.refund_attempt_count ?? null,
+      prior_refund_clawback_state: payment.refund_clawback_state ?? null,
+      prior_refund_wallet_debited_attempt: payment.refund_wallet_debited_attempt ?? null,
     },
   })
+  // IMPORTANT: refund_clawback_state is deliberately NOT reset here.
+  //
+  // A 'pending' clawback means the customer was already refunded but the
+  // organizer wallet did not have enough balance to take the share back. The
+  // durable debt now lives in refund_clawbacks (written by
+  // settle_payment_refund), but this mirror column is still what payout
+  // reservation reads. Clearing it on requote made the debt invisible to both
+  // the retry job and the payout reservation, permanently losing one
+  // organizer share. Keep it, regardless of the new sale.
   const { error: clearErr } = await supabase.from("payments").update({
     refund_status: null,
     razorpay_payment_id: null,
@@ -115,8 +126,6 @@ export async function clearRefundFieldsForRequote(
     refund_reason: null,
     refund_amount_due: null,
     refund_attempt_count: 0,
-    refund_clawback_state: "none",
-    refund_wallet_debited_attempt: 0,
   }).eq("id", payment.id)
   if (clearErr) throw clearErr
 }
