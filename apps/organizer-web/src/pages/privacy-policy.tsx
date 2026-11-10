@@ -5,8 +5,8 @@ export default function PrivacyPolicyPage() {
   return (
     <LegalShell title="Privacy Policy" updated="August 7, 2026">
       <p>
-        This Privacy Policy explains how Cluvo ("we", "us") collects, uses, and shares
-        information about you when you use the Cluvo mobile app, the organizer web app, and
+        This Privacy Policy explains how chigzo ("we", "us") collects, uses, and shares
+        information about you when you use the chigzo mobile app, the organizer web app, and
         related services (together, the "Services"). By using the Services you agree to the
         practices described here.
       </p>

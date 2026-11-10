@@ -25,11 +25,11 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
-      includeAssets: ["favicon.png", "apple-touch-icon.png", "icons/*.png"],
+      includeAssets: ["favicon.png", "apple-touch-icon.png", "icon.svg", "icons/*.png"],
       manifest: {
-        name: "Cluvo Admin",
-        short_name: "Cluvo Admin",
-        description: "Cluvo admin console for managing communities and events.",
+        name: "chigzo Admin",
+        short_name: "chigzo Admin",
+        description: "chigzo admin console for managing communities and events.",
         theme_color: "#C2185B",
         background_color: "#ffffff",
         display: "standalone",

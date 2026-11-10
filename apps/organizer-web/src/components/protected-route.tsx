@@ -100,9 +100,9 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
             Your account is scheduled for deletion
           </h1>
           <p className="mt-2 text-sm text-neutral-600">
-            Your Cluvo account is in its 30-day deletion grace period, so the
+            Your chigzo account is in its 30-day deletion grace period, so the
             organizer portal is unavailable. You can restore your account from
-            the Cluvo mobile app (Profile → Keep my account), or sign in there
+            the chigzo mobile app (Profile → Keep my account), or sign in there
             to cancel the deletion.
           </p>
           <div className="mt-5 flex flex-col gap-2">

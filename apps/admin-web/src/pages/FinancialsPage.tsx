@@ -1475,7 +1475,7 @@ export default function FinancialsPage() {
             {/* 2. Platform Fee Earned */}
             <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
               <span className="text-[11px] font-bold text-cluvo-primary uppercase tracking-wide">
-                Cluvo Fee
+                chigzo Fee
               </span>
               <p className="mt-1 text-lg font-black text-cluvo-primary">
                 {formatCurrency(selectedEventSummary.platformFee)}
@@ -1564,7 +1564,7 @@ export default function FinancialsPage() {
                 {formatCurrency(kpis.platformFees)}
               </p>
               <p className="mt-1 text-[11px] text-neutral-400">
-                Cluvo platform revenue
+                chigzo platform revenue
               </p>
             </div>
 
@@ -1634,7 +1634,7 @@ export default function FinancialsPage() {
                     <tr className="border-b border-neutral-200 bg-neutral-50/70 text-neutral-500 font-bold uppercase tracking-wider">
                       <th className="py-2.5 px-3">Event Name</th>
                       <th className="py-2.5 px-3 text-right">Total Collected</th>
-                      <th className="py-2.5 px-3 text-right">Cluvo Fee</th>
+                      <th className="py-2.5 px-3 text-right">chigzo Fee</th>
                       <th className="py-2.5 px-3 text-right">Refunds</th>
                       <th className="py-2.5 px-3 text-right font-black">Net Total</th>
                       <th className="py-2.5 px-3 text-right">Settled</th>

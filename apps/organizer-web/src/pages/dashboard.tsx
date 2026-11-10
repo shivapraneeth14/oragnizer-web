@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { BrandLogo } from "ui"
 import { useAuth } from "../auth-context"
 import { supabase } from "../supabase"
 import { shareBase, isMobileDevice } from "../lib/share"
@@ -437,7 +438,7 @@ export default function DashboardPage() {
         {/* Logo */}
         <div className="flex h-16 items-center justify-between border-b border-neutral-200 px-4">
           {sidebarOpen && (
-            <span className="text-lg font-bold tracking-wider text-cluvo-primary">chigzo</span>
+            <BrandLogo height={22} />
           )}
           <button
             onClick={toggleSidebar}
@@ -539,6 +540,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-3">
 
+            {!isDesktop && <BrandLogo height={20} />}
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cluvo-primary/20 text-xs font-bold text-cluvo-primary">
               {user?.email?.charAt(0).toUpperCase() || "U"}
             </div>
@@ -549,7 +551,7 @@ export default function DashboardPage() {
         <div className="overflow-y-auto p-4 sm:p-6">
           {activeSection === "dashboard" && (
             <div>
-              <h3 className="text-xl font-semibold text-neutral-900">Welcome to Cluvo</h3>
+              <h3 className="text-xl font-semibold text-neutral-900">Welcome to chigzo</h3>
               <p className="mt-2 text-sm text-neutral-500">Your community dashboard is ready. Start managing your events, members, and settings from here.</p>
               <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-soft">
@@ -618,7 +620,7 @@ export default function DashboardPage() {
                       const url = `${shareBase()}communities/${communityId}`;
                       if (navigator.share && isMobileDevice()) {
                         try {
-                          await navigator.share({ title: 'Join my community on Cluvo', url });
+                          await navigator.share({ title: 'Join my community on chigzo', url });
                         } catch {
                           // user cancelled — do nothing
                         }
@@ -667,7 +669,7 @@ export default function DashboardPage() {
                         <button
                           onClick={() => {
                             if (!communityId) return;
-                            window.location.href = `mailto:?subject=${encodeURIComponent('Join my community on Cluvo')}&body=${encodeURIComponent(`${shareBase()}communities/${communityId}`)}`;
+                            window.location.href = `mailto:?subject=${encodeURIComponent('Join my community on chigzo')}&body=${encodeURIComponent(`${shareBase()}communities/${communityId}`)}`;
                             setShowShareOptions(false);
                           }}
                           className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-neutral-700 hover:bg-neutral-100"

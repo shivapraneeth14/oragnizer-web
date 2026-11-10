@@ -143,7 +143,7 @@ describe("ProtectedRoute (Organizer Web Auth & Role Gate)", () => {
         organizer: false,
         networkError: true,
         message: "Network failure",
-        error: "Unable to reach Cluvo auth services. Please check connection.",
+        error: "Unable to reach chigzo auth services. Please check connection.",
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -173,7 +173,7 @@ describe("ProtectedRoute (Organizer Web Auth & Role Gate)", () => {
     // Verify error state
     await waitFor(() => {
       expect(
-        screen.getByText("Unable to reach Cluvo auth services. Please check connection.")
+        screen.getByText("Unable to reach chigzo auth services. Please check connection.")
       ).toBeInTheDocument()
     })
 

@@ -142,7 +142,7 @@ export default function CancellationProgressModal({
             <div className="rounded-lg bg-red-50 p-3 col-span-2">
               <span className="text-xs text-red-700">Requires Manual Attention</span>
               <p className="text-sm font-medium text-red-900">
-                {failed} refund(s) could not be completed automatically. Cluvo support has been alerted.
+                {failed} refund(s) could not be completed automatically. chigzo support has been alerted.
               </p>
             </div>
           )}

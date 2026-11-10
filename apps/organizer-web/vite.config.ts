@@ -24,11 +24,11 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
-      includeAssets: ["favicon.png", "apple-touch-icon.png", "icons/*.png"],
+      includeAssets: ["favicon.png", "apple-touch-icon.png", "icon.svg", "icons/*.png"],
       manifest: {
-        name: "Cluvo Organizer",
-        short_name: "Cluvo Organizer",
-        description: "Cluvo organizer dashboard for creating and managing events.",
+        name: "chigzo Organizer",
+        short_name: "chigzo Organizer",
+        description: "chigzo organizer dashboard for creating and managing events.",
         theme_color: "#C2185B",
         background_color: "#ffffff",
         display: "standalone",

@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
+import { BrandLogo } from "ui"
 import { useAuth } from "../Auth"
 
 export default function ForgotPasswordPage() {
@@ -15,9 +16,9 @@ export default function ForgotPasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-cluvo-primary px-4">
       <div className="w-full max-w-md animate-slide-in-right">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold tracking-wider text-white">chigzo</h1>
-          <p className="mt-2 text-sm text-white/80">Admin Portal</p>
+        <div className="mb-8 flex flex-col items-center text-center">
+          <BrandLogo variant="light" height={40} />
+          <p className="mt-3 text-sm text-white/80">Admin Portal</p>
         </div>
         <form onSubmit={handleSubmit} className="rounded-2xl bg-white p-6 shadow-strong sm:p-8">
           <h2 className="text-xl font-semibold text-neutral-900">Reset Password</h2>

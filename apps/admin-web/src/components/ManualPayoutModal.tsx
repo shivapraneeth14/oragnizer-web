@@ -415,7 +415,7 @@ export default function ManualPayoutModal({
                         </span>
                       </div>
                       <div>
-                        <span className="text-neutral-400 block">Cluvo Platform Fee</span>
+                        <span className="text-neutral-400 block">chigzo Platform Fee</span>
                         <span className="font-semibold text-neutral-800">
                           -{formatCurrency(activeEventSummary.platformFee)}
                         </span>

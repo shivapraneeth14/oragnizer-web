@@ -12,7 +12,7 @@ export const feeSections: LegalSection[] = [
     body: (
       <p>
         When someone buys a ticket, they pay the ticket price you set plus a
-        Cluvo platform fee (6% of the ticket price by default, calculated after
+        chigzo platform fee (6% of the ticket price by default, calculated after
         any coupon discount). The fee is shown to the attendee as a separate
         line at checkout.
       </p>
@@ -22,7 +22,7 @@ export const feeSections: LegalSection[] = [
     heading: "2. What you receive",
     body: (
       <p>
-        You receive 100% of the ticket price you set. The Cluvo platform fee is
+        You receive 100% of the ticket price you set. The chigzo platform fee is
         charged on top of that price — it is not deducted from your share.
         Revenue from paid events is credited to your community wallet.
       </p>

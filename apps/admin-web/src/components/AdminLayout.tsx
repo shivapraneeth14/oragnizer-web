@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
+import { BrandLogo } from "ui"
 import { useAuth } from "../Auth"
 import { supabase } from "../supabase"
 import { optionalEnv } from "../config"
@@ -85,7 +86,14 @@ export default function AdminLayout() {
         }`}
       >
         <div className="flex h-16 items-center justify-between border-b border-neutral-200 px-4">
-          {sidebarOpen && <span className="text-lg font-bold tracking-wider text-cluvo-primary">chigzo ADMIN</span>}
+          {sidebarOpen && (
+            <span className="flex items-center gap-2" data-testid="sidebar-brand">
+              <BrandLogo height={22} />
+              <span className="rounded bg-cluvo-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cluvo-primary">
+                Admin
+              </span>
+            </span>
+          )}
           <button
             onClick={toggleSidebar}
             className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700"
@@ -191,8 +199,11 @@ export default function AdminLayout() {
             </button>
             <h2 className="text-lg font-semibold text-neutral-900 capitalize">{sectionName}</h2>
           </div>
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cluvo-primary/20 text-xs font-bold text-cluvo-primary">
-            {user?.email?.charAt(0).toUpperCase() || "A"}
+          <div className="flex items-center gap-3">
+            {!isDesktop && <BrandLogo height={20} />}
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cluvo-primary/20 text-xs font-bold text-cluvo-primary">
+              {user?.email?.charAt(0).toUpperCase() || "A"}
+            </div>
           </div>
         </header>
 

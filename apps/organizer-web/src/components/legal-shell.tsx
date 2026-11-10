@@ -1,5 +1,6 @@
 import { ReactNode } from "react"
 import { Link } from "react-router-dom"
+import { BrandLogo } from "ui"
 
 export default function LegalShell({
   title,
@@ -14,8 +15,8 @@ export default function LegalShell({
     <div className="min-h-screen bg-neutral-50">
       <header className="border-b border-neutral-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
-          <Link to="/" className="text-lg font-bold tracking-[0.2em] text-cluvo-primary">
-            chigzo
+          <Link to="/" className="shrink-0">
+            <BrandLogo height={24} />
           </Link>
           <nav className="flex items-center gap-5 text-sm">
             <Link to="/privacy" className="text-neutral-600 transition hover:text-neutral-900">
@@ -36,7 +37,7 @@ export default function LegalShell({
 
       <footer className="border-t border-neutral-200 bg-white">
         <div className="mx-auto flex max-w-3xl flex-col items-center justify-between gap-3 px-6 py-6 text-sm text-neutral-500 sm:flex-row">
-          <span>&copy; {new Date().getFullYear()} Cluvo</span>
+          <span>&copy; {new Date().getFullYear()} chigzo</span>
           <div className="flex items-center gap-5">
             <Link to="/privacy" className="transition hover:text-neutral-900">
               Privacy Policy

@@ -62,7 +62,7 @@ export const termsSections: LegalSection[] = [
       <p>
         You retain ownership of content you post. By posting, you grant us a non-exclusive
         license to host, display, and use that content solely to operate the Services. The
-        Cluvo name, logos, and the Services themselves are protected by intellectual property
+        chigzo name, logos, and the Services themselves are protected by intellectual property
         laws and may not be copied or reused without our permission.
       </p>
     ),

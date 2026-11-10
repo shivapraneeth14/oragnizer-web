@@ -37,7 +37,7 @@ export default function EmailFirst() {
         </div>
       )}
 
-      <h2 className="text-xl font-semibold text-neutral-900">Welcome to Cluvo</h2>
+      <h2 className="text-xl font-semibold text-neutral-900">Welcome to chigzo</h2>
       <p className="mt-1 text-sm text-neutral-500">Continue with Google to sign in or create your account.</p>
 
       <button

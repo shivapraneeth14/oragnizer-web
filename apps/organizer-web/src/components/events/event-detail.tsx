@@ -571,7 +571,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                     const url = `${shareBase()}events/${event.id}`;
                     if (navigator.share && isMobileDevice()) {
                       try {
-                        await navigator.share({ title: `Check out ${event.title} on Cluvo`, url });
+                        await navigator.share({ title: `Check out ${event.title} on chigzo`, url });
                       } catch {
                         // user cancelled — do nothing
                       }
@@ -604,7 +604,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                       <div className="p-1.5">
                         <button
                           onClick={() => {
-                            const text = encodeURIComponent(`Check out ${event.title} on Cluvo!\n${shareBase()}events/${event.id}`);
+                            const text = encodeURIComponent(`Check out ${event.title} on chigzo!\n${shareBase()}events/${event.id}`);
                             window.open(`https://wa.me/?text=${text}`, '_blank');
                             setShowShareOptions(false);
                           }}
@@ -615,7 +615,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                         </button>
                         <button
                           onClick={() => {
-                            window.location.href = `mailto:?subject=${encodeURIComponent(`Check out ${event.title} on Cluvo`)}&body=${encodeURIComponent(`${shareBase()}events/${event.id}`)}`;
+                            window.location.href = `mailto:?subject=${encodeURIComponent(`Check out ${event.title} on chigzo`)}&body=${encodeURIComponent(`${shareBase()}events/${event.id}`)}`;
                             setShowShareOptions(false);
                           }}
                           className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-neutral-700 hover:bg-neutral-100"

@@ -828,7 +828,7 @@ export default function PayoutSection({ communityId }: Props) {
                   </p>
                 </div>
                 <div className="rounded-xl bg-neutral-50 p-3">
-                  <span className="text-[11px] font-medium text-neutral-400">Cluvo Fee</span>
+                  <span className="text-[11px] font-medium text-neutral-400">chigzo Fee</span>
                   <p className="text-base font-bold text-neutral-700 mt-0.5">
                     -{formatCurrency(selectedEventSummary.platformFee)}
                   </p>

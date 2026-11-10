@@ -5,8 +5,8 @@ export default function TermsPage() {
   return (
     <LegalShell title="Terms of Service" updated="August 7, 2026">
       <p>
-        These Terms of Service ("Terms") govern your use of the Cluvo mobile app, the organizer
-        web app, and related services (together, the "Services"), operated by Cluvo ("we", "us").
+        These Terms of Service ("Terms") govern your use of the chigzo mobile app, the organizer
+        web app, and related services (together, the "Services"), operated by chigzo ("we", "us").
         By using the Services, you agree to these Terms.
       </p>
       {termsSections.map((s) => (

@@ -333,7 +333,7 @@ export default function TransactionDetailDrawer({ transaction, onClose, onAction
                   </dd>
                 </div>
                 <div className="flex justify-between py-1 border-b border-neutral-100">
-                  <dt className="text-neutral-500">Cluvo Platform Fee (6%)</dt>
+                  <dt className="text-neutral-500">chigzo Platform Fee (6%)</dt>
                   <dd className="font-semibold text-neutral-900">
                     {formatCurrency(transaction.platform_fee)}
                   </dd>

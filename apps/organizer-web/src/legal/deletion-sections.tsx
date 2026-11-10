@@ -11,7 +11,7 @@ export const deletionSections: LegalSection[] = [
     heading: "1. How to delete your account",
     body: (
       <p>
-        Open the Cluvo mobile app, go to Profile → Delete Account, and confirm.
+        Open the chigzo mobile app, go to Profile → Delete Account, and confirm.
         Deletion is permanent: your profile, wishlist, reviews, notifications,
         and community memberships are removed.
       </p>

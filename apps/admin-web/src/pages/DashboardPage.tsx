@@ -53,7 +53,7 @@ export default function DashboardPage() {
     <div className="space-y-8">
       <div>
         <h3 className="text-xl font-semibold text-neutral-900">Platform Overview</h3>
-        <p className="mt-2 text-sm text-neutral-500">Summary of all activity across Cluvo.</p>
+        <p className="mt-2 text-sm text-neutral-500">Summary of all activity across chigzo.</p>
         <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard title="Total Communities" value={loading ? "..." : counts.communities} label="All communities on the platform" />
           <StatCard title="Total Users" value={loading ? "..." : counts.users} label="All registered users" />

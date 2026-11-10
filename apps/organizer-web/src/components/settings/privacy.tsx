@@ -17,7 +17,7 @@ interface RowConfig {
 
 const rows: RowConfig[] = [
   { id: "privacy", title: "Privacy Policy", subtitle: "How we collect, use, and share your data" },
-  { id: "terms", title: "Terms of Service", subtitle: "Rules for using Cluvo" },
+  { id: "terms", title: "Terms of Service", subtitle: "Rules for using chigzo" },
   { id: "fees", title: "Fees & Payouts", subtitle: "Platform fee, settlements, and refunds" },
   { id: "support", title: "Support", subtitle: SUPPORT_EMAIL },
   { id: "deletion", title: "Delete Account", subtitle: "How to permanently remove your account" },
@@ -28,7 +28,7 @@ export default function Privacy() {
 
   const handleRow = (id: RowConfig["id"]) => {
     if (id === "support") {
-      window.location.href = `mailto:${SUPPORT_EMAIL}?subject=Cluvo%20Support`
+      window.location.href = `mailto:${SUPPORT_EMAIL}?subject=chigzo%20Support`
       return
     }
     setOpenDialog(id)

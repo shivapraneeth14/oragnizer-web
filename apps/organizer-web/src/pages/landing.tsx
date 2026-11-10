@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { Link } from "react-router-dom"
+import { BrandLogo } from "ui"
 import { supabase } from "../supabase"
 import { useAuth } from "../auth-context"
 import EmailFirst from "../components/email-first"
@@ -183,10 +184,8 @@ export default function LandingPage() {
       <div className="flex min-h-screen flex-col md:flex-row">
         <div className="hidden md:flex md:w-[58%] items-center justify-center">
           <div className="flex flex-col items-start">
-            <h1 className="text-8xl font-bold tracking-[0.15em] text-white">
-              chigzo
-            </h1>
-            <p className="mt-4 text-lg font-light tracking-wider text-white/70">
+            <BrandLogo variant="light" height={112} />
+            <p className="mt-6 text-lg font-light tracking-wider text-white/70">
               Connecting communities
             </p>
           </div>
@@ -208,9 +207,9 @@ export default function LandingPage() {
             )}
             <div className="flex-1 flex items-center justify-center px-6 py-12 md:px-14">
               <div className="w-full max-w-sm mx-auto">
-                <div className="mb-8 text-center md:hidden">
-                  <h1 className="text-4xl font-bold tracking-[0.15em] text-cluvo-primary">chigzo</h1>
-                  <p className="mt-2 text-sm font-light tracking-wider text-neutral-500">Connecting communities</p>
+                <div className="mb-8 flex flex-col items-center text-center md:hidden">
+                  <BrandLogo height={40} />
+                  <p className="mt-3 text-sm font-light tracking-wider text-neutral-500">Connecting communities</p>
                 </div>
 
                 {flow === "auth" && <EmailFirst />}
@@ -292,7 +291,7 @@ function LegalFooter() {
   return (
     <div className="border-t border-white/15 bg-cluvo-primary-dark px-6 py-6">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-sm text-white/70 sm:flex-row">
-        <span>&copy; {new Date().getFullYear()} Cluvo</span>
+        <span>&copy; {new Date().getFullYear()} chigzo</span>
         <div className="flex items-center gap-6">
           <Link to="/privacy" className="transition hover:text-white">
             Privacy Policy
@@ -316,7 +315,7 @@ function FeaturesSection() {
         <div className="text-center">
           <h2 className="text-3xl font-bold text-neutral-900">Everything you need to run a community</h2>
           <p className="mt-4 text-lg text-neutral-500">
-            From events to payments, Cluvo has you covered.
+            From events to payments, chigzo has you covered.
           </p>
         </div>
         <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
