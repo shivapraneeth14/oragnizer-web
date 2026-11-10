@@ -7,7 +7,7 @@ export const handlers = [
   http.get(`${BASE_URL}/auth/v1/user`, () => {
     return HttpResponse.json({
       id: "admin-user-id",
-      email: "admin@cluvo.com",
+      email: "admin@chigzo.com",
       app_metadata: { provider: "email" },
       user_metadata: { first_name: "Admin", last_name: "Superuser" },
     })
@@ -21,7 +21,7 @@ export const handlers = [
       if (body.password === "WrongPassword!") {
         return HttpResponse.json({ error: "Invalid login credentials", message: "Invalid login credentials" }, { status: 400 })
       }
-      if (body.email === "banned@cluvo.com") {
+      if (body.email === "banned@chigzo.com") {
         return HttpResponse.json({ error: "User is banned", message: "User is banned" }, { status: 400 })
       }
       return HttpResponse.json({
@@ -45,7 +45,7 @@ export const handlers = [
   http.put(`${BASE_URL}/auth/v1/user`, () => {
     return HttpResponse.json({
       id: "admin-user-id",
-      email: "admin@cluvo.com",
+      email: "admin@chigzo.com",
     })
   }),
 
@@ -357,7 +357,7 @@ export const handlers = [
       },
       {
         id: "admin-user-id",
-        email: "admin@cluvo.com",
+        email: "admin@chigzo.com",
         first_name: "Admin",
         last_name: "User",
         is_admin: true,

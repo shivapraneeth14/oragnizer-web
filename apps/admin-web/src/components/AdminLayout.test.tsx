@@ -9,7 +9,7 @@ import { http, HttpResponse } from "msw"
 const BASE_URL = "http://127.0.0.1:54321"
 
 let mockAuthState = {
-  user: { id: "admin-id", email: "admin@cluvo.com" } as any,
+  user: { id: "admin-id", email: "admin@chigzo.com" } as any,
   session: { access_token: "mock-token" } as any,
   loading: false,
   isAdmin: true,
@@ -24,7 +24,7 @@ describe("AdminLayout (Admin Portal Shell & Route Guard)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockAuthState = {
-      user: { id: "admin-id", email: "admin@cluvo.com" },
+      user: { id: "admin-id", email: "admin@chigzo.com" },
       session: { access_token: "mock-token" },
       loading: false,
       isAdmin: true,

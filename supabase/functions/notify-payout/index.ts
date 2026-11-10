@@ -1,6 +1,6 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
-import { sendCluvoEmail } from "../_shared/send-email.ts"
+import { sendChigzoEmail } from "../_shared/send-email.ts"
 import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -125,13 +125,13 @@ A manual payout of ₹${amountRupees} has been initiated for your community "${c
 ${payoutDetails}- Status: Pending Your Digital Confirmation
 
 Next Steps:
-Please sign in to your Cluvo Organizer Portal to review and confirm receipt of these funds.
+Please sign in to your Chigzo Organizer Portal to review and confirm receipt of these funds.
 Once accepted, this amount will be reconciled with your community wallet and recorded as settled.
 
 If you have any questions or notice an issue with this transfer, you can flag it directly by selecting "Report Issue / Dispute" inside your Organizer Portal.
 
 Warm regards,
-The Cluvo Team`
+The Chigzo Team`
 
     if (context === "verified") {
       subject = `[Settled] Payout of ₹${amountRupees} marked received for ${community.name}`
@@ -144,7 +144,7 @@ ${payoutDetails}- Status: Settled / Received
 No further action is required. This amount is now recorded as paid out from your community wallet.
 
 Warm regards,
-The Cluvo Team`
+The Chigzo Team`
     } else if (context === "reconfirmed") {
       subject = `[Action Required] Please re-confirm payout of ₹${amountRupees} for ${community.name}`
       textBody = `Hello ${ownerName},
@@ -154,10 +154,10 @@ We re-checked the settlement below with the bank and believe it was delivered to
 ${payoutDetails}- Status: Pending Your Digital Confirmation
 
 Next Steps:
-Sign in to your Cluvo Organizer Portal and confirm receipt. If the funds still have not arrived, select "Report Issue / Dispute" again and attach your bank statement.
+Sign in to your Chigzo Organizer Portal and confirm receipt. If the funds still have not arrived, select "Report Issue / Dispute" again and attach your bank statement.
 
 Warm regards,
-The Cluvo Team`
+The Chigzo Team`
     } else if (context === "reissued") {
       subject = `[Action Required] Payout reissued: ₹${amountRupees} for ${community.name}`
       textBody = `Hello ${ownerName},
@@ -167,17 +167,17 @@ The earlier transfer could not be completed, so we reissued the payout below wit
 ${payoutDetails}- Status: Pending Your Digital Confirmation
 
 Next Steps:
-Please sign in to your Cluvo Organizer Portal to review and confirm receipt of these funds.
+Please sign in to your Chigzo Organizer Portal to review and confirm receipt of these funds.
 
 Warm regards,
-The Cluvo Team`
+The Chigzo Team`
     }
 
     try {
-      await sendCluvoEmail(ownerProfile.email, subject, textBody)
+      await sendChigzoEmail(ownerProfile.email, subject, textBody)
       return jsonResponse({ ok: true, email_sent: true, recipient: ownerProfile.email })
     } catch (emailErr) {
-      logError("notify-payout sendCluvoEmail failed:", emailErr)
+      logError("notify-payout sendChigzoEmail failed:", emailErr)
       // Return ok: true so caller doesn't fail the recorded transaction, but note email_sent: false
       return jsonResponse({ ok: true, email_sent: false, error: "SMTP delivery failed" })
     }

@@ -10,7 +10,7 @@ const BASE_URL = "http://127.0.0.1:54321"
 // Mock useAuth
 const mockAdminUser = {
   id: "admin-auth-uuid-456",
-  email: "admin@cluvo.com",
+  email: "admin@chigzo.com",
 }
 
 let currentUser: { id: string; email: string } | null = mockAdminUser

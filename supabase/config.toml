@@ -251,7 +251,7 @@ port = 465
 user = "env(SMTP_USER)"
 pass = "env(SMTP_PASS)"
 admin_email = "env(SMTP_SENDER_EMAIL)"
-sender_name = "Cluvo"
+sender_name = "Chigzo"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

@@ -23,7 +23,7 @@ export type NextStep = "password" | "google" | "signup"
 export const NEXT_STEP_MESSAGES: Record<NextStep, string> = {
   password: "Enter your password to continue.",
   google: "This email is registered with Google. Continue with Google to sign in.",
-  signup: "Looks like you're new here. Create your Cluvo account to get started.",
+  signup: "Looks like you're new here. Create your Chigzo account to get started.",
 }
 
 // The single decision the email step makes. `hasPassword` must come from an

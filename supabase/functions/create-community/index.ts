@@ -2,7 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { isDeletionPending, deletionPendingResponse } from "../_shared/deletion.ts"
-import { sendCluvoEmail } from "../_shared/send-email.ts"
+import { sendChigzoEmail } from "../_shared/send-email.ts"
 import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -270,7 +270,7 @@ Deno.serve(async (req) => {
       const subject = `Community Submitted for Review: "${community_name.trim()}"`
       const body = `Hello,
 
-Thank you for creating "${community_name.trim()}" on Cluvo.
+Thank you for creating "${community_name.trim()}" on Chigzo.
 
 Your community application has been submitted to the admin team for review and verification.
 Once verified and approved, your community will be activated and you will gain full access to your Organizer Dashboard.
@@ -281,12 +281,12 @@ Submission Summary:
 - Contact Email: ${contact_email.trim()}
 - Contact Phone: ${contact_phone.trim()}
 
-You can log in to your Cluvo Organizer Portal at any time to check the live status of your application.
+You can log in to your Chigzo Organizer Portal at any time to check the live status of your application.
 
 Warm regards,
-The Cluvo Team`
+The Chigzo Team`
 
-      sendCluvoEmail(user.email, subject, body).catch((e) => {
+      sendChigzoEmail(user.email, subject, body).catch((e) => {
         logError("create-community confirmation email error", e)
       })
     }

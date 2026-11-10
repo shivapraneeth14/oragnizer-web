@@ -1,6 +1,6 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
-import { sendCluvoEmail } from "../_shared/send-email.ts"
+import { sendChigzoEmail } from "../_shared/send-email.ts"
 import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -88,37 +88,37 @@ Deno.serve(async (req) => {
     let textBody = ""
 
     if (action === "approved") {
-      subject = `🎉 Community Approved: Welcome to Cluvo, ${app.community_name}!`
+      subject = `🎉 Community Approved: Welcome to Chigzo, ${app.community_name}!`
       textBody = `Hello ${applicantName},
 
-Congratulations! Your community "${app.community_name}" has been approved and activated by the Cluvo team.
+Congratulations! Your community "${app.community_name}" has been approved and activated by the Chigzo team.
 
 Your community is now live, visible in discovery, and you have full access to your Organizer Dashboard. You can now publish events, build your community membership, and manage revenue.
 
 Next steps:
-Log in to your Cluvo Organizer Portal to start setting up your first event!
+Log in to your Chigzo Organizer Portal to start setting up your first event!
 
 Warm regards,
-The Cluvo Team`
+The Chigzo Team`
     } else {
-      subject = `Update on your Cluvo Community Application: ${app.community_name}`
+      subject = `Update on your Chigzo Community Application: ${app.community_name}`
       textBody = `Hello ${applicantName},
 
-Thank you for your interest in creating "${app.community_name}" on Cluvo.
+Thank you for your interest in creating "${app.community_name}" on Chigzo.
 Our verification team has reviewed your application.
 
 Feedback from our team:
 ${reason || app.rejection_reason || "Your application did not meet our verification criteria at this time."}
 
 Next steps:
-You can log in to your Cluvo Organizer Portal at any time to revise the required information and re-submit your application for review.
+You can log in to your Chigzo Organizer Portal at any time to revise the required information and re-submit your application for review.
 
 Warm regards,
-The Cluvo Team`
+The Chigzo Team`
     }
 
     try {
-      await sendCluvoEmail(recipientEmail, subject, textBody)
+      await sendChigzoEmail(recipientEmail, subject, textBody)
       return jsonResponse({ ok: true, email_sent: true, recipient: recipientEmail })
     } catch (emailErr) {
       logError("notify-community-approval email delivery error:", emailErr)

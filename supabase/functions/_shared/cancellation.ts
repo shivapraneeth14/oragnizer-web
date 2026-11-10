@@ -1,5 +1,5 @@
 // ============================================================================
-// CLUVO — Shared Types & Helpers for Durable Event Cancellation & Bulk Refunds
+// CHIGZO — Shared Types & Helpers for Durable Event Cancellation & Bulk Refunds
 // ============================================================================
 
 export type TaskStatus =

@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Cluvo (TEST)",
+      "name": "Chigzo (TEST)",
       "type": "dart",
       "request": "launch",
       "program": "apps/mobile/lib/main.dart",

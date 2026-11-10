@@ -4,7 +4,7 @@ import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-
 import { isOrganizerAccount } from "../_shared/organizer.ts"
 import { findUserByEmail, hasEmailIdentity } from "../_shared/users.ts"
 import { generateOtpCode, otpHash } from "../_shared/otp.ts"
-import { sendCluvoEmail } from "../_shared/send-email.ts"
+import { sendChigzoEmail } from "../_shared/send-email.ts"
 import { logError } from "../_shared/logger.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -115,12 +115,12 @@ Deno.serve(async (req) => {
     }, { onConflict: "user_id" })
     if (upsertError) throw upsertError
 
-    await sendCluvoEmail(
+    await sendChigzoEmail(
       normalizedEmail,
-      "Your Cluvo verification code",
-      `Your Cluvo password reset code is ${code}. It expires in 10 minutes.\n\n` +
+      "Your Chigzo verification code",
+      `Your Chigzo password reset code is ${code}. It expires in 10 minutes.\n\n` +
         `If you didn't request this, you can safely ignore this email and your password will stay the same.\n\n` +
-        `— Cluvo`,
+        `— Chigzo`,
     )
 
     return jsonResponse({ sent: true, expiresIn: OTP_TTL_SECONDS })

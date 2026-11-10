@@ -10,7 +10,7 @@ const BASE_URL = "http://127.0.0.1:54321"
 // Mock useAuth
 vi.mock("../Auth", () => ({
   useAuth: () => ({
-    user: { id: "admin-user-id", email: "admin@cluvo.com" },
+    user: { id: "admin-user-id", email: "admin@chigzo.com" },
   }),
 }))
 

@@ -2,7 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { otpHash } from "../_shared/otp.ts"
-import { sendCluvoEmail } from "../_shared/send-email.ts"
+import { sendChigzoEmail } from "../_shared/send-email.ts"
 import { getCorsHeaders } from "../_shared/cors.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
@@ -96,12 +96,12 @@ Deno.serve(async (req) => {
       const { data: user } = await supabase.auth.admin.getUserById(row.user_id)
       const email = user.user?.email
       if (email) {
-        await sendCluvoEmail(
+        await sendChigzoEmail(
           email,
-          "Your Cluvo password was changed",
-          `The password for your Cluvo account was changed on ${new Date().toISOString()}.\n\n` +
+          "Your Chigzo password was changed",
+          `The password for your Chigzo account was changed on ${new Date().toISOString()}.\n\n` +
             `If this was you, no further action is needed.\n\n` +
-            `If you didn't make this change, please contact support immediately.\n\n— Cluvo`,
+            `If you didn't make this change, please contact support immediately.\n\n— Chigzo`,
         )
       }
     } catch (err) {

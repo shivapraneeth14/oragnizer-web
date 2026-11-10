@@ -596,7 +596,7 @@ export default function FinancialsPage() {
     const eventName = selectedEventId !== "all"
       ? (events.find((e) => e.id === selectedEventId)?.title || "event").replace(/[^a-z0-9]/gi, "_")
       : "all_events"
-    const filename = `cluvo_ledger_${commName}_${eventName}_${new Date().toISOString().slice(0, 10)}.csv`
+    const filename = `chigzo_ledger_${commName}_${eventName}_${new Date().toISOString().slice(0, 10)}.csv`
 
     const headers = [
       "Timestamp (IST)",

@@ -11,7 +11,7 @@ import { requiredEnv } from "./env.ts"
 // runtimes never hold an idle connection. Never put passwords or codes in
 // subject lines or logs.
 
-export async function sendCluvoEmail(
+export async function sendChigzoEmail(
   to: string,
   subject: string,
   textBody: string,
@@ -31,7 +31,7 @@ export async function sendCluvoEmail(
 
   try {
     await transport.sendMail({
-      from: `Cluvo <${sender}>`,
+      from: `Chigzo <${sender}>`,
       to,
       subject,
       text: textBody,

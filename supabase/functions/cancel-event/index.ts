@@ -15,7 +15,7 @@ const corsHeaders = {
 }
 
 // ============================================================================
-// CLUVO — STAGE 5 MILESTONE B: DURABLE EVENT CANCELLATION
+// CHIGZO — STAGE 5 MILESTONE B: DURABLE EVENT CANCELLATION
 //
 // Fast asynchronous cancellation:
 // 1. Authenticates caller & validates rate limits (< 15ms).

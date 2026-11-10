@@ -21,25 +21,25 @@ function AuthTestConsumer() {
       <div data-testid="error">{error || "no-error"}</div>
 
       <button
-        onClick={() => signIn("admin@cluvo.com", "CorrectPassword123!")}
+        onClick={() => signIn("admin@chigzo.com", "CorrectPassword123!")}
       >
         Sign In Admin
       </button>
 
       <button
-        onClick={() => signIn("admin@cluvo.com", "WrongPassword!")}
+        onClick={() => signIn("admin@chigzo.com", "WrongPassword!")}
       >
         Sign In Wrong Password
       </button>
 
       <button
-        onClick={() => signIn("banned@cluvo.com", "AnyPassword123!")}
+        onClick={() => signIn("banned@chigzo.com", "AnyPassword123!")}
       >
         Sign In Banned
       </button>
 
       <button
-        onClick={() => signIn("member@cluvo.com", "MemberPassword123!")}
+        onClick={() => signIn("member@chigzo.com", "MemberPassword123!")}
       >
         Sign In Member
       </button>
@@ -74,7 +74,7 @@ describe("AuthContext (Admin Web Authentication & RBAC Gate)", () => {
     await user.click(screen.getByRole("button", { name: "Sign In Admin" }))
 
     await waitFor(() => {
-      expect(screen.getByTestId("user").textContent).toBe("admin@cluvo.com")
+      expect(screen.getByTestId("user").textContent).toBe("admin@chigzo.com")
       expect(screen.getByTestId("is-admin").textContent).toBe("admin")
       expect(screen.getByTestId("error").textContent).toBe("no-error")
     })
