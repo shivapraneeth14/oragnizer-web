@@ -128,6 +128,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611110002_strengthen_free_ticket_token.sql",
     "202611110003_add_get_user_id_by_email.sql",
     "202611110004_restrict_financial_reads.sql",
+    "202611110005_harden_delete_user_auth_cascade_search_path.sql",
   ])
 })
 
