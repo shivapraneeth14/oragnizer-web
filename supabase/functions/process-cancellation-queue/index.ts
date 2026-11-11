@@ -7,6 +7,7 @@ import {
   RazorpayUncertainOutcomeError,
 } from "../_shared/razorpay.ts"
 import { calculateTaskBackoff, type RefundTask } from "../_shared/cancellation.ts"
+import { safeEqual } from "../_shared/crypto.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -35,8 +36,11 @@ Deno.serve(async (req) => {
     // 1. Verify caller secret
     const incomingWorkerSecret = req.headers.get("x-worker-secret")
     const authHeader = req.headers.get("Authorization")
-    const isServiceAuth = authHeader === `Bearer ${supabaseServiceKey}`
-    const isSecretAuth = Boolean(RECONCILE_SECRET && incomingWorkerSecret === RECONCILE_SECRET)
+    const isServiceAuth =
+      authHeader !== null && safeEqual(authHeader, `Bearer ${supabaseServiceKey}`)
+    const isSecretAuth =
+      !!RECONCILE_SECRET && incomingWorkerSecret !== null &&
+      safeEqual(incomingWorkerSecret, RECONCILE_SECRET)
 
     if (!isServiceAuth && !isSecretAuth) {
       return new Response(JSON.stringify({ error: "Unauthorized worker request" }), {
