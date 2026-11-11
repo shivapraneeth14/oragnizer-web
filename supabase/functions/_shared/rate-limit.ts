@@ -100,7 +100,19 @@ export function rateLimitResponse(retryAfter: number): Response {
 }
 
 export function getClientIp(req: Request): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    ?? req.headers.get("x-real-ip")
-    ?? "unknown"
+  // Never trust the LEFTMOST x-forwarded-for entry: that is whatever the
+  // caller supplied, so an attacker can mint a fresh rate-limit bucket per
+  // request by rotating it. Prefer the platform-set x-real-ip; otherwise use
+  // the RIGHTMOST x-forwarded-for hop, which is the one appended by the
+  // trusted edge proxy.
+  const realIp = req.headers.get("x-real-ip")?.trim()
+  if (realIp) return realIp
+
+  const forwarded = req.headers.get("x-forwarded-for")
+  if (forwarded) {
+    const hops = forwarded.split(",").map((h) => h.trim()).filter(Boolean)
+    if (hops.length > 0) return hops[hops.length - 1]
+  }
+
+  return "unknown"
 }
