@@ -126,6 +126,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611070008_admin_writers_durable_clawbacks.sql",
     "202611110001_fix_admin_refund_rpc_authz.sql",
     "202611110002_strengthen_free_ticket_token.sql",
+    "202611110003_add_get_user_id_by_email.sql",
   ])
 })
 
