@@ -41,7 +41,8 @@ Deno.serve(async (req) => {
 
     if (!community) return new Response(JSON.stringify({ error: "Community not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
 
-    // Allow owner or team (ORGANIZER/MODERATOR/OWNER)
+    // Allow owner or organizer. MODERATOR is deliberately excluded from
+    // financial reads (see migration 202611110004).
     const isOwner = community.owner_id === user.id
     if (!isOwner) {
       const { data: membership } = await supabase
@@ -52,8 +53,8 @@ Deno.serve(async (req) => {
         .maybeSingle()
 
       const role = membership?.role
-      if (!role || !["OWNER", "ORGANIZER", "MODERATOR"].includes(role)) {
-        return new Response(JSON.stringify({ error: "Only the community owner or team can view the statement" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+      if (!role || !["OWNER", "ORGANIZER"].includes(role)) {
+        return new Response(JSON.stringify({ error: "Only the community owner or organizers can view the statement" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
       }
     }
 
