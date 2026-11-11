@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { logError } from "../_shared/logger.ts"
 import { getCorsHeaders } from "../_shared/cors.ts"
+import { isCommunityInClosureGrace, COMMUNITY_CLOSING_MESSAGE } from "../_shared/deletion.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -52,6 +53,10 @@ Deno.serve(async (req) => {
 
     if (!community) return new Response(JSON.stringify({ error: "Community not found" }), { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } })
     if (community.owner_id !== user.id) return new Response(JSON.stringify({ error: "Only the community owner can set up payouts" }), { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } })
+
+    if (await isCommunityInClosureGrace(supabase, community_id)) {
+      return new Response(JSON.stringify({ error: COMMUNITY_CLOSING_MESSAGE }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
 
     const maskedNumber = "xxxxxx" + cleanAccount.slice(-4)
     const { data: existingBen } = await supabase

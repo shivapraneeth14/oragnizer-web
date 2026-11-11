@@ -2,6 +2,7 @@ import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { getCorsHeaders } from "../_shared/cors.ts"
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { isCommunityInClosureGrace, COMMUNITY_CLOSING_MESSAGE } from "../_shared/deletion.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -75,6 +76,10 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Only community owners, organizers, or administrators can remove members" }),
         { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
       )
+    }
+
+    if (await isCommunityInClosureGrace(supabase, community_id)) {
+      return new Response(JSON.stringify({ error: COMMUNITY_CLOSING_MESSAGE }), { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
     // 2. Fetch target member

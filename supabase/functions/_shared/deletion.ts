@@ -89,3 +89,22 @@ export function deletionGraceForbiddenResponse(req?: Request): Response {
     },
   )
 }
+
+// --- Community closure (scheduled deletion) guards -------------------------
+
+export const COMMUNITY_CLOSING_MESSAGE =
+  "This community is scheduled for closure. Changes are frozen until the closure is cancelled or the grace period ends."
+
+// True when a community is in its closure/grace window (scheduled for deletion),
+// during which service-role mutations must be frozen to match the DB trigger.
+export async function isCommunityInClosureGrace(
+  supabase: SupabaseClient,
+  communityId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("communities")
+    .select("closed_at, deletion_grace_started_at")
+    .eq("id", communityId)
+    .maybeSingle()
+  return Boolean(data?.closed_at || data?.deletion_grace_started_at)
+}

@@ -1,6 +1,7 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
 import { logError } from "../_shared/logger.ts"
+import { isCommunityInClosureGrace, COMMUNITY_CLOSING_MESSAGE } from "../_shared/deletion.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -52,6 +53,12 @@ Deno.serve(async (req) => {
     if (!community) {
       return new Response(JSON.stringify({ error: "You don't own a community." }), {
         status: 404, headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    if (await isCommunityInClosureGrace(supabase, community.id)) {
+      return new Response(JSON.stringify({ error: COMMUNITY_CLOSING_MESSAGE }), {
+        status: 409, headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
 
