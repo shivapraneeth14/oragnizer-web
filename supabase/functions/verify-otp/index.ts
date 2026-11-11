@@ -77,10 +77,10 @@ Deno.serve(async (req) => {
     }
 
     if ((row.otp_attempts ?? 0) >= MAX_ATTEMPTS) {
-      return jsonResponse(
-        { error: "Too many attempts. Request a new code and try again." },
-        429,
-      )
+      // Generic reply (not a distinct 429): a specific "too many attempts"
+      // response is only reachable for a real account with a live code, so it
+      // would leak that the email exists. The code is unusable either way.
+      return jsonResponse({ error: INVALID_CODE_MESSAGE }, 400)
     }
 
     const matches = await otpMatches(code.trim(), row.otp_hash)
@@ -101,10 +101,8 @@ Deno.serve(async (req) => {
           target_id: user.id,
           details: { attempts },
         })
-        return jsonResponse(
-          { error: "Too many attempts. Request a new code and try again." },
-          429,
-        )
+        // Generic reply so the lockout cannot be used to confirm an account.
+        return jsonResponse({ error: INVALID_CODE_MESSAGE }, 400)
       }
       await supabase
         .from("password_reset_otps")
