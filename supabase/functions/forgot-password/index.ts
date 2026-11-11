@@ -35,6 +35,14 @@ const UNIFIED_MESSAGE =
   "If your email uses password login, a verification code has been sent. " +
   "If it uses Google, please sign in with Google instead."
 
+// Anti-enumeration: every non-malformed request returns the SAME body and
+// status, regardless of whether the address exists, uses Google, is an
+// organizer, or is inside the resend cooldown. A caller cannot distinguish an
+// existing address from a missing one. Only a real password account actually
+// receives a code.
+const neutralResponse = () =>
+  jsonResponse({ sent: true, expiresIn: OTP_TTL_SECONDS, message: UNIFIED_MESSAGE })
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders })
@@ -59,19 +67,19 @@ Deno.serve(async (req) => {
 
     const user = await findUserByEmail(supabase, normalizedEmail)
     if (!user) {
-      return jsonResponse({ sent: false, message: UNIFIED_MESSAGE })
+      return neutralResponse()
     }
 
     // Google-only accounts have no password to reset — no code is sent, but the
     // reply stays identical to every other non-send case.
     if (!hasEmailIdentity(user.identities ?? [])) {
-      return jsonResponse({ sent: false, message: UNIFIED_MESSAGE })
+      return neutralResponse()
     }
 
     if (requireOrganizer === true) {
       const isOrganizer = await isOrganizerAccount(supabase, user.id)
       if (!isOrganizer) {
-        return jsonResponse({ sent: false, message: UNIFIED_MESSAGE })
+        return neutralResponse()
       }
     }
 
@@ -89,10 +97,9 @@ Deno.serve(async (req) => {
     ) {
       const created = new Date(existing.created_at).getTime()
       if (Date.now() - created < RESEND_COOLDOWN_SECONDS * 1000) {
-        return jsonResponse(
-          { error: "Please wait a moment before requesting another code." },
-          429,
-        )
+        // Do not send another code yet, but keep the reply indistinguishable
+        // from every other branch (no account-specific 429).
+        return neutralResponse()
       }
     }
 
@@ -123,7 +130,7 @@ Deno.serve(async (req) => {
         `— Chigzo`,
     )
 
-    return jsonResponse({ sent: true, expiresIn: OTP_TTL_SECONDS })
+    return neutralResponse()
   } catch (err) {
     logError("forgot-password", err)
     return jsonResponse({ error: "Something went wrong. Try again." }, 500)
