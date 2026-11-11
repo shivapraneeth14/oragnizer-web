@@ -40,7 +40,10 @@ const SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY
 const RAZORPAY_KEY_ID = env.RAZORPAY_KEY_ID
 const RAZORPAY_KEY_SECRET = env.RAZORPAY_KEY_SECRET
 const RAZORPAY_WEBHOOK_SECRET = env.RAZORPAY_WEBHOOK_SECRET
-const RECONCILE_SECRET = "DOHDlQEwCb9Mrq5B9j+gM/s0fYRUk+jpqXNCCOLu7dM="
+const RECONCILE_SECRET = env.RECONCILE_SECRET
+if (!RECONCILE_SECRET) {
+  throw new Error("CRITICAL HALT: RECONCILE_SECRET is not set in supabase/.env")
+}
 
 // Absolute Safeguard Assertions
 if (!SUPABASE_URL.includes("ofvfasdgdwkehdcjugnf")) {
