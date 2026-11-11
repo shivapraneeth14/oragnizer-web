@@ -49,6 +49,11 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Authenticated abuse guard keyed on the user id (cannot be spoofed by a
+    // client-supplied IP header). Complements the best-effort IP check above.
+    const userRl = await checkRateLimit(user.id, "create-community")
+    if (!userRl.allowed) return rateLimitResponse(userRl.retryAfter)
+
     const { data: existingOwner } = await supabase
       .from("community_members")
       .select("community_id")

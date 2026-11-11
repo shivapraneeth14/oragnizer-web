@@ -65,6 +65,11 @@ Deno.serve(async (req) => {
 
     const normalizedEmail = email.trim().toLowerCase()
 
+    // Per-email flood guard (spoof-proof): stop repeated reset requests for a
+    // single address without revealing whether it exists (neutral response).
+    const emailRl = await checkRateLimit(normalizedEmail, "forgot-password-email")
+    if (!emailRl.allowed) return neutralResponse()
+
     const user = await findUserByEmail(supabase, normalizedEmail)
     if (!user) {
       return neutralResponse()

@@ -1,6 +1,6 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
-import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { GRACE_DAYS } from "../_shared/deletion.ts"
 import { logError } from "../_shared/logger.ts"
 
@@ -143,8 +143,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    const ip = getClientIp(req)
-    const rl = await checkRateLimit(ip, "delete-account")
+    const rl = await checkRateLimit(user.id, "delete-account")
     if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
     // Idempotent: if already in grace, return success without re-running guards.

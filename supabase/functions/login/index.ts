@@ -64,6 +64,13 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Invalid email or password." }, 400)
     }
 
+    // Per-email brute-force guard (spoof-proof): limit attempts against a
+    // single address regardless of the caller's IP, so rotating x-forwarded-for
+    // cannot mint fresh login buckets.
+    const emailKey = email.trim().toLowerCase()
+    const emailRl = await checkRateLimit(emailKey, "login-email")
+    if (!emailRl.allowed) return rateLimitResponse(emailRl.retryAfter)
+
     const { data, error } = await anonClient.auth.signInWithPassword({
       email: email.trim(),
       password,

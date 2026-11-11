@@ -1,6 +1,6 @@
 import { requiredEnv } from "../_shared/env.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
-import { checkRateLimit, getClientIp, rateLimitResponse } from "../_shared/rate-limit.ts"
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts"
 import { CONSENT_VERSION, isValidConsentSource } from "../_shared/consent.ts"
 import { logError } from "../_shared/logger.ts"
 
@@ -51,8 +51,7 @@ Deno.serve(async (req) => {
   }
   const user = userData.user
 
-  const ip = getClientIp(req)
-  const rl = await checkRateLimit(ip, "complete-google-profile")
+  const rl = await checkRateLimit(user.id, "complete-google-profile")
   if (!rl.allowed) return rateLimitResponse(rl.retryAfter)
 
   try {
