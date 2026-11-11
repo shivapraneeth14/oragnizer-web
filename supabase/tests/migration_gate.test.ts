@@ -124,6 +124,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611070006_payout_reserves_durable_clawbacks.sql",
     "202611070007_drop_stale_confirm_payment_overload.sql",
     "202611070008_admin_writers_durable_clawbacks.sql",
+    "202611110001_fix_admin_refund_rpc_authz.sql",
   ])
 })
 
