@@ -591,6 +591,15 @@ export default function FinancialsPage() {
   const exportToCsv = () => {
     if (!filteredStatement.length) return
 
+    // RFC-4180 escaping + spreadsheet formula-injection neutralization: a cell
+    // beginning with = + - @ (or tab/CR) is prefixed with an apostrophe so
+    // Excel/Sheets treat it as text instead of executing it.
+    const csvCell = (v: string | number | null | undefined) => {
+      const s = v == null ? "" : String(v)
+      const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s
+      return `"${safe.replace(/"/g, '""')}"`
+    }
+
     const selectedComm = communities.find((c) => c.id === selectedCommunityId)
     const commName = selectedComm ? selectedComm.name.replace(/[^a-z0-9]/gi, "_") : "community"
     const eventName = selectedEventId !== "all"
@@ -620,24 +629,24 @@ export default function FinancialsPage() {
     ]
 
     const rows = filteredStatement.map((tx) => [
-      `"${formatDateTime(tx.created_at)}"`,
-      `"${tx.transaction_id}"`,
-      `"${tx.transaction_type}"`,
-      `"${tx.status}"`,
-      `"${(tx.description || "").replace(/"/g, '""')}"`,
-      `"${(tx.event_title || "").replace(/"/g, '""')}"`,
-      `"${(tx.attendee_name || "").replace(/"/g, '""')}"`,
-      `"${tx.attendee_email || ""}"`,
-      `"${tx.attendee_phone || ""}"`,
-      `"${tx.reference_id || ""}"`,
-      `"${tx.secondary_ref || ""}"`,
+      csvCell(formatDateTime(tx.created_at)),
+      csvCell(tx.transaction_id),
+      csvCell(tx.transaction_type),
+      csvCell(tx.status),
+      csvCell(tx.description),
+      csvCell(tx.event_title),
+      csvCell(tx.attendee_name),
+      csvCell(tx.attendee_email),
+      csvCell(tx.attendee_phone),
+      csvCell(tx.reference_id),
+      csvCell(tx.secondary_ref),
       (tx.gross_amount / 100).toFixed(2),
       (tx.platform_fee / 100).toFixed(2),
       (tx.money_in / 100).toFixed(2),
       (tx.money_out / 100).toFixed(2),
       (tx.running_balance / 100).toFixed(2),
-      `"${(tx.refund_reason || "").replace(/"/g, '""')}"`,
-      `"${(tx.admin_notes || "").replace(/"/g, '""')}"`,
+      csvCell(tx.refund_reason),
+      csvCell(tx.admin_notes),
     ])
 
     const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n")
