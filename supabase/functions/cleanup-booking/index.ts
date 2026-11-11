@@ -61,6 +61,18 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ success: true, cleaned: false, reason: "confirmed" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
     }
 
+    // Attended (checked-in) and already-cancelled registrations are immutable
+    // for cleanup purposes. Without these guards an attendee could cancel their
+    // own attendance, release capacity (oversell risk), and leave inconsistent
+    // state (status='cancelled' while checked_in=true).
+    if (registration.status === "attended") {
+      return new Response(JSON.stringify({ success: true, cleaned: false, reason: "attended" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
+    if (registration.status === "cancelled") {
+      return new Response(JSON.stringify({ success: true, cleaned: false, reason: "already_cancelled" }), { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } })
+    }
+
     const { data: payment } = await supabase
       .from("payments")
       .select("id, status, coupon_id, razorpay_order_id")
