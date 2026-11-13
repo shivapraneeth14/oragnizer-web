@@ -1,4 +1,4 @@
-export type EventDisplayStatus = "draft" | "published" | "cancelled" | "closed"
+export type EventDisplayStatus = "draft" | "published" | "cancelling" | "cancelled" | "closed"
 
 export interface EventLike {
   status?: string | null
@@ -15,6 +15,7 @@ export interface EventLike {
  */
 export function isEventClosed(event: EventLike, now: Date = new Date()): boolean {
   if (event.status === "cancelled") return false
+  if (event.status === "cancelling") return false
   if (event.status === "completed") return true
 
   const cutoff = event.end_date || event.start_date
@@ -32,6 +33,7 @@ export function isEventClosed(event: EventLike, now: Date = new Date()): boolean
  */
 export function canEditEvent(event: EventLike, now: Date = new Date()): boolean {
   if (event.status === "cancelled") return false
+  if (event.status === "cancelling") return false
   if (isEventClosed(event, now)) return false
   return true
 }
@@ -41,6 +43,7 @@ export function canEditEvent(event: EventLike, now: Date = new Date()): boolean 
  */
 export function canCancelEvent(event: EventLike, now: Date = new Date()): boolean {
   if (event.status === "cancelled") return false
+  if (event.status === "cancelling") return false
   if (isEventClosed(event, now)) return false
   return true
 }
@@ -50,6 +53,7 @@ export function canCancelEvent(event: EventLike, now: Date = new Date()): boolea
  */
 export function getEventDisplayStatus(event: EventLike, now: Date = new Date()): EventDisplayStatus {
   if (event.status === "cancelled") return "cancelled"
+  if (event.status === "cancelling") return "cancelling"
   if (isEventClosed(event, now)) return "closed"
   if (event.status === "draft") return "draft"
   return "published"
@@ -59,6 +63,8 @@ export function getEventStatusLabel(status: EventDisplayStatus): string {
   switch (status) {
     case "closed":
       return "Closed"
+    case "cancelling":
+      return "Cancelling"
     case "cancelled":
       return "Cancelled"
     case "published":
@@ -71,6 +77,7 @@ export function getEventStatusLabel(status: EventDisplayStatus): string {
 export const eventStatusColors: Record<EventDisplayStatus, string> = {
   draft: "bg-neutral-100 text-neutral-600",
   published: "bg-green-100 text-green-700",
+  cancelling: "bg-amber-100 text-amber-800",
   cancelled: "bg-red-100 text-red-600",
   closed: "bg-neutral-100 text-neutral-600 border border-neutral-200",
 }

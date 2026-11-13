@@ -50,6 +50,7 @@ interface Props {
 const statusColors: Record<string, string> = {
   draft: "bg-neutral-100 text-neutral-600",
   published: "bg-green-100 text-green-700",
+  cancelling: "bg-amber-100 text-amber-800",
   cancelled: "bg-red-100 text-red-600",
   completed: "bg-blue-100 text-blue-600",
 }
@@ -554,7 +555,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                   Cancel
                 </button>
               )}
-              {!isEventClosed(event) && event.status !== "cancelled" && onCheckIn && (
+              {!isEventClosed(event) && event.status !== "cancelled" && event.status !== "cancelling" && onCheckIn && (
                 <button
                   onClick={onCheckIn}
                   className="flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100 transition-colors"
