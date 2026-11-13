@@ -5,7 +5,7 @@
 // same resolver now covers every stale pending payment, so a paid order can no
 // longer fall through a ">2h, assume unpaid" gap.
 
-export const PENDING_GIVE_UP_AFTER_MS = 2 * 60 * 60 * 1000
+export const PENDING_GIVE_UP_AFTER_MS = 10 * 60 * 1000
 
 export interface ProviderOrder {
   status?: string | null

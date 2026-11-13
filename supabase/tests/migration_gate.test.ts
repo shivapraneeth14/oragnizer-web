@@ -133,6 +133,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611120001_event_cancel_immediate_tickets.sql",
     "202611120002_failed_refund_workflow.sql",
     "202611120003_fix_payout_reserve_double_count.sql",
+    "202611120004_reconcile_cron_1min.sql",
   ])
 })
 

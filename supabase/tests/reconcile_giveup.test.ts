@@ -204,16 +204,32 @@ Deno.test("an unpaid 3h payment is expired only after the provider check", async
   ])
 })
 
-Deno.test("an unpaid 30m payment waits without writing anything", async () => {
+Deno.test("an unpaid 5m payment waits without writing anything (inside the 10m grace)", async () => {
   const h = harness({ order: { status: "created", amount_paid: 0 } })
 
   const out = await resolvePendingPayment(
-    row({ created_at: new Date(NOW - 30 * 60 * 1000).toISOString() }),
+    row({ created_at: new Date(NOW - 5 * 60 * 1000).toISOString() }),
     h.deps,
   )
 
   assertEquals(out.action, "wait")
   assertEquals(h.writes, [])
+})
+
+Deno.test("an unpaid 11m payment is expired after the 10m grace", async () => {
+  const h = harness({ order: { status: "created", amount_paid: 0 } })
+
+  const out = await resolvePendingPayment(
+    row({ created_at: new Date(NOW - 11 * 60 * 1000).toISOString() }),
+    h.deps,
+  )
+
+  assertEquals(out.action, "expired")
+  assertEquals(h.writes, [
+    "payment_failed",
+    "registration_cancelled",
+    "payment_reconcile_gave_up",
+  ])
 })
 
 Deno.test("losing the guarded expiry race leaves the registration alone", async () => {
