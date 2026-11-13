@@ -173,6 +173,8 @@ export default function FinancialsPage() {
   const [payUtr, setPayUtr] = useState<string>("")
   const [payNote, setPayNote] = useState<string>("")
   const [settleBusy, setSettleBusy] = useState<boolean>(false)
+  const [revealedUpi, setRevealedUpi] = useState<Record<string, boolean>>({})
+  const [payUpiRevealed, setPayUpiRevealed] = useState<boolean>(false)
 
   // Financial Reconciliation Engine State (Stage 5 Milestone D)
   const [reconReport, setReconReport] = useState<ReconciliationReport | null>(null)
@@ -1021,8 +1023,22 @@ export default function FinancialsPage() {
                             {chip.label}
                           </span>
                           {refund.workflow?.upi_id && !settled && (
-                            <div className="mt-1 text-[10px] font-mono text-neutral-500">
-                              {maskUpi(refund.workflow.upi_id)}
+                            <div className="mt-1 flex items-center justify-center gap-1 text-[10px] font-mono text-neutral-500">
+                              <span>
+                                {revealedUpi[refund.id]
+                                  ? refund.workflow.upi_id
+                                  : maskUpi(refund.workflow.upi_id)}
+                              </span>
+                              <button
+                                type="button"
+                                title="Reveal UPI"
+                                onClick={() =>
+                                  setRevealedUpi((m) => ({ ...m, [refund.id]: !m[refund.id] }))
+                                }
+                                className="text-neutral-400 hover:text-neutral-800"
+                              >
+                                {revealedUpi[refund.id] ? "🙈" : "👁"}
+                              </button>
                             </div>
                           )}
                           {settled && refund.workflow?.utr && (
@@ -1039,7 +1055,7 @@ export default function FinancialsPage() {
                             <span className="text-neutral-400">—</span>
                           ) : wf === "upi_received" ? (
                             <button
-                              onClick={() => { setPayTarget(refund); setPayUtr(""); setPayNote("") }}
+                              onClick={() => { setPayTarget(refund); setPayUtr(""); setPayNote(""); setPayUpiRevealed(false) }}
                               className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-emerald-700 shadow-2xs"
                             >
                               Mark paid
@@ -2354,7 +2370,24 @@ export default function FinancialsPage() {
             <p className="mt-1 text-xs text-neutral-500">
               Pay{" "}
               {formatCurrency(Number(payTarget.refund_amount_due ?? payTarget.refunded_amount ?? payTarget.amount))}{" "}
-              to {payTarget.workflow?.upi_id ? maskUpi(payTarget.workflow.upi_id) : "the customer"}
+              to{" "}
+              {payTarget.workflow?.upi_id ? (
+                <>
+                  <span className="font-mono">
+                    {payUpiRevealed ? payTarget.workflow.upi_id : maskUpi(payTarget.workflow.upi_id)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPayUpiRevealed((v) => !v)}
+                    title="Reveal UPI"
+                    className="ml-1 text-neutral-500 hover:text-neutral-800"
+                  >
+                    {payUpiRevealed ? "🙈" : "👁"}
+                  </button>
+                </>
+              ) : (
+                "the customer"
+              )}
             </p>
             <label className="mt-4 block text-xs font-semibold text-neutral-700">
               UTR / reference (min 10 characters)
