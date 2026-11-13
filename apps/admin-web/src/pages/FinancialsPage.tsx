@@ -152,17 +152,27 @@ export default function FinancialsPage() {
   type FailedRefundItem = {
     id: string
     amount: number
+    refunded_amount: number | null
     refund_amount_due: number | null
     refund_status: string | null
+    refund_settlement_type: string | null
     refund_reason: string | null
     refund_attempt_count: number | null
     razorpay_payment_id: string | null
     registration_id: string
     registrations?: { id: string; user_id: string; event_id: string; events?: { title?: string } } | null
+    customer_email?: string | null
+    workflow?: { status: string; upi_id: string | null; utr: string | null } | null
   }
   const [failedRefunds, setFailedRefunds] = useState<FailedRefundItem[]>([])
   const [showFailedRefundPanel, setShowFailedRefundPanel] = useState<boolean>(false)
   const [retryingRefundId, setRetryingRefundId] = useState<string | null>(null)
+  const [upiTarget, setUpiTarget] = useState<FailedRefundItem | null>(null)
+  const [upiValue, setUpiValue] = useState<string>("")
+  const [payTarget, setPayTarget] = useState<FailedRefundItem | null>(null)
+  const [payUtr, setPayUtr] = useState<string>("")
+  const [payNote, setPayNote] = useState<string>("")
+  const [settleBusy, setSettleBusy] = useState<boolean>(false)
 
   // Financial Reconciliation Engine State (Stage 5 Milestone D)
   const [reconReport, setReconReport] = useState<ReconciliationReport | null>(null)
@@ -338,14 +348,44 @@ export default function FinancialsPage() {
     try {
       const { data, error } = await supabase
         .from("payments")
-        .select("id, amount, refund_amount_due, refund_status, refund_reason, refund_attempt_count, razorpay_payment_id, registration_id, registrations!inner(id, user_id, event_id, events!inner(title))")
+        .select("id, amount, refunded_amount, refund_amount_due, refund_status, refund_settlement_type, refund_reason, refund_attempt_count, razorpay_payment_id, registration_id, registrations!inner(id, user_id, event_id, events!inner(title))")
         .or("refund_status.eq.failed,refund_claim_state.eq.failed")
-        .gt("refund_amount_due", 0)
         .order("updated_at", { ascending: false })
         .limit(50)
 
       if (error) throw error
-      setFailedRefunds((data as unknown as FailedRefundItem[]) || [])
+      // Include issued-then-failed rows (refund_amount_due is cleared at
+      // issuance, so a refund_status='failed' row can still be owed).
+      const rows = ((data as unknown as FailedRefundItem[]) || []).filter(
+        (r) => Number(r.refund_amount_due ?? 0) > 0 || Number(r.refunded_amount ?? 0) > 0
+      )
+
+      const userIds = Array.from(
+        new Set(rows.map((r) => r.registrations?.user_id).filter(Boolean))
+      ) as string[]
+      const paymentIds = rows.map((r) => r.id)
+
+      const [{ data: profiles }, { data: workflows }] = await Promise.all([
+        userIds.length
+          ? supabase.from("profiles").select("id, email").in("id", userIds)
+          : Promise.resolve({ data: [] as any[] }),
+        paymentIds.length
+          ? supabase.from("refund_workflows").select("payment_id, status, upi_id, utr").in("payment_id", paymentIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ])
+
+      const emailById = new Map((profiles || []).map((p: any) => [p.id, p.email]))
+      const wfByPayment = new Map((workflows || []).map((w: any) => [w.payment_id, w]))
+
+      setFailedRefunds(
+        rows.map((r) => ({
+          ...r,
+          customer_email: r.registrations?.user_id
+            ? (emailById.get(r.registrations.user_id) as string | undefined) ?? null
+            : null,
+          workflow: (wfByPayment.get(r.id) as any) ?? null,
+        }))
+      )
     } catch (err) {
       console.error("Error loading failed refunds:", err)
     }
@@ -369,6 +409,83 @@ export default function FinancialsPage() {
       setRetryingRefundId(null)
     }
   }, [loadFailedRefunds, loadUnresolvedTasks, loadStatement])
+
+  const maskUpi = (upi: string) => {
+    const [name, handle] = upi.split("@")
+    if (!handle) return upi
+    return `${name.slice(0, 2)}${"•".repeat(Math.max(1, name.length - 2))}@${handle}`
+  }
+
+  const requestRefundUpi = useCallback(async (paymentId: string) => {
+    setRetryingRefundId(paymentId)
+    setError(null)
+    try {
+      const { data, error } = await supabase.functions.invoke("request-refund-upi", {
+        body: { payment_id: paymentId },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.message || data.error)
+      await loadFailedRefunds()
+    } catch (err: any) {
+      setError(err?.message || "Failed to send the UPI request email.")
+    } finally {
+      setRetryingRefundId(null)
+    }
+  }, [loadFailedRefunds])
+
+  const saveRefundUpi = useCallback(async () => {
+    if (!upiTarget) return
+    setSettleBusy(true)
+    setError(null)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("Admin session expired. Please log in again.")
+      const { data, error } = await supabase.rpc("record_refund_upi", {
+        p_payment_id: upiTarget.id,
+        p_admin_id: user.id,
+        p_upi_id: upiValue.trim(),
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      setUpiTarget(null)
+      setUpiValue("")
+      await loadFailedRefunds()
+    } catch (err: any) {
+      setError(err?.message || "Failed to save the UPI ID.")
+    } finally {
+      setSettleBusy(false)
+    }
+  }, [upiTarget, upiValue, loadFailedRefunds])
+
+  const markRefundPaid = useCallback(async () => {
+    if (!payTarget) return
+    setSettleBusy(true)
+    setError(null)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("Admin session expired. Please log in again.")
+      const { data, error } = await supabase.rpc("admin_manual_settle_payment", {
+        p_payment_id: payTarget.id,
+        p_admin_id: user.id,
+        p_evidence: {
+          settlement_method: "upi",
+          reference_number: payUtr.trim(),
+          notes: payNote.trim(),
+        },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.message || data.error)
+      setPayTarget(null)
+      setPayUtr("")
+      setPayNote("")
+      await Promise.all([loadFailedRefunds(), loadUnresolvedTasks()])
+      if (typeof loadStatement === "function") await loadStatement()
+    } catch (err: any) {
+      setError(err?.message || "Failed to record the manual settlement.")
+    } finally {
+      setSettleBusy(false)
+    }
+  }, [payTarget, payUtr, payNote, loadFailedRefunds, loadUnresolvedTasks, loadStatement])
 
   useEffect(() => {
     loadStatement()
@@ -867,36 +984,94 @@ export default function FinancialsPage() {
                     <th className="px-3 py-2">Event</th>
                     <th className="px-3 py-2 text-right">Owed</th>
                     <th className="px-3 py-2 text-center">Attempts</th>
-                    <th className="px-3 py-2">Reason</th>
+                    <th className="px-3 py-2">Customer</th>
+                    <th className="px-3 py-2 text-center">Status</th>
                     <th className="px-3 py-2 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
-                  {failedRefunds.map((refund) => (
-                    <tr key={refund.id} className="hover:bg-neutral-50 transition-colors">
-                      <td className="px-3 py-2.5 font-semibold text-neutral-800">
-                        {refund.registrations?.events?.title || refund.registration_id.slice(0, 8)}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-bold text-amber-700 whitespace-nowrap">
-                        {formatCurrency(Number(refund.refund_amount_due ?? refund.amount))}
-                      </td>
-                      <td className="px-3 py-2.5 text-center text-neutral-600 font-mono">
-                        {refund.refund_attempt_count ?? 0} / 5
-                      </td>
-                      <td className="px-3 py-2.5 text-[10px] text-neutral-500">
-                        {(refund.refund_reason || "refund").replace(/_/g, " ")}
-                      </td>
-                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => retryFailedRefund(refund.id)}
-                          disabled={retryingRefundId === refund.id}
-                          className="rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-700 shadow-2xs disabled:opacity-50"
-                        >
-                          {retryingRefundId === refund.id ? "Retrying…" : "Retry with Razorpay"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {failedRefunds.map((refund) => {
+                    const settled =
+                      refund.refund_settlement_type === "manual_offline" ||
+                      refund.workflow?.status === "settled"
+                    const wf = refund.workflow?.status
+                    const chip = settled
+                      ? { label: "Settled", cls: "bg-emerald-100 text-emerald-800" }
+                      : wf === "upi_received"
+                      ? { label: "UPI received", cls: "bg-emerald-50 text-emerald-700" }
+                      : wf === "upi_requested"
+                      ? { label: "UPI requested", cls: "bg-amber-100 text-amber-800" }
+                      : { label: "Failed", cls: "bg-rose-100 text-rose-800" }
+                    return (
+                      <tr key={refund.id} className="hover:bg-neutral-50 transition-colors">
+                        <td className="px-3 py-2.5 font-semibold text-neutral-800">
+                          {refund.registrations?.events?.title || refund.registration_id.slice(0, 8)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-bold text-amber-700 whitespace-nowrap">
+                          {formatCurrency(Number(refund.refund_amount_due ?? refund.refunded_amount ?? refund.amount))}
+                        </td>
+                        <td className="px-3 py-2.5 text-center text-neutral-600 font-mono">
+                          {refund.refund_attempt_count ?? 0} / 5
+                        </td>
+                        <td className="px-3 py-2.5 text-[11px] text-neutral-600">
+                          {refund.customer_email || "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${chip.cls}`}>
+                            {chip.label}
+                          </span>
+                          {refund.workflow?.upi_id && !settled && (
+                            <div className="mt-1 text-[10px] font-mono text-neutral-500">
+                              {maskUpi(refund.workflow.upi_id)}
+                            </div>
+                          )}
+                          {settled && refund.workflow?.utr && (
+                            <div className="mt-1 text-[10px] font-mono text-neutral-500">
+                              UTR {refund.workflow.utr}
+                            </div>
+                          )}
+                          {settled && !refund.workflow?.utr && (
+                            <div className="mt-1 text-[10px] text-neutral-500">Manual</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                          {settled ? (
+                            <span className="text-neutral-400">—</span>
+                          ) : wf === "upi_received" ? (
+                            <button
+                              onClick={() => { setPayTarget(refund); setPayUtr(""); setPayNote("") }}
+                              className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-emerald-700 shadow-2xs"
+                            >
+                              Mark paid
+                            </button>
+                          ) : (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => retryFailedRefund(refund.id)}
+                                disabled={retryingRefundId === refund.id}
+                                className="rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-bold text-white hover:bg-amber-700 shadow-2xs disabled:opacity-50"
+                              >
+                                {retryingRefundId === refund.id ? "Working…" : "Retry with Razorpay"}
+                              </button>
+                              <button
+                                onClick={() => requestRefundUpi(refund.id)}
+                                disabled={retryingRefundId === refund.id}
+                                className="rounded-lg bg-neutral-800 px-2.5 py-1 text-xs font-bold text-white hover:bg-neutral-900 shadow-2xs disabled:opacity-50"
+                              >
+                                {wf === "upi_requested" ? "Resend UPI request" : "Request UPI"}
+                              </button>
+                              <button
+                                onClick={() => { setUpiTarget(refund); setUpiValue(refund.workflow?.upi_id ?? "") }}
+                                className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-50"
+                              >
+                                UPI received
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2135,6 +2310,89 @@ export default function FinancialsPage() {
           loadUnresolvedTasks()
         }}
       />
+
+      {/* Record customer's UPI ID (failed refund) */}
+      {upiTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-bold text-neutral-900">Record customer&apos;s UPI ID</h3>
+            <p className="mt-1 text-xs text-neutral-500">
+              {upiTarget.registrations?.events?.title} ·{" "}
+              {formatCurrency(Number(upiTarget.refund_amount_due ?? upiTarget.refunded_amount ?? upiTarget.amount))}
+            </p>
+            <label className="mt-4 block text-xs font-semibold text-neutral-700">UPI ID</label>
+            <input
+              value={upiValue}
+              onChange={(e) => setUpiValue(e.target.value)}
+              placeholder="name@okhdfc"
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => { setUpiTarget(null); setUpiValue("") }}
+                className="rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveRefundUpi}
+                disabled={settleBusy || upiValue.trim().length < 3}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {settleBusy ? "Saving…" : "Save UPI"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mark failed refund as paid (manual UPI settlement) */}
+      {payTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-bold text-neutral-900">Mark refund as paid</h3>
+            <p className="mt-1 text-xs text-neutral-500">
+              Pay{" "}
+              {formatCurrency(Number(payTarget.refund_amount_due ?? payTarget.refunded_amount ?? payTarget.amount))}{" "}
+              to {payTarget.workflow?.upi_id ? maskUpi(payTarget.workflow.upi_id) : "the customer"}
+            </p>
+            <label className="mt-4 block text-xs font-semibold text-neutral-700">
+              UTR / reference (min 10 characters)
+            </label>
+            <input
+              value={payUtr}
+              onChange={(e) => setPayUtr(e.target.value)}
+              placeholder="512345678901"
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            />
+            <label className="mt-3 block text-xs font-semibold text-neutral-700">
+              Notes / proof (min 20 characters)
+            </label>
+            <textarea
+              value={payNote}
+              onChange={(e) => setPayNote(e.target.value)}
+              rows={3}
+              placeholder="Paid via UPI on 13 Nov 2026…"
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => { setPayTarget(null); setPayUtr(""); setPayNote("") }}
+                className="rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={markRefundPaid}
+                disabled={settleBusy || payUtr.trim().length < 10 || payNote.trim().length < 20}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {settleBusy ? "Recording…" : "Confirm paid"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

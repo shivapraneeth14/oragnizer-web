@@ -16,6 +16,7 @@ import {
   type PendingDeps,
 } from "../_shared/reconcile-pending.ts"
 import { razorpayGet } from "../_shared/razorpay.ts"
+import { sendChigzoEmail } from "../_shared/send-email.ts"
 
 const supabaseUrl = requiredEnv("SUPABASE_URL")
 const supabaseServiceKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
@@ -174,16 +175,20 @@ async function flagExhausted(
         if (!pay?.registration_id) return
         const { data: reg } = await supabase
           .from("registrations")
-          .select("user_id, event_id")
+          .select("user_id, event_id, events!inner(title)")
           .eq("id", pay.registration_id)
           .maybeSingle()
         if (!reg?.user_id) return
+
         const amount = Number(pay.refund_amount_due ?? pay.amount ?? 0)
+        const amountText = `₹${(amount / 100).toFixed(0)}`
+        const eventTitle = (reg as any).events?.title ?? "your booking"
+
         await supabase.from("notifications").insert({
           user_id: reg.user_id,
           type: "refund_needs_attention",
-          title: "Your refund is taking longer than expected",
-          body: `Your refund of ₹${(amount / 100).toFixed(0)} is still owed and our support team has been notified. We will contact you as soon as it is completed.`,
+          title: "Refund needs your UPI ID",
+          body: `We could not refund ${amountText} for "${eventTitle}" to your original payment method. Please contact support and share your UPI ID so we can transfer it to you.`,
           payload: {
             payment_id: id,
             registration_id: pay.registration_id,
@@ -193,6 +198,33 @@ async function flagExhausted(
             note,
           },
         })
+
+        try {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("email, first_name")
+            .eq("id", reg.user_id)
+            .maybeSingle()
+          if (profile?.email) {
+            const greeting = profile.first_name ? `Hi ${profile.first_name},` : "Hi,"
+            await sendChigzoEmail(
+              profile.email,
+              `Refund for "${eventTitle}" — please share your UPI ID`,
+              [
+                greeting,
+                "",
+                `We could not send your refund of ${amountText} for "${eventTitle}" back to your original payment method.`,
+                "",
+                "Please reply to this email with your UPI ID (for example: yourname@okhdfc) and we will transfer the refund to you.",
+                "",
+                "— Chigzo Support",
+              ].join("\n"),
+            )
+          }
+        } catch (e) {
+          // Never block reconciliation on a notification failure.
+          console.error("refund-exhausted email failed:", e instanceof Error ? e.message : String(e))
+        }
       },
     },
   )

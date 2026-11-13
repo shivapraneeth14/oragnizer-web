@@ -61,6 +61,7 @@ const DEFAULTS: Record<string, RateLimitConfig> = {
   "change-password": { maxRequests: 10, windowSeconds: 300, action: "change_password" },
   "cancel-event": { maxRequests: 5, windowSeconds: 300, action: "cancel_event" },
   "issue-refund": { maxRequests: 10, windowSeconds: 300, action: "issue_refund" },
+  "request-refund-upi": { maxRequests: 20, windowSeconds: 300, action: "request_refund_upi" },
   "remove-beneficiary": { maxRequests: 10, windowSeconds: 600, action: "remove_beneficiary" },
   "switch-active-beneficiary": { maxRequests: 10, windowSeconds: 600, action: "switch_active_beneficiary" },
   "get-wallet-statement": { maxRequests: 30, windowSeconds: 60, action: "get_wallet_statement" },
