@@ -112,14 +112,27 @@ async function processRefund(paymentId: string, amount: number, reason: string):
   if (outcome.status === "conflict" || outcome.status === "already_refunded") return false
 
   if (Number(payment.platform_fee ?? 0) > 0) {
+    // Policy: the platform keeps its fee whenever the customer actually got a
+    // ticket (booking confirmed -> organizer_share is set). The fee is only
+    // refunded when the booking was never confirmed (capacity_full / capture on
+    // an already-cancelled booking). Record the matching audit action instead
+    // of always claiming the commission was reversed — a customer self-cancel
+    // retry keeps the fee, so it must log platform_fee_kept.
+    const feeRefunded = payment.organizer_share == null
     await supabase.from("payment_audit_log").insert({
-      action: "commission_reversed",
+      action: feeRefunded ? "commission_reversed" : "platform_fee_kept",
       payment_id: payment.id,
-      details: {
-        commission_amount: payment.platform_fee,
-        reason,
-        note: `Platform commission zeroed — customer refunded the full ₹${(Number(payment.amount) / 100).toFixed(0)} including our fee`,
-      },
+      details: feeRefunded
+        ? {
+            commission_amount: payment.platform_fee,
+            reason,
+            note: `Platform commission zeroed — customer refunded the full ₹${(Number(payment.amount) / 100).toFixed(0)} including our fee`,
+          }
+        : {
+            fee_amount: payment.platform_fee,
+            reason,
+            note: `Platform fee kept — ₹${(Number(payment.platform_fee) / 100).toFixed(2)} booking fee retained; ₹${(Number(payment.organizer_share ?? 0) / 100).toFixed(2)} refunded to customer`,
+          },
     })
   }
   return true

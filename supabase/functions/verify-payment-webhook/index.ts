@@ -184,19 +184,33 @@ async function syncRefundState(entity: any, _eventType: string): Promise<void> {
       eventTitle = ev?.title ?? null
     }
     if (reg?.user_id) {
-      const amountText = `₹${(Number(entity.amount ?? 0) / 100).toFixed(0)}`
-      const titleText = eventTitle ? `"${eventTitle}"` : "your booking"
-      const cancelledRefund = regRow?.refund_reason === "registration_cancellation" ||
-        regRow?.refund_reason === "event_cancellation"
-      await supabase.from("notifications").insert({
-        user_id: reg.user_id,
-        type: "refund_completed",
-        title: "Refund Completed",
-        body: cancelledRefund
-          ? `Refund of ${amountText} for ${titleText} is complete — you can rebook your spot now.`
-          : `Refund of ${amountText} has been credited back to your account.`,
-        payload: { payment_id: paymentRow.id, event_id: reg.event_id ?? null, amount: entity.amount ?? null, refund_id: entity.id, rebookable: cancelledRefund },
-      })
+      // Razorpay delivers BOTH refund.created (which for instant refunds already
+      // carries status "processed") and refund.processed for the same refund.
+      // Both map to "processed" here, so without this check the customer gets the
+      // "Refund Completed" notification (and the payment timeline entry) twice.
+      const { data: alreadyNotified } = await supabase
+        .from("notifications")
+        .select("id")
+        .eq("user_id", reg.user_id)
+        .eq("type", "refund_completed")
+        .contains("payload", { refund_id: entity.id })
+        .maybeSingle()
+
+      if (!alreadyNotified) {
+        const amountText = `₹${(Number(entity.amount ?? 0) / 100).toFixed(0)}`
+        const titleText = eventTitle ? `"${eventTitle}"` : "your booking"
+        const cancelledRefund = regRow?.refund_reason === "registration_cancellation" ||
+          regRow?.refund_reason === "event_cancellation"
+        await supabase.from("notifications").insert({
+          user_id: reg.user_id,
+          type: "refund_completed",
+          title: "Refund Completed",
+          body: cancelledRefund
+            ? `Refund of ${amountText} for ${titleText} is complete — you can rebook your spot now.`
+            : `Refund of ${amountText} has been credited back to your account.`,
+          payload: { payment_id: paymentRow.id, event_id: reg.event_id ?? null, amount: entity.amount ?? null, refund_id: entity.id, rebookable: cancelledRefund },
+        })
+      }
     }
   }
 }

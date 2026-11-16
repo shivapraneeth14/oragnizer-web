@@ -308,7 +308,14 @@ export async function attemptRefund(
   }
 
   let refund: any
-  const receipt = `ref_${payment.id}_${claim.attempt}`
+  // The idempotency key MUST be unique per captured payment, not just per
+  // payment row: re-quoting reuses the same row and resets refund_attempt_count
+  // to 0 (see clearRefundFieldsForRequote), so ref_<row>_<attempt> collided
+  // with the PREVIOUS sale's refund and Razorpay rejected it with
+  // "Different request with the same idempotency key has already been
+  // processed." Including razorpay_payment_id (unique per capture) keeps the
+  // first and second sale's refund keys distinct.
+  const receipt = `ref_${payment.id}_${payment.razorpay_payment_id}_${claim.attempt}`
   try {
     refund = await razorpayPost(
       `payments/${payment.razorpay_payment_id}/refund`,

@@ -364,7 +364,7 @@ Deno.test("REF-005: Mobile client registers /refunds/:id and isolates historical
     "payment_detail_screen.dart must declare historyId parameter",
   )
   assert(
-    screenSrc.includes("title: Text(widget.historyId != null ? 'Refund Details' : 'Payment Details')"),
+    screenSrc.includes("widget.historyId != null ? 'Refund Details' : 'Payment Details'"),
     "payment_detail_screen.dart must display Refund Details for history receipts",
   )
 })
