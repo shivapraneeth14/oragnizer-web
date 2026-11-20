@@ -50,12 +50,12 @@ instead of the admin dashboard (same for `/reset-password` links).
   (Supabase Dashboard → Auth → URL Configuration, or Management API `config/auth`).
 - **PROD** (`vdxspyumkvwawmqwfkzr`): must include `https://cluvo-admin-five.vercel.app/**` and
   `https://cluvo-admin-*.vercel.app/**` (preview deployments), plus the existing mobile
-  (`cluvo://login`, `com.cluvo.mobile://login`, `cluvo://signup`), organizer-web
+  (`chigzo://login`, `com.chigzo.mobile://login`, `chigzo://signup`), organizer-web
   (`cluvo-org.vercel.app/**`), and Flutter (`cluvo-nu.vercel.app/**`) entries — do not remove them.
 - **TEST** (`ofvfasdgdwkehdcjugnf`): allow list includes `localhost:5173`, `localhost:3000`, plus the mobile
-  deep-link schemes `cluvo://login`, `cluvo://signup`, `com.cluvo.mobile://login`. Google sign-in **is** enabled
+  deep-link schemes `chigzo://login`, `chigzo://signup`, `com.chigzo.mobile://login`. Google sign-in **is** enabled
   on TEST (existing accounts have linked Google identities) — recovery links for those accounts redirect to
-  `cluvo://login`, so the schemes must stay in the list. If a hosted TEST surface ever needs OAuth, add its URL
+  `chigzo://login`, so the schemes must stay in the list. If a hosted TEST surface ever needs OAuth, add its URL
   to the allow list first.
 - `site_url` staying at `https://cluvo-nu.vercel.app` is intentional (Flutter is the main consumer app);
   the admin portal is covered by its allow-list entries.
@@ -70,7 +70,7 @@ instead of the admin dashboard (same for `/reset-password` links).
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon/publishable key |
 | `VITE_CLOUDINARY_CLOUD_NAME` | Cloudinary upload |
 | `VITE_CLOUDINARY_UPLOAD_PRESET` | Cloudinary unsigned upload preset |
-| `VITE_APP_DEEPLINK_BASE` | Mobile deep link base for share links (`cluvo://`) |
+| `VITE_APP_DEEPLINK_BASE` | Mobile deep link base for share links (`chigzo://`) |
 | `VITE_APP_URL` | Web share base URL |
 
 ### apps/admin-web — required (refuses to start without ALL of these)
@@ -129,7 +129,7 @@ Set these secrets separately in **each** project (`supabase secrets set --env-fi
 |---|---|
 | `SMTP_HOST` | `smtp.gmail.com` |
 | `SMTP_PORT` | `465` |
-| `SMTP_USER` | Gmail address used to authenticate (e.g. `supp.cluvo@gmail.com`) |
+| `SMTP_USER` | Gmail address used to authenticate (e.g. `chigzo.app@gmail.com`) |
 | `SMTP_PASS` | 16-character Google **App Password** (2-Step Verification required) |
 | `SMTP_SENDER_EMAIL` | From address (same Gmail address) |
 

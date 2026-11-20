@@ -3,7 +3,7 @@ import { ReactNode } from "react"
 // Single source of truth for the Privacy Policy text — rendered by the public
 // /privacy page AND the in-flow consent dialog (components/legal-dialog.tsx).
 
-const CONTACT_EMAIL = "supp.cluvo@gmail.com"
+const CONTACT_EMAIL = "chigzo.app@gmail.com"
 
 export interface LegalSection {
   heading: string
@@ -36,6 +36,11 @@ export const privacySections: LegalSection[] = [
           <strong>Usage information:</strong> your activity in the Services, including events you
           wishlist or register for, notifications you receive, event check-ins, and community
           membership.
+        </p>
+        <p>
+          <strong>Location information:</strong> if you allow location access, we use your device
+          location to show events near you and to calculate distances. Your coordinates are sent
+          to our server for this purpose and are not shared with third parties.
         </p>
       </>
     ),

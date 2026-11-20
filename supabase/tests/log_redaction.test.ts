@@ -9,7 +9,7 @@ import { redact, safeMessage } from "../functions/_shared/logger.ts"
 
 Deno.test("redact removes email addresses", () => {
   assertEquals(
-    redact("user supp.cluvo@gmail.com failed"),
+    redact("user chigzo.app@gmail.com failed"),
     "user [email] failed",
   )
 })

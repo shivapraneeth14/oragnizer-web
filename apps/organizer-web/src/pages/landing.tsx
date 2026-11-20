@@ -299,7 +299,7 @@ function LegalFooter() {
           <Link to="/terms" className="transition hover:text-white">
             Terms
           </Link>
-          <a href="mailto:supp.cluvo@gmail.com" className="transition hover:text-white">
+          <a href="mailto:chigzo.app@gmail.com" className="transition hover:text-white">
             Contact
           </a>
         </div>

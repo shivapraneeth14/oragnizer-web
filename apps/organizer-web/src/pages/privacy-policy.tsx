@@ -3,7 +3,7 @@ import { privacySections } from "../legal/privacy-content"
 
 export default function PrivacyPolicyPage() {
   return (
-    <LegalShell title="Privacy Policy" updated="August 7, 2026">
+    <LegalShell title="Privacy Policy" updated="November 20, 2026">
       <p>
         This Privacy Policy explains how chigzo ("we", "us") collects, uses, and shares
         information about you when you use the chigzo mobile app, the organizer web app, and

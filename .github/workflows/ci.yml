@@ -79,7 +79,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ env.SUPABASE_ANON_KEY }}
           VITE_CLOUDINARY_CLOUD_NAME: djz0pypu1
           VITE_CLOUDINARY_UPLOAD_PRESET: cluvo_preset
-          VITE_APP_DEEPLINK_BASE: cluvo://
+          VITE_APP_DEEPLINK_BASE: chigzo://
           VITE_APP_URL: https://cluvo-nu.vercel.app
       - run: npm run build --workspace=apps/admin-web
         env:

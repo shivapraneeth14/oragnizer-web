@@ -14,7 +14,7 @@ export default defineConfig({
       VITE_SUPABASE_ANON_KEY: "mock-anon-key",
       VITE_CLOUDINARY_CLOUD_NAME: "test-cloud",
       VITE_CLOUDINARY_UPLOAD_PRESET: "test-preset",
-      VITE_APP_DEEPLINK_BASE: "cluvo://",
+      VITE_APP_DEEPLINK_BASE: "chigzo://",
       VITE_APP_URL: "http://localhost:3000",
     },
   },

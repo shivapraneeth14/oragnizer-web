@@ -43,8 +43,8 @@ export const deletionSections: LegalSection[] = [
     body: (
       <p>
         Email{" "}
-        <a className="text-cluvo-primary underline" href="mailto:supp.cluvo@gmail.com">
-          supp.cluvo@gmail.com
+        <a className="text-cluvo-primary underline" href="mailto:chigzo.app@gmail.com">
+          chigzo.app@gmail.com
         </a>{" "}
         and we will process your deletion request.
       </p>

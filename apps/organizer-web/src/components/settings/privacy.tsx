@@ -7,7 +7,7 @@ import { deletionSections } from "../../legal/deletion-sections"
 
 type DialogKind = "privacy" | "terms" | "fees" | "deletion" | null
 
-const SUPPORT_EMAIL = "supp.cluvo@gmail.com"
+const SUPPORT_EMAIL = "chigzo.app@gmail.com"
 
 interface RowConfig {
   id: DialogKind | "support"

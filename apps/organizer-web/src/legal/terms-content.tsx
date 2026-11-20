@@ -3,7 +3,7 @@ import { ReactNode } from "react"
 // Single source of truth for the Terms of Service text — rendered by the public
 // /terms page AND the in-flow consent dialog (components/legal-dialog.tsx).
 
-const CONTACT_EMAIL = "supp.cluvo@gmail.com"
+const CONTACT_EMAIL = "chigzo.app@gmail.com"
 
 export interface LegalSection {
   heading: string

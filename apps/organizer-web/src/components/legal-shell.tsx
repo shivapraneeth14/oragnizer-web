@@ -45,7 +45,10 @@ export default function LegalShell({
             <Link to="/terms" className="transition hover:text-neutral-900">
               Terms
             </Link>
-            <a href="mailto:supp.cluvo@gmail.com" className="transition hover:text-neutral-900">
+            <Link to="/data-deletion" className="transition hover:text-neutral-900">
+              Data Deletion
+            </Link>
+            <a href="mailto:chigzo.app@gmail.com" className="transition hover:text-neutral-900">
               Contact
             </a>
           </div>

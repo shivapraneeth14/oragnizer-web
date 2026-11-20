@@ -1,6 +1,13 @@
-# Play Store Readiness Audit — Cluvo
+# Play Store Readiness Audit — Chigzo
 
-App: **Cluvo** (community events + ticketing) · Target: Google Play Store submission
+> **Correction note (2026-11-20):** The package was renamed `com.cluvo.mobile` →
+> `com.chigzo.mobile` and the deep-link scheme `cluvo://` → `chigzo://`. Location
+> **is** collected (precise + approximate, sent to Supabase for distance) —
+> §1's "not collected" claim and §3's "no location permissions" claim are wrong.
+> The authoritative Data safety mapping is now `docs/play-store-submission.md`.
+> The evidence below is point-in-time (Aug 2026) and is retained unedited.
+
+App: **Chigzo** (community events + ticketing) · Target: Google Play Store submission
 Format: per item — **Finding | Evidence | Verdict | Fix | Re-verify**. No numeric score.
 Status legend: ✅ PASS · ⏳ IN PROGRESS · ❌ FAIL/MISSING · 🔒 BLOCKED
 

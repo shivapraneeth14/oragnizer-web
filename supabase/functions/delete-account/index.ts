@@ -31,7 +31,7 @@ async function checkDeletionGuards(userId: string): Promise<{ error: string; own
     const names = owned.map((c) => `"${c.name}"`).join(", ")
     return {
       error: `You can't delete your account yet — you're the organizer of ${names}. ` +
-        "Please contact support at supp.cluvo@gmail.com to close your community first. " +
+        "Please contact support at chigzo.app@gmail.com to close your community first. " +
         "Then try again.",
       owned: owned.map((c) => c.name),
     }

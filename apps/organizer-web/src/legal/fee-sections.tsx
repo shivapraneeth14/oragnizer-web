@@ -45,8 +45,8 @@ export const feeSections: LegalSection[] = [
     body: (
       <p>
         Questions about fees or payouts:{" "}
-        <a className="text-cluvo-primary underline" href="mailto:supp.cluvo@gmail.com">
-          supp.cluvo@gmail.com
+        <a className="text-cluvo-primary underline" href="mailto:chigzo.app@gmail.com">
+          chigzo.app@gmail.com
         </a>
       </p>
     ),

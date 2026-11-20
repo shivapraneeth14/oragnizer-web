@@ -4,6 +4,7 @@ import LandingPage from "./pages/landing"
 import DashboardPage from "./pages/dashboard"
 import PrivacyPolicyPage from "./pages/privacy-policy"
 import TermsPage from "./pages/terms"
+import DataDeletionPage from "./pages/data-deletion"
 import ProtectedRoute from "./components/protected-route"
 import ErrorBoundary from "./components/error-boundary"
 
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/terms" element={<TermsPage />} />
+          <Route path="/data-deletion" element={<DataDeletionPage />} />
           <Route
             path="/dashboard"
             element={
