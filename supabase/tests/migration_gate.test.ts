@@ -135,7 +135,24 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611120003_fix_payout_reserve_double_count.sql",
     "202611120004_reconcile_cron_1min.sql",
     "202611200001_update_closure_contact_email.sql",
+    "202611240001_public_communities_rpc.sql",
   ])
+})
+
+Deno.test("202611240001 public community directory RPC is anon-safe", async () => {
+  const mig = await read("202611240001_public_communities_rpc.sql")
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.get_public_communities"))
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.get_public_community_categories"))
+  assert(mig.includes("SECURITY DEFINER"))
+  assert(mig.includes("deletion_grace_started_at IS NULL"))
+  assert(mig.includes("is_hidden = false"))
+  assert(mig.includes("visibility = 'public'"))
+  assert(
+    mig.includes(
+      "GRANT EXECUTE ON FUNCTION public.get_public_communities(text, integer) TO anon, authenticated, service_role;",
+    ),
+  )
+  assert(!mig.includes("GRANT SELECT (deletion_grace_started_at) ON public.communities TO anon"))
 })
 
 Deno.test("202611010014 atomic cancel and attended refund guard shipped", async () => {
