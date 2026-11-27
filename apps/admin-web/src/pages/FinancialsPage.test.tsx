@@ -137,4 +137,35 @@ describe("FinancialsPage (Admin Financial Observability & Control)", () => {
     // Should NOT display "+₹250.00 pending" anywhere
     expect(screen.queryByText(/\+₹250\.00 pending/i)).not.toBeInTheDocument()
   })
+
+  it("shows refund money_out even when wallet_debit_amount is 0", async () => {
+    server.use(
+      http.post(`${BASE_URL}/rest/v1/rpc/get_admin_financial_statement`, () => {
+        return HttpResponse.json([
+          {
+            transaction_id: "tx-refund-1",
+            id: "tx-refund-1",
+            event_id: "event_mock_admin_1",
+            event_title: "Admin Super Event",
+            transaction_type: "refund",
+            money_in: 0,
+            money_out: 200,
+            wallet_debit_amount: 0,
+            reserved_amount: 0,
+            gross_amount: 200,
+            platform_fee: 0,
+            organizer_share: 200,
+            running_balance: 0,
+            status: "processed",
+            created_at: new Date().toISOString(),
+          },
+        ])
+      })
+    )
+
+    render(<FinancialsPage />)
+
+    expect(await screen.findByText("−₹2.00")).toBeInTheDocument()
+    expect(screen.queryByText("−₹0.00")).not.toBeInTheDocument()
+  })
 })

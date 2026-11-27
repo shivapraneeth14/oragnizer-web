@@ -198,4 +198,33 @@ describe("PayoutSection (Organizer Financial Observability & Payout Reconciliati
       expect(screen.getByText("Ref: UTR-CANCELLED-99")).toBeInTheDocument()
     })
   })
+
+  it("shows refund money_out even when wallet_debit_amount is 0", async () => {
+    server.use(
+      http.post(`${BASE_URL}/rest/v1/rpc/get_organizer_financial_statement`, async () => {
+        return HttpResponse.json([
+          {
+            created_at: "2026-11-23T07:37:26Z",
+            transaction_id: "tx-refund-1",
+            transaction_type: "refund",
+            status: "processed",
+            description: "Refund: Ticket cancelled",
+            reference_id: "rfnd_test_123",
+            money_in: 0,
+            money_out: 200,
+            wallet_debit_amount: 0,
+            reserved_amount: 0,
+            gross_amount: 200,
+            organizer_share: 200,
+            running_balance: 0,
+          },
+        ])
+      })
+    )
+
+    render(<PayoutSection communityId="comm_mock_123" />)
+
+    expect(await screen.findByText("-₹2")).toBeInTheDocument()
+    expect(screen.queryByText("−₹0")).not.toBeInTheDocument()
+  })
 })

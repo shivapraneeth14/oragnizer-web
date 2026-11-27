@@ -2093,6 +2093,11 @@ export default function FinancialsPage() {
                   const isCredit = tx.money_in > 0
                   const isRefund = tx.transaction_type === "refund"
                   const isPayout = tx.transaction_type.startsWith("payout")
+                  // Refund amounts live in money_out; wallet_debit_amount is a
+                  // payout-settlement field and is 0 for refunds in the RPC.
+                  const displayedMoneyOut = isRefund
+                    ? tx.money_out
+                    : tx.wallet_debit_amount ?? tx.money_out
 
                   return (
                     <tr
@@ -2200,7 +2205,7 @@ export default function FinancialsPage() {
                               isRefund ? "text-rose-600" : "text-blue-600"
                             }`}
                           >
-                            −{formatCurrency(tx.wallet_debit_amount ?? tx.money_out)}
+                            −{formatCurrency(displayedMoneyOut)}
                           </span>
                         ) : (
                           <span className="text-neutral-300">—</span>

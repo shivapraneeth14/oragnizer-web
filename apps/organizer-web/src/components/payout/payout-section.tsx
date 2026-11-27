@@ -1009,7 +1009,11 @@ export default function PayoutSection({ communityId }: Props) {
                 {displayedTransactions.map((tx) => {
                   const isPayout = tx.transaction_type.startsWith("payout")
                   const isPendingPayout = isPayout && tx.status === "pending_confirmation"
-                  const debitAmount = (tx.wallet_debit_amount ?? tx.money_out) || 0
+                  // Refund amounts live in money_out; wallet_debit_amount is a
+                  // payout-settlement field and is 0 for refunds in the RPC.
+                  const debitAmount = tx.transaction_type === "refund"
+                    ? (tx.money_out || 0)
+                    : (tx.wallet_debit_amount ?? tx.money_out) || 0
                   const reservedAmount = (tx.reserved_amount ?? tx.money_out) || 0
 
                   return (
