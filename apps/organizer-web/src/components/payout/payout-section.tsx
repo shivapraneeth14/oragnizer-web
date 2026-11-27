@@ -298,6 +298,10 @@ export default function PayoutSection({ communityId }: Props) {
       // Available = netShare - settled (actual debits) - reserved (holds)
       const remainingBalance = Math.max(0, netShare - settled - pendingAmount - disputed)
 
+      // Display-only: the organizer's ticket sales (total collected minus the chigzo
+      // fee). Deliberately kept out of every settlement / payout / wallet calculation.
+      const earnings = Math.max(0, gross - platformFee)
+
       return {
         id: ev.id,
         title: ev.title,
@@ -312,6 +316,7 @@ export default function PayoutSection({ communityId }: Props) {
         pendingAmount,
         pendingPayouts,
         remainingBalance,
+        earnings,
         hasPendingConfirmation: pendingPayouts.length > 0,
       }
     })
@@ -569,7 +574,7 @@ export default function PayoutSection({ communityId }: Props) {
               <div className="mt-1 text-base font-extrabold text-neutral-900">
                 {formatCurrency(settlementSummary.netEarned)}
               </div>
-              <span className="text-[10px] text-neutral-500">Sales less fee & refunds</span>
+              <span className="text-[10px] text-neutral-500">Ticket sales less refunds</span>
             </div>
 
             <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
@@ -820,17 +825,11 @@ export default function PayoutSection({ communityId }: Props) {
                 Event financial details are unavailable until the statement loads. The community wallet balance above is still accurate.
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 <div className="rounded-xl bg-neutral-50 p-3">
-                  <span className="text-[11px] font-medium text-neutral-400">Total Collected (incl. fee)</span>
+                  <span className="text-[11px] font-medium text-neutral-400">Organizer Earnings</span>
                   <p className="text-base font-bold text-neutral-900 mt-0.5">
-                    {formatCurrency(selectedEventSummary.gross)}
-                  </p>
-                </div>
-                <div className="rounded-xl bg-neutral-50 p-3">
-                  <span className="text-[11px] font-medium text-neutral-400">chigzo Fee</span>
-                  <p className="text-base font-bold text-neutral-700 mt-0.5">
-                    -{formatCurrency(selectedEventSummary.platformFee)}
+                    {formatCurrency(selectedEventSummary.earnings)}
                   </p>
                 </div>
                 <div className="rounded-xl bg-neutral-50 p-3">
@@ -919,8 +918,8 @@ export default function PayoutSection({ communityId }: Props) {
                 {/* 4 Mini KPIs */}
                 <div className="mt-3.5 grid grid-cols-2 gap-2 text-[11px] border-t border-neutral-100 pt-3">
                   <div>
-                    <span className="text-neutral-400 block">Total Collected</span>
-                    <span className="font-semibold text-neutral-900">{formatCurrency(ev.gross)}</span>
+                    <span className="text-neutral-400 block">Earnings</span>
+                    <span className="font-semibold text-neutral-900">{formatCurrency(ev.earnings)}</span>
                   </div>
                   <div>
                     <span className="text-neutral-400 block">Refunds</span>

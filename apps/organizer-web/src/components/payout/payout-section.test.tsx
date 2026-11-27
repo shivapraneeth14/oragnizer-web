@@ -227,4 +227,22 @@ describe("PayoutSection (Organizer Financial Observability & Payout Reconciliati
     expect(await screen.findByText("-₹2")).toBeInTheDocument()
     expect(screen.queryByText("−₹0")).not.toBeInTheDocument()
   })
+
+  it("shows organizer earnings instead of gross collections and the chigzo fee", async () => {
+    const user = userEvent.setup()
+    render(<PayoutSection communityId="comm_mock_123" />)
+
+    // Event cards show earnings (₹500 collected − ₹30 fee = ₹470), not gross.
+    expect(await screen.findByText("Earnings")).toBeInTheDocument()
+    expect(screen.getAllByText("₹470").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Total Collected")).not.toBeInTheDocument()
+
+    // Event statement shows the earnings card; fee-revealing cards are gone.
+    await user.click((await screen.findAllByText("Test Workshop"))[0])
+    expect(await screen.findByText("Organizer Earnings")).toBeInTheDocument()
+    expect(screen.queryByText("Total Collected (incl. fee)")).not.toBeInTheDocument()
+    expect(screen.queryByText("chigzo Fee")).not.toBeInTheDocument()
+    expect(screen.getByText("Refunds Deducted")).toBeInTheDocument()
+    expect(screen.getByText("Net Organizer Share")).toBeInTheDocument()
+  })
 })
