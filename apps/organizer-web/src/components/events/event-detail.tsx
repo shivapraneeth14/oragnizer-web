@@ -13,13 +13,24 @@ import {
 } from "../../lib/event-lifecycle"
 import type { Event, Profile, Payment } from "shared"
 
+type PaymentSummary = Pick<Payment, "amount" | "organizer_share" | "status">
+
 interface RegistrationWithDetails {
   id: string
   user_id: string
   status: "pending" | "confirmed" | "cancelled" | "attended"
   registered_at: string
   profiles: Pick<Profile, "email" | "first_name" | "last_name">
-  payments: Pick<Payment, "amount" | "organizer_share" | "status">[] | null
+  payments: PaymentSummary | null
+}
+
+// payments.registration_id is UNIQUE, so PostgREST embeds one payment as an
+// object, not an array. Accept both shapes so older/mocked responses work too.
+export function normalizePayment(
+  payments: PaymentSummary | PaymentSummary[] | null | undefined,
+): PaymentSummary | null {
+  if (!payments) return null
+  return Array.isArray(payments) ? payments[0] ?? null : payments
 }
 
 interface MessageWithProfile {
@@ -108,6 +119,8 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
   const [restrictUserId, setRestrictUserId] = useState("")
   const [restrictSearch, setRestrictSearch] = useState("")
   const [contacts, setContacts] = useState<Map<string, OrgContact>>(new Map())
+  const [contactsError, setContactsError] = useState(false)
+  const [contactsRefreshKey, setContactsRefreshKey] = useState(0)
   const [searchResults, setSearchResults] = useState<Pick<Profile, "id" | "first_name" | "last_name" | "email">[]>([])
   const [searching, setSearching] = useState(false)
   const [newMessage, setNewMessage] = useState("")
@@ -118,6 +131,7 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
   const [shareCopied, setShareCopied] = useState(false)
   const [isTeam, setIsTeam] = useState(false)
   const regIdsRef = useRef<Set<string>>(new Set())
+  const contactsRef = useRef<Map<string, OrgContact>>(new Map())
   const profileCacheRef = useRef<Map<string, Pick<Profile, "first_name" | "last_name" | "avatar_url">>>(new Map())
 
   useEffect(() => { setDescTabIndex(0) }, [event.id])
@@ -151,16 +165,21 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
     }
   }, [currentUserId, event.community_id])
 
-  // Contacts (email) are fetched once through the authorized organizer
-  // endpoint and used to decorate rows below. profiles.email is no longer
-  // readable directly by clients (202610120005).
+  // Contacts (email) are fetched through the authorized organizer endpoint and
+  // used to decorate rows below. profiles.email is no longer readable directly
+  // by clients (202610120005). An empty map means the call failed (the endpoint
+  // always includes the caller), so expose a retry instead of blank emails.
   useEffect(() => {
     let active = true
+    setContactsError(false)
     fetchOrganizerContacts().then((map) => {
-      if (active) setContacts(map)
+      if (!active) return
+      setContacts(map)
+      contactsRef.current = map
+      setContactsError(map.size === 0)
     })
     return () => { active = false }
-  }, [])
+  }, [contactsRefreshKey])
 
   useEffect(() => {
     if (contacts.size === 0) return
@@ -189,15 +208,18 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
     if (error) {
       setError(error.message)
     } else {
-      const rows = ((data || []) as unknown as RegistrationWithDetails[]).map((r) => ({
+      const rows = ((data || []) as unknown as Array<
+        Omit<RegistrationWithDetails, "payments"> & { payments: PaymentSummary | PaymentSummary[] | null }
+      >).map((r) => ({
         ...r,
-        profiles: { ...r.profiles, email: r.profiles?.email || contacts.get(r.user_id)?.email || "" },
+        payments: normalizePayment(r.payments),
+        profiles: { ...r.profiles, email: r.profiles?.email || contactsRef.current.get(r.user_id)?.email || "" },
       }))
       setRegistrations(rows)
       regIdsRef.current = new Set((data || []).map((r: { id: string }) => r.id))
     }
     setLoading(false)
-  }, [event.id, contacts])
+  }, [event.id])
 
   useEffect(() => {
     setLoading(true)
@@ -703,6 +725,17 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
           {activeTab === "registrations" && (
             <div>
               {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+              {contactsError && (
+                <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <span>Couldn't load attendee emails. Other details are still available.</span>
+                  <button
+                    onClick={() => setContactsRefreshKey((k) => k + 1)}
+                    className="shrink-0 font-medium text-amber-900 underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
               {loading ? (
                 <div className="flex justify-center py-10">
                   <svg className="h-5 w-5 animate-spin text-cluvo-primary" viewBox="0 0 24 24" fill="none">
@@ -721,42 +754,48 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                 <>
                   {/* Mobile: stacked cards */}
                   <div className="space-y-2 md:hidden">
-                    {registrations.map((reg) => (
-                      <div key={reg.id} className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-medium text-neutral-900 truncate">
-                              {[reg.profiles?.first_name, reg.profiles?.last_name].filter(Boolean).join(" ") || "—"}
-                            </p>
-                            <p className="mt-0.5 text-xs text-neutral-500 truncate">{reg.profiles?.email || "—"}</p>
+                    {registrations.map((reg) => {
+                      const isFree = event.price === 0
+                      const payment = reg.payments
+                      return (
+                        <div key={reg.id} className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-medium text-neutral-900 truncate">
+                                {[reg.profiles?.first_name, reg.profiles?.last_name].filter(Boolean).join(" ") || "—"}
+                              </p>
+                              <p className="mt-0.5 text-xs text-neutral-500 truncate">{reg.profiles?.email || "—"}</p>
+                            </div>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${regStatusColors[reg.status]}`}>
+                              {reg.status.charAt(0).toUpperCase() + reg.status.slice(1)}
+                            </span>
                           </div>
-                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${regStatusColors[reg.status]}`}>
-                            {reg.status.charAt(0).toUpperCase() + reg.status.slice(1)}
-                          </span>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between border-t border-neutral-100 pt-2 text-xs">
-                          <div className="flex items-center gap-2">
-                            {reg.payments && reg.payments.length > 0 ? (
-                              <>
-                                <span className={`inline-block rounded-full px-2 py-0.5 font-medium ${payStatusColors[reg.payments[0].status]}`}>
-                                  {reg.payments[0].status.charAt(0).toUpperCase() + reg.payments[0].status.slice(1)}
-                                </span>
-                                {reg.payments[0].amount > 0 && (
-                                  <span className="font-medium text-neutral-600" title="Credited to your wallet">
-                                    ₹{(((reg.payments[0].organizer_share ?? reg.payments[0].amount) as number) / 100).toFixed(0)}
+                          <div className="mt-2 flex items-center justify-between border-t border-neutral-100 pt-2 text-xs">
+                            <div className="flex items-center gap-2">
+                              {isFree ? (
+                                <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-600">Free</span>
+                              ) : payment ? (
+                                <>
+                                  <span className={`inline-block rounded-full px-2 py-0.5 font-medium ${payStatusColors[payment.status]}`}>
+                                    {payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}
                                   </span>
-                                )}
-                              </>
-                            ) : (
-                              <span className="text-neutral-400">—</span>
-                            )}
+                                  {payment.amount > 0 && (
+                                    <span className="font-medium text-neutral-600" title="Amount paid">
+                                      ₹{(payment.amount / 100).toFixed(0)}
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-neutral-400">—</span>
+                              )}
+                            </div>
+                            <span className="text-neutral-500">
+                              {new Date(reg.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
                           </div>
-                          <span className="text-neutral-500">
-                            {new Date(reg.registered_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                          </span>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
 
                   {/* Desktop: table */}
@@ -772,40 +811,46 @@ export default function EventDetail({ event, onEdit, onCancel, onClose, onCheckI
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-100">
-                        {registrations.map((reg) => (
-                          <tr key={reg.id} className="hover:bg-neutral-50">
-                            <td className="px-4 py-3 text-neutral-900">
-                              {[reg.profiles?.first_name, reg.profiles?.last_name].filter(Boolean).join(" ") || "—"}
-                            </td>
-                            <td className="px-4 py-3 text-neutral-500">{reg.profiles?.email || "—"}</td>
-                            <td className="px-4 py-3">
-                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${regStatusColors[reg.status]}`}>
-                                {reg.status.charAt(0).toUpperCase() + reg.status.slice(1)}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              {reg.payments && reg.payments.length > 0 ? (
-                                <>
-                                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${payStatusColors[reg.payments[0].status]}`}>
-                                    {reg.payments[0].status.charAt(0).toUpperCase() + reg.payments[0].status.slice(1)}
-                                  </span>
-                                  {reg.payments[0].amount > 0 && (
-                                    <span className="ml-2 text-xs font-medium text-neutral-600">
-                                      ₹{(reg.payments[0].amount / 100).toFixed(0)}
+                        {registrations.map((reg) => {
+                          const isFree = event.price === 0
+                          const payment = reg.payments
+                          return (
+                            <tr key={reg.id} className="hover:bg-neutral-50">
+                              <td className="px-4 py-3 text-neutral-900">
+                                {[reg.profiles?.first_name, reg.profiles?.last_name].filter(Boolean).join(" ") || "—"}
+                              </td>
+                              <td className="px-4 py-3 text-neutral-500">{reg.profiles?.email || "—"}</td>
+                              <td className="px-4 py-3">
+                                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${regStatusColors[reg.status]}`}>
+                                  {reg.status.charAt(0).toUpperCase() + reg.status.slice(1)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {isFree ? (
+                                  <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">Free</span>
+                                ) : payment ? (
+                                  <>
+                                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${payStatusColors[payment.status]}`}>
+                                      {payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}
                                     </span>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="text-xs text-neutral-400">—</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-xs text-neutral-500">
-                              {new Date(reg.registered_at).toLocaleDateString("en-US", {
-                                month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                              })}
-                            </td>
-                          </tr>
-                        ))}
+                                    {payment.amount > 0 && (
+                                      <span className="ml-2 text-xs font-medium text-neutral-600">
+                                        ₹{(payment.amount / 100).toFixed(0)}
+                                      </span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-neutral-400">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-neutral-500">
+                                {new Date(reg.registered_at).toLocaleDateString("en-US", {
+                                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                                })}
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
