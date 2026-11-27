@@ -47,8 +47,12 @@ export default function MemberRow({ member, currentUserId, communityId, onRemove
     setConfirm(false)
   }
 
-  const displayName = `@${member.username || member.email?.split("@")[0] || "unknown"}`
-  const initial = (member.username || member.email || "?")[0].toUpperCase()
+  const fullName = [member.first_name, member.last_name].filter(Boolean).join(" ").trim()
+  const username = member.username?.trim()
+  // Order: username handle → real name → Unknown. Email is deliberately not
+  // used as a display fallback here.
+  const displayName = username ? `@${username}` : fullName || "Unknown"
+  const initial = (username || fullName || "?")[0].toUpperCase()
   const joined = new Date(member.joined_at).toLocaleDateString()
 
   const rolePill = (

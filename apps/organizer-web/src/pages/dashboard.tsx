@@ -174,15 +174,21 @@ export default function DashboardPage() {
         setMembersError(error.message)
       } else if (data) {
         setMembers(
-          data.map((m: any) => ({
-            user_id: m.user_id,
-            role: m.role,
-            joined_at: m.joined_at,
-            email: contacts.get(m.user_id)?.email || null,
-            username: m.profiles?.username || null,
-            first_name: m.profiles?.first_name || null,
-            last_name: m.profiles?.last_name || null,
-          }))
+          data.map((m: any) => {
+            const contact = contacts.get(m.user_id)
+            // PostgREST returns an object for a single FK, but some queries
+            // expose it as an array — handle both so names are never dropped.
+            const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles
+            return {
+              user_id: m.user_id,
+              role: m.role,
+              joined_at: m.joined_at,
+              email: contact?.email || null,
+              username: profile?.username || contact?.username || null,
+              first_name: profile?.first_name || contact?.first_name || null,
+              last_name: profile?.last_name || contact?.last_name || null,
+            }
+          })
         )
       }
       setMembersLoading(false)
