@@ -5,6 +5,7 @@ Deno.test("isOriginAllowed recognizes exact matches in default allowlist", () =>
   assert(isOriginAllowed("https://cluvo.app", DEFAULT_ALLOWED_ORIGINS))
   assert(isOriginAllowed("https://org.cluvo.app", DEFAULT_ALLOWED_ORIGINS))
   assert(isOriginAllowed("https://admin.cluvo.app", DEFAULT_ALLOWED_ORIGINS))
+  assert(isOriginAllowed("https://cluvo-org.vercel.app", DEFAULT_ALLOWED_ORIGINS))
   assert(isOriginAllowed("http://localhost:5173", DEFAULT_ALLOWED_ORIGINS))
   assert(isOriginAllowed("http://localhost:3000", DEFAULT_ALLOWED_ORIGINS))
 })
@@ -12,6 +13,7 @@ Deno.test("isOriginAllowed recognizes exact matches in default allowlist", () =>
 Deno.test("isOriginAllowed rejects untrusted origins", () => {
   assert(!isOriginAllowed("https://malicious-site.com", DEFAULT_ALLOWED_ORIGINS))
   assert(!isOriginAllowed("https://cluvo.app.evil.com", DEFAULT_ALLOWED_ORIGINS))
+  assert(!isOriginAllowed("https://cluvo-org.vercel.app.evil.com", DEFAULT_ALLOWED_ORIGINS))
   assert(!isOriginAllowed("http://localhost:9999", DEFAULT_ALLOWED_ORIGINS))
 })
 
@@ -28,6 +30,14 @@ Deno.test("getCorsHeaders echoes matching origin for trusted origin", () => {
   })
   const headers = getCorsHeaders(req)
   assertEquals(headers["Access-Control-Allow-Origin"], "https://admin.cluvo.app")
+})
+
+Deno.test("getCorsHeaders echoes Vercel organizer origin", () => {
+  const req = new Request("https://api.example.com", {
+    headers: { origin: "https://cluvo-org.vercel.app" },
+  })
+  const headers = getCorsHeaders(req)
+  assertEquals(headers["Access-Control-Allow-Origin"], "https://cluvo-org.vercel.app")
 })
 
 Deno.test("getCorsHeaders echoes localhost dev origin for local testing", () => {

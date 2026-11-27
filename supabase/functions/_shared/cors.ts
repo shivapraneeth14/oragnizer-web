@@ -5,6 +5,7 @@ export const DEFAULT_ALLOWED_ORIGINS = [
   "https://www.cluvo.app",
   "https://org.cluvo.app",
   "https://admin.cluvo.app",
+  "https://cluvo-org.vercel.app",
   "http://localhost:3000",
   "http://localhost:5173",
   "http://localhost:5174",
