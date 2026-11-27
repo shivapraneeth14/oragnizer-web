@@ -137,6 +137,7 @@ Deno.test("migration version prefixes are unique and ordered", async () => {
     "202611200001_update_closure_contact_email.sql",
     "202611240001_public_communities_rpc.sql",
     "202611240002_public_community_detail_rpc.sql",
+    "202611280001_admin_community_event_counts.sql",
   ])
 })
 
@@ -167,6 +168,19 @@ Deno.test("202611240002 public community detail RPC is anon-safe", async () => {
   assert(!mig.includes("c.contact_email"))
   assert(!mig.includes("c.contact_phone"))
   assert(!mig.includes("c.wallet_balance"))
+})
+
+Deno.test("202611280001 admin community event counts RPC is read-only and admin-only", async () => {
+  const mig = await read("202611280001_admin_community_event_counts.sql")
+  assert(mig.includes("CREATE OR REPLACE FUNCTION public.admin_community_event_counts()"))
+  assert(mig.includes("SECURITY DEFINER"))
+  assert(mig.includes("WHERE public.is_admin_user()"))
+  assert(mig.includes("GROUP BY e.community_id"))
+  assert(mig.includes("REVOKE ALL ON FUNCTION public.admin_community_event_counts() FROM PUBLIC, anon;"))
+  assert(mig.includes("GRANT EXECUTE ON FUNCTION public.admin_community_event_counts() TO authenticated, service_role;"))
+  assert(!mig.includes("UPDATE public.communities"))
+  assert(!mig.includes("deleted_at IS NULL"))
+  assert(!mig.includes("status = 'published'"))
 })
 
 Deno.test("202611010014 atomic cancel and attended refund guard shipped", async () => {

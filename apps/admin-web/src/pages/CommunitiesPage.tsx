@@ -56,20 +56,28 @@ export default function CommunitiesPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [cSettled, pSettled, appsRes] = await Promise.allSettled([
+      const [cSettled, pSettled, appsRes, countsRes] = await Promise.allSettled([
         supabase.from("communities").select(COMMUNITY_CLIENT_COLUMNS_SELECT).order("created_at", { ascending: false }),
         fetchAdminProfiles(),
         supabase.rpc("get_admin_community_applications"),
+        supabase.rpc("admin_community_event_counts"),
       ])
 
       const profiles = pSettled.status === "fulfilled" ? pSettled.value : []
       const cRes = cSettled.status === "fulfilled" ? cSettled.value : null
       const emailById = new Map(profiles.map((p) => [p.id, p.email]))
 
+      const eventCountRows =
+        countsRes.status === "fulfilled" && countsRes.value?.data
+          ? (countsRes.value.data as { community_id: string; event_count: number | string }[])
+          : []
+      const eventCountById = new Map(eventCountRows.map((row) => [row.community_id, Number(row.event_count) || 0]))
+
       if (cRes?.data) {
         setCommunities(
           (cRes.data as unknown as any[]).map((c) => ({
             ...c,
+            event_count: eventCountById.get(c.id) ?? c.event_count ?? 0,
             owner_email: emailById.get(c.owner_id),
           }))
         )
