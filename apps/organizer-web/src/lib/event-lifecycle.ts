@@ -29,6 +29,15 @@ export function isEventClosed(event: EventLike, now: Date = new Date()): boolean
 }
 
 /**
+ * Events that can still be checked into. Uses the same lifecycle rule as the
+ * rest of the app: closed events are excluded, cancelled/cancelling events
+ * keep their existing (non-closed) behaviour.
+ */
+export function isCheckInEligible(event: EventLike, now: Date = new Date()): boolean {
+  return !isEventClosed(event, now)
+}
+
+/**
  * Closed and cancelled events cannot be edited.
  */
 export function canEditEvent(event: EventLike, now: Date = new Date()): boolean {

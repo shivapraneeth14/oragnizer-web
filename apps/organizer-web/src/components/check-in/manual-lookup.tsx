@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { supabase } from "../../supabase"
 import { fetchOrganizerContacts, type OrgContact } from "../../lib/organizer-contacts"
+import { isCheckInEligible } from "../../lib/event-lifecycle"
 
 interface Registration {
   id: string
@@ -36,7 +37,7 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
 
     let queryBuilder = supabase
       .from("registrations")
-      .select("id, user_id, status, qr_code, profiles(first_name, last_name, username), events!inner(community_id)")
+      .select("id, user_id, status, qr_code, profiles(first_name, last_name, username), events!inner(community_id, status, start_date, end_date)")
       .is("deleted_at", null)
       .in("status", ["confirmed", "attended"])
 
@@ -50,7 +51,8 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
 
     if (!regs) { setResults([]); setSearching(false); return }
 
-    const withEmail = (regs as unknown as Registration[]).map((r) => ({
+    const eligibleRegs = regs.filter(r => !!r.events?.[0] && isCheckInEligible(r.events[0]))
+    const withEmail = (eligibleRegs as unknown as Registration[]).map((r) => ({
       ...r,
       profiles: (r.profiles || []).map((p) => ({
         ...p,

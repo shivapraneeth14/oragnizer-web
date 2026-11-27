@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { supabase } from "../../supabase"
+import { isCheckInEligible } from "../../lib/event-lifecycle"
 
 interface CheckInRecord {
   id: string
@@ -33,7 +34,7 @@ export default function CheckInList({ eventId, communityId, refreshKey }: Props)
     setLoading(true)
     let query = supabase
       .from("registrations")
-      .select("id, status, checked_in, checked_in_at, qr_code, user_id, event_id, profiles(first_name, last_name, username), events!inner(title, community_id)")
+      .select("id, status, checked_in, checked_in_at, qr_code, user_id, event_id, profiles(first_name, last_name, username), events!inner(title, community_id, status, start_date, end_date)")
       .is("deleted_at", null)
       .in("status", ["confirmed", "attended"])
 
@@ -45,14 +46,16 @@ export default function CheckInList({ eventId, communityId, refreshKey }: Props)
 
     const { data } = await query.order("checked_in_at", { ascending: false, nullsFirst: false }).order("registered_at", { ascending: false })
 
-    const mapped = (data || []).map(r => ({
-      id: r.id,
-      attendee_name: `${r.profiles?.[0]?.first_name || ""} ${r.profiles?.[0]?.last_name || ""}`.trim() || r.profiles?.[0]?.username || "Unknown",
-      event_title: r.events?.[0]?.title || "",
-      checked_in_at: r.checked_in_at || "",
-      status: r.status,
-      qr_code: r.qr_code,
-    }))
+    const mapped = (data || [])
+      .filter(r => !!r.events?.[0] && isCheckInEligible(r.events[0]))
+      .map(r => ({
+        id: r.id,
+        attendee_name: `${r.profiles?.[0]?.first_name || ""} ${r.profiles?.[0]?.last_name || ""}`.trim() || r.profiles?.[0]?.username || "Unknown",
+        event_title: r.events?.[0]?.title || "",
+        checked_in_at: r.checked_in_at || "",
+        status: r.status,
+        qr_code: r.qr_code,
+      }))
 
     setRecords(mapped)
     setLoading(false)

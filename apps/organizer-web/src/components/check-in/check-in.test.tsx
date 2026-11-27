@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import ManualLookup from "./manual-lookup"
+import EventSelector from "./event-selector"
+import CheckInList from "./check-in-list"
 import ScanModal from "./scan-modal"
 import { server } from "../../test/setup"
 import { http, HttpResponse } from "msw"
@@ -46,6 +48,14 @@ describe("CheckIn (Attendee Verification & Ticket Check-In)", () => {
             qr_code: "QR_TOKEN_BOB_123",
             profiles: [
               { first_name: "Bob", last_name: "Taylor", username: "bobt", email: "bob@example.com" },
+            ],
+            events: [
+              {
+                community_id: "comm_mock_123",
+                status: "published",
+                start_date: new Date(Date.now() + 86400000).toISOString(),
+                end_date: new Date(Date.now() + 90000000).toISOString(),
+              },
             ],
           },
         ])
@@ -124,5 +134,115 @@ describe("CheckIn (Attendee Verification & Ticket Check-In)", () => {
     expect(res.status).toBe(400)
     expect(body.error).toBe("Attendee already checked in")
     expect(body.attendee_name).toBe("Jane Doe")
+  })
+
+  it("excludes closed events from the selector options and counts", async () => {
+    const future = new Date(Date.now() + 86400000).toISOString()
+    const past = new Date(Date.now() - 86400000).toISOString()
+
+    server.use(
+      http.get(`${BASE_URL}/rest/v1/events`, () => {
+        return HttpResponse.json([
+          { id: "open-event", title: "Open Workshop", status: "published", start_date: future, end_date: future },
+          { id: "completed-event", title: "Completed Workshop", status: "completed", start_date: past, end_date: past },
+          { id: "elapsed-event", title: "Elapsed Workshop", status: "published", start_date: past, end_date: past },
+        ])
+      }),
+      http.get(`${BASE_URL}/rest/v1/registrations`, () => {
+        return HttpResponse.json([
+          { event_id: "open-event", checked_in: true },
+          { event_id: "open-event", checked_in: false },
+          { event_id: "completed-event", checked_in: false },
+          { event_id: "elapsed-event", checked_in: false },
+        ])
+      })
+    )
+
+    const onEventsLoad = vi.fn()
+    render(
+      <EventSelector
+        selectedEventId={null}
+        onSelect={vi.fn()}
+        communityId="comm_mock_123"
+        onEventsLoad={onEventsLoad}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "All Events (1/2)" })).toBeInTheDocument()
+    })
+    expect(screen.getAllByRole("option").map(o => o.textContent)).toEqual([
+      "All Events (1/2)",
+      "Open Workshop (1/2)",
+    ])
+    expect(onEventsLoad).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "open-event", total: 2, checked_in: 1 }),
+    ])
+  })
+
+  it("hides closed events from the check-in records list", async () => {
+    const future = new Date(Date.now() + 86400000).toISOString()
+    const past = new Date(Date.now() - 86400000).toISOString()
+
+    server.use(
+      http.get(`${BASE_URL}/rest/v1/registrations`, () => {
+        return HttpResponse.json([
+          {
+            id: "reg-open",
+            status: "attended",
+            checked_in_at: future,
+            profiles: [{ first_name: "Alice", last_name: "Active" }],
+            events: [{ title: "Open Workshop", status: "published", start_date: future, end_date: future }],
+          },
+          {
+            id: "reg-closed",
+            status: "attended",
+            checked_in_at: past,
+            profiles: [{ first_name: "Bob", last_name: "Closed" }],
+            events: [{ title: "Completed Workshop", status: "completed", start_date: past, end_date: past }],
+          },
+        ])
+      })
+    )
+
+    render(<CheckInList eventId={null} communityId="comm_mock_123" refreshKey={0} />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Check-in Records (1/1)")).toBeInTheDocument()
+    })
+    expect(screen.getByText("Alice Active")).toBeInTheDocument()
+    expect(screen.queryByText("Bob Closed")).not.toBeInTheDocument()
+  })
+
+  it("does not offer manual check-in for attendees of closed events", async () => {
+    const user = userEvent.setup()
+    const past = new Date(Date.now() - 86400000).toISOString()
+
+    server.use(
+      http.get(`${BASE_URL}/rest/v1/registrations`, () => {
+        return HttpResponse.json([
+          {
+            id: "reg-closed",
+            user_id: "user-2",
+            status: "confirmed",
+            qr_code: "QR_CLOSED",
+            profiles: [{ first_name: "Carol", last_name: "Closed", username: "carolc" }],
+            events: [{ community_id: "comm_mock_123", status: "completed", start_date: past, end_date: past }],
+          },
+        ])
+      })
+    )
+
+    render(
+      <ManualLookup eventId={null} communityId="comm_mock_123" onCheckIn={vi.fn()} />
+    )
+
+    await user.type(screen.getByPlaceholderText(/Search by name, email, or booking ID/i), "Carol")
+    await user.click(screen.getByRole("button", { name: "Search" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("No registrations found")).toBeInTheDocument()
+    })
+    expect(screen.queryByText("Carol Closed")).not.toBeInTheDocument()
   })
 })

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { supabase } from "../../supabase"
+import { isCheckInEligible } from "../../lib/event-lifecycle"
 
 export interface EventOption {
   id: string
@@ -29,14 +30,24 @@ export default function EventSelector({ selectedEventId, onSelect, communityId, 
     setLoading(true)
     const { data: evts } = await supabase
       .from("events")
-      .select("id, title, start_date")
+      .select("id, title, start_date, status, end_date")
       .eq("community_id", communityId!)
       .is("deleted_at", null)
       .order("start_date", { ascending: false })
 
     if (!evts) { setLoading(false); return }
 
-    const eventIds = evts.map(e => e.id)
+    // Closed events cannot be checked into, so leave them out of the dropdown and counts.
+    const eligibleEvents = evts.filter(e => isCheckInEligible(e))
+    const eventIds = eligibleEvents.map(e => e.id)
+
+    if (eventIds.length === 0) {
+      setEvents([])
+      setLoading(false)
+      onEventsLoad?.([])
+      return
+    }
+
     const { data: regs } = await supabase
       .from("registrations")
       .select("event_id, checked_in")
@@ -51,7 +62,7 @@ export default function EventSelector({ selectedEventId, onSelect, communityId, 
       if (r.checked_in) stats[r.event_id].checked_in++
     }
 
-    const mapped = evts.map(e => ({
+    const mapped = eligibleEvents.map(e => ({
       id: e.id,
       title: e.title,
       start_date: e.start_date,
