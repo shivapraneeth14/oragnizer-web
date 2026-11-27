@@ -46,17 +46,13 @@ describe("CheckIn (Attendee Verification & Ticket Check-In)", () => {
             user_id: "user-1",
             status: "confirmed",
             qr_code: "QR_TOKEN_BOB_123",
-            profiles: [
-              { first_name: "Bob", last_name: "Taylor", username: "bobt", email: "bob@example.com" },
-            ],
-            events: [
-              {
-                community_id: "comm_mock_123",
-                status: "published",
-                start_date: new Date(Date.now() + 86400000).toISOString(),
-                end_date: new Date(Date.now() + 90000000).toISOString(),
-              },
-            ],
+            profiles: { first_name: "Bob", last_name: "Taylor", username: "bobt", email: "bob@example.com" },
+            events: {
+              community_id: "comm_mock_123",
+              status: "published",
+              start_date: new Date(Date.now() + 86400000).toISOString(),
+              end_date: new Date(Date.now() + 90000000).toISOString(),
+            },
           },
         ])
       })
@@ -80,6 +76,7 @@ describe("CheckIn (Attendee Verification & Ticket Check-In)", () => {
     await waitFor(() => {
       expect(screen.getByText("Bob Taylor")).toBeInTheDocument()
       expect(screen.getByText("bob@example.com")).toBeInTheDocument()
+      expect(screen.queryByText("Unknown")).not.toBeInTheDocument()
     })
 
     // Click Check In button
@@ -191,15 +188,15 @@ describe("CheckIn (Attendee Verification & Ticket Check-In)", () => {
             id: "reg-open",
             status: "attended",
             checked_in_at: future,
-            profiles: [{ first_name: "Alice", last_name: "Active" }],
-            events: [{ title: "Open Workshop", status: "published", start_date: future, end_date: future }],
+            profiles: { first_name: "Alice", last_name: "Active" },
+            events: { title: "Open Workshop", status: "published", start_date: future, end_date: future },
           },
           {
             id: "reg-closed",
             status: "attended",
             checked_in_at: past,
-            profiles: [{ first_name: "Bob", last_name: "Closed" }],
-            events: [{ title: "Completed Workshop", status: "completed", start_date: past, end_date: past }],
+            profiles: { first_name: "Bob", last_name: "Closed" },
+            events: { title: "Completed Workshop", status: "completed", start_date: past, end_date: past },
           },
         ])
       })
@@ -211,7 +208,33 @@ describe("CheckIn (Attendee Verification & Ticket Check-In)", () => {
       expect(screen.getByText("Check-in Records (1/1)")).toBeInTheDocument()
     })
     expect(screen.getByText("Alice Active")).toBeInTheDocument()
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument()
     expect(screen.queryByText("Bob Closed")).not.toBeInTheDocument()
+  })
+
+  it("still shows names when the joined profile and event come back as arrays", async () => {
+    const future = new Date(Date.now() + 86400000).toISOString()
+
+    server.use(
+      http.get(`${BASE_URL}/rest/v1/registrations`, () => {
+        return HttpResponse.json([
+          {
+            id: "reg-array",
+            status: "attended",
+            checked_in_at: future,
+            profiles: [{ first_name: "Dana", last_name: "Array" }],
+            events: [{ title: "Array Workshop", status: "published", start_date: future, end_date: future }],
+          },
+        ])
+      })
+    )
+
+    render(<CheckInList eventId={null} communityId="comm_mock_123" refreshKey={0} />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Dana Array")).toBeInTheDocument()
+    })
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument()
   })
 
   it("does not offer manual check-in for attendees of closed events", async () => {
@@ -226,8 +249,8 @@ describe("CheckIn (Attendee Verification & Ticket Check-In)", () => {
             user_id: "user-2",
             status: "confirmed",
             qr_code: "QR_CLOSED",
-            profiles: [{ first_name: "Carol", last_name: "Closed", username: "carolc" }],
-            events: [{ community_id: "comm_mock_123", status: "completed", start_date: past, end_date: past }],
+            profiles: { first_name: "Carol", last_name: "Closed", username: "carolc" },
+            events: { community_id: "comm_mock_123", status: "completed", start_date: past, end_date: past },
           },
         ])
       })

@@ -46,16 +46,21 @@ export default function CheckInList({ eventId, communityId, refreshKey }: Props)
 
     const { data } = await query.order("checked_in_at", { ascending: false, nullsFirst: false }).order("registered_at", { ascending: false })
 
-    const mapped = (data || [])
-      .filter(r => !!r.events?.[0] && isCheckInEligible(r.events[0]))
-      .map(r => ({
+    const mapped = (data || []).flatMap((r: any) => {
+      // PostgREST returns one object for a single FK join, but some queries
+      // expose it as an array — handle both so names are never dropped.
+      const profile = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles
+      const event = Array.isArray(r.events) ? r.events[0] : r.events
+      if (!event || !isCheckInEligible(event)) return []
+      return [{
         id: r.id,
-        attendee_name: `${r.profiles?.[0]?.first_name || ""} ${r.profiles?.[0]?.last_name || ""}`.trim() || r.profiles?.[0]?.username || "Unknown",
-        event_title: r.events?.[0]?.title || "",
+        attendee_name: `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() || profile?.username || "Unknown",
+        event_title: event.title || "",
         checked_in_at: r.checked_in_at || "",
         status: r.status,
         qr_code: r.qr_code,
-      }))
+      }]
+    })
 
     setRecords(mapped)
     setLoading(false)

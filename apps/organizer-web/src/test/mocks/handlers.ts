@@ -232,6 +232,12 @@ export const handlers = [
         status: "confirmed",
         payments: [{ amount: 50000, status: "success", organizer_share: 47000 }],
         profiles: { first_name: "Bob", last_name: "Taylor", email: "bob@example.com" },
+        events: {
+          community_id: "comm_mock_123",
+          status: "published",
+          start_date: new Date(Date.now() + 86400000).toISOString(),
+          end_date: new Date(Date.now() + 90000000).toISOString(),
+        },
       },
     ])
   }),

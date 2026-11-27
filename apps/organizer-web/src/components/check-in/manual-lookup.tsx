@@ -8,7 +8,8 @@ interface Registration {
   user_id: string
   status: string
   qr_code: string | null
-  profiles: { email: string; first_name: string; last_name: string; username: string }[] | null
+  profiles: { email?: string; first_name?: string; last_name?: string; username?: string } | null
+  events?: { community_id?: string; status?: string; start_date?: string; end_date?: string } | null
 }
 
 interface Props {
@@ -51,17 +52,25 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
 
     if (!regs) { setResults([]); setSearching(false); return }
 
-    const eligibleRegs = regs.filter(r => !!r.events?.[0] && isCheckInEligible(r.events[0]))
-    const withEmail = (eligibleRegs as unknown as Registration[]).map((r) => ({
-      ...r,
-      profiles: (r.profiles || []).map((p) => ({
-        ...p,
-        email: p.email || contacts.get(r.user_id)?.email || "",
-      })),
-    }))
+    const eligibleRegs = (regs as any[]).filter((r) => {
+      const event = Array.isArray(r.events) ? r.events[0] : r.events
+      return !!event && isCheckInEligible(event)
+    })
+
+    const withEmail = eligibleRegs.map((r) => {
+      // PostgREST returns one object for a single FK join, but some queries
+      // expose it as an array — handle both so names are never dropped.
+      const profile = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles
+      return {
+        ...r,
+        profiles: profile
+          ? { ...profile, email: profile.email || contacts.get(r.user_id)?.email || "" }
+          : null,
+      } as Registration
+    })
 
     const filtered = withEmail.filter(r => {
-      const profile = r.profiles?.[0]
+      const profile = r.profiles
       const name = `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim().toLowerCase()
       const username = profile?.username?.toLowerCase() || ""
       const email = profile?.email?.toLowerCase() || ""
@@ -110,9 +119,9 @@ export default function ManualLookup({ eventId, communityId, onCheckIn }: Props)
             <div key={r.id} className="flex items-center justify-between rounded-lg border border-neutral-100 bg-neutral-50 p-3">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-neutral-800 truncate">
-                  {[r.profiles?.[0]?.first_name, r.profiles?.[0]?.last_name].filter(Boolean).join(" ") || r.profiles?.[0]?.username || "Unknown"}
+                  {[r.profiles?.first_name, r.profiles?.last_name].filter(Boolean).join(" ") || r.profiles?.username || "Unknown"}
                 </p>
-                <p className="text-xs text-neutral-500 truncate">{r.profiles?.[0]?.email}</p>
+                <p className="text-xs text-neutral-500 truncate">{r.profiles?.email}</p>
                 <p className="text-xs text-neutral-400">#{r.id.split("-")[0]}</p>
               </div>
               <button
